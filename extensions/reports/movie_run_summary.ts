@@ -20,35 +20,27 @@ const NETWORK_RUN_SPEC = "run";
 
 const MEDIA_SPECS = new Set(["inspection", "manifest", "cleanup"]);
 
-const SSH_SPECS = new Set([
-  "host",
-  "runResult",
-  "masterAudit",
-  "hostPublicKey",
-  "selection",
-]);
+const SSH_SPECS = new Set(["host", "runResult", "masterAudit", "hostPublicKey", "selection"]);
 
-const KNOWN_MODEL_TYPES = new Set([
-  TMDB_TYPE,
-  CATALOG_TYPE,
-  NETWORK_TYPE,
-  MEDIA_TYPE,
-  SSH_TYPE,
-]);
+const KNOWN_MODEL_TYPES = new Set([TMDB_TYPE, CATALOG_TYPE, NETWORK_TYPE, MEDIA_TYPE, SSH_TYPE]);
 
 const TEXT_DECODER = new TextDecoder();
 
-const TmdIdSchema = z.union([z.number(), z.string().regex(/^\d+$/)]).transform(
-  (v) => Number(v),
-);
+const TmdIdSchema = z.union([z.number(), z.string().regex(/^\d+$/)]).transform((v) => Number(v));
 
 const DiscoveredMovieSchema = z.object({
   tmdbId: TmdIdSchema,
   title: z.string().min(1).max(500),
-  releaseDate: z.string().regex(/^\d{4}(-\d{2}(-\d{2})?)?$/).nullable(),
+  releaseDate: z
+    .string()
+    .regex(/^\d{4}(-\d{2}(-\d{2})?)?$/)
+    .nullable(),
   year: z.number().int().min(1800).max(2200).nullable(),
   overview: z.string().max(5000).nullable(),
-  isoWeek: z.string().regex(/^\d{4}-W\d{2}$/).optional(),
+  isoWeek: z
+    .string()
+    .regex(/^\d{4}-W\d{2}$/)
+    .optional(),
   discoveredAt: z.iso.datetime().optional(),
   region: z.string().length(2).optional(),
   language: z.string().min(2).max(10).optional(),
@@ -71,6 +63,7 @@ const CatalogMovieSchema = z.object({
     "selected",
     "downloading",
     "seeding",
+    "seed-stopped",
     "transfer-ready",
     "transferred",
     "cleanup-pending",
@@ -90,49 +83,56 @@ const CatalogPlanSchema = z.object({
   retryable: z.array(z.number().int().positive()),
   downloading: z.array(z.number().int().positive()),
   seeding: z.array(z.number().int().positive()),
+  seedStopped: z.array(z.number().int().positive()),
   transferReady: z.array(z.number().int().positive()),
   cleanupPending: z.array(z.number().int().positive()),
 });
 
-const NetworkCurrentSchema = z.object({
-  checkedAt: z.iso.datetime().optional(),
-  nordvpn: z.object({
-    status: z.string().max(100),
-    country: z.string().max(100).nullable(),
-    city: z.string().max(100).nullable(),
-  }).passthrough(),
-  tailscale: z.object({
-    backendState: z.string().max(100),
-    online: z.boolean(),
-  }).passthrough(),
-  publicIp: z.object({
-    value: z.string().max(64).nullable(),
-    ok: z.boolean(),
-    error: z.string().max(500).nullable(),
-  }).passthrough(),
-}).passthrough();
+const NetworkCurrentSchema = z
+  .object({
+    checkedAt: z.iso.datetime().optional(),
+    nordvpn: z
+      .object({
+        status: z.string().max(100),
+        country: z.string().max(100).nullable(),
+        city: z.string().max(100).nullable(),
+      })
+      .passthrough(),
+    tailscale: z
+      .object({
+        backendState: z.string().max(100),
+        online: z.boolean(),
+      })
+      .passthrough(),
+    publicIp: z
+      .object({
+        value: z.string().max(64).nullable(),
+        ok: z.boolean(),
+        error: z.string().max(500).nullable(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
 
-const NetworkRunSchema = z.object({
-  method: z.enum(["enter-download", "enter-transfer", "restore"]),
-  startedAt: z.iso.datetime(),
-  completedAt: z.iso.datetime(),
-  outcome: z.enum(["success", "failure"]),
-  failureReasons: z.array(z.string().max(500)),
-  pre: NetworkCurrentSchema,
-  post: NetworkCurrentSchema.nullable(),
-}).passthrough();
+const NetworkRunSchema = z
+  .object({
+    method: z.enum(["enter-download", "enter-transfer", "restore"]),
+    startedAt: z.iso.datetime(),
+    completedAt: z.iso.datetime(),
+    outcome: z.enum(["success", "failure"]),
+    failureReasons: z.array(z.string().max(500)),
+    pre: NetworkCurrentSchema,
+    post: NetworkCurrentSchema.nullable(),
+  })
+  .passthrough();
 
 const MediaInspectionSchema = z.object({
   tmdbId: TmdIdSchema,
   inspectedAt: z.iso.datetime(),
   ok: z.boolean(),
   reason: z.string().nullable().optional(),
-  approvedFiles: z.array(
-    z.object({ relativePath: z.string(), bytes: z.number() }),
-  ).default([]),
-  denied: z.array(
-    z.object({ relativePath: z.string(), reason: z.string() }),
-  ).default([]),
+  approvedFiles: z.array(z.object({ relativePath: z.string(), bytes: z.number() })).default([]),
+  denied: z.array(z.object({ relativePath: z.string(), reason: z.string() })).default([]),
 });
 
 const MediaManifestSchema = z.object({
@@ -158,41 +158,51 @@ const MediaCleanupSchema = z.object({
   deletedFiles: z.array(z.string()).default([]),
 });
 
-const SshHostSchema = z.object({
-  name: z.string(),
-  host: z.string().optional(),
-  user: z.string().optional(),
-  address: z.string().optional(),
-}).passthrough();
+const SshHostSchema = z
+  .object({
+    name: z.string(),
+    host: z.string().optional(),
+    user: z.string().optional(),
+    address: z.string().optional(),
+  })
+  .passthrough();
 
-const SshRunResultSchema = z.object({
-  method: z.string(),
-  host: z.string(),
-  exitCode: z.number().nullable(),
-  signal: z.string().nullable().optional(),
-  error: z.string().optional(),
-  args: z.record(z.string(), z.unknown()).optional(),
-}).passthrough();
+const SshRunResultSchema = z
+  .object({
+    method: z.string(),
+    host: z.string(),
+    exitCode: z.number().nullable(),
+    signal: z.string().nullable().optional(),
+    error: z.string().optional(),
+    args: z.record(z.string(), z.unknown()).optional(),
+  })
+  .passthrough();
 
-const SshMasterAuditSchema = z.object({
-  host: z.string(),
-  event: z.string(),
-  outcome: z.string(),
-  detail: z.string().optional(),
-}).passthrough();
+const SshMasterAuditSchema = z
+  .object({
+    host: z.string(),
+    event: z.string(),
+    outcome: z.string(),
+    detail: z.string().optional(),
+  })
+  .passthrough();
 
-const SshHostPublicKeySchema = z.object({
-  name: z.string(),
-  host: z.string(),
-  fingerprint: z.string(),
-  algorithm: z.string(),
-}).passthrough();
+const SshHostPublicKeySchema = z
+  .object({
+    name: z.string(),
+    host: z.string(),
+    fingerprint: z.string(),
+    algorithm: z.string(),
+  })
+  .passthrough();
 
-const SshSelectionSchema = z.object({
-  fleet: z.string(),
-  selector: z.string(),
-  count: z.number().int(),
-}).passthrough();
+const SshSelectionSchema = z
+  .object({
+    fleet: z.string(),
+    selector: z.string(),
+    count: z.number().int(),
+  })
+  .passthrough();
 
 export interface DiscoveryRow {
   tmdbId: number | null;
@@ -256,6 +266,7 @@ export interface Collected {
     retryable: number[];
     downloading: number[];
     seeding: number[];
+    seedStopped: number[];
     transferReady: number[];
     cleanupPending: number[];
   } | null;
@@ -387,9 +398,7 @@ async function readHandle(
       handle.version,
     );
   } catch (error) {
-    throw new Error(
-      `${handle.name} unreadable: ${bounded(String(error), 200)}`,
-    );
+    throw new Error(`${handle.name} unreadable: ${bounded(String(error), 200)}`);
   }
   const value = decodeJson(bytes);
   if (value === undefined) {
@@ -398,9 +407,7 @@ async function readHandle(
   return value;
 }
 
-function partitionCatalog(
-  catalogs: ReadonlyMap<number, CatalogRow>,
-): {
+function partitionCatalog(catalogs: ReadonlyMap<number, CatalogRow>): {
   wanted: CatalogRow[];
   selected: CatalogRow[];
   noAcceptableRelease: CatalogRow[];
@@ -432,6 +439,7 @@ function partitionCatalog(
         downloaded.push(row);
         break;
       case "seeding":
+      case "seed-stopped":
         seeded.push(row);
         break;
       case "transferred":
@@ -549,11 +557,9 @@ export function renderMarkdown(
     lines.push("| --- | --- | --- | --- | --- | --- |");
     for (const row of list) {
       lines.push(
-        `| ${row.tmdbId ?? "?"} | ${mdEscape(row.title ?? "")} | ${
-          mdEscape(row.status)
-        } | ${bytesFormat(row.bytes)} | ${
-          mdEscape(row.reason ?? "")
-        } | ${row.provenance} |`,
+        `| ${row.tmdbId ?? "?"} | ${mdEscape(row.title ?? "")} | ${mdEscape(
+          row.status,
+        )} | ${bytesFormat(row.bytes)} | ${mdEscape(row.reason ?? "")} | ${row.provenance} |`,
       );
     }
     lines.push("");
@@ -575,11 +581,11 @@ export function renderMarkdown(
     lines.push("| --- | --- | --- | --- | --- | --- | --- |");
     for (const row of collected.network) {
       lines.push(
-        `| ${mdEscape(row.step)} | ${row.kind} | ${row.ok} | ${
-          mdEscape(row.country ?? "")
-        } | ${mdEscape(row.city ?? "")} | ${mdEscape(row.publicIp ?? "")} | ${
-          mdEscape(row.reason ?? "")
-        } |`,
+        `| ${mdEscape(row.step)} | ${row.kind} | ${row.ok} | ${mdEscape(
+          row.country ?? "",
+        )} | ${mdEscape(row.city ?? "")} | ${mdEscape(row.publicIp ?? "")} | ${mdEscape(
+          row.reason ?? "",
+        )} |`,
       );
     }
     lines.push("");
@@ -594,11 +600,9 @@ export function renderMarkdown(
     lines.push("| --- | --- | --- | --- | --- | --- |");
     for (const row of collected.ssh) {
       lines.push(
-        `| ${mdEscape(row.step)} | ${row.spec} | ${
-          mdEscape(row.host ?? "")
-        } | ${mdEscape(row.method ?? "")} | ${row.ok} | ${
-          mdEscape(row.detail ?? "")
-        } |`,
+        `| ${mdEscape(row.step)} | ${row.spec} | ${mdEscape(
+          row.host ?? "",
+        )} | ${mdEscape(row.method ?? "")} | ${row.ok} | ${mdEscape(row.detail ?? "")} |`,
       );
     }
     lines.push("");
@@ -612,9 +616,7 @@ export function renderMarkdown(
     lines.push("| step | present | reason |");
     lines.push("| --- | --- | --- |");
     for (const row of collected.icloud) {
-      lines.push(
-        `| ${mdEscape(row.step)} | ${row.present} | ${mdEscape(row.reason)} |`,
-      );
+      lines.push(`| ${mdEscape(row.step)} | ${row.present} | ${mdEscape(row.reason)} |`);
     }
     lines.push("");
   }
@@ -670,10 +672,7 @@ export function isDegraded(collected: Collected): boolean {
   return false;
 }
 
-function adoptCatalogRow(
-  catalogs: Map<number, CatalogRow>,
-  row: CatalogRow,
-): void {
+function adoptCatalogRow(catalogs: Map<number, CatalogRow>, row: CatalogRow): void {
   if (row.tmdbId === null) return;
   // Ponytail: step rows always win. Plan rows fill gaps only — they reflect
   // the same catalog state but lack detail (bytes, noMatchReason), so we
@@ -764,6 +763,7 @@ async function collectFromCatalog(
       retryable: parsed.data.retryable,
       downloading: parsed.data.downloading,
       seeding: parsed.data.seeding,
+      seedStopped: parsed.data.seedStopped,
       transferReady: parsed.data.transferReady,
       cleanupPending: parsed.data.cleanupPending,
     };
@@ -819,9 +819,7 @@ async function collectFromNetwork(
       return;
     }
     const ok = parsed.data.outcome === "success";
-    const reason = ok
-      ? null
-      : parsed.data.failureReasons[0] ?? parsed.data.method;
+    const reason = ok ? null : (parsed.data.failureReasons[0] ?? parsed.data.method);
     collected.network.push({
       kind: "run",
       ok,
@@ -849,9 +847,7 @@ async function collectFromMedia(
   if (spec === "inspection") {
     const parsed = MediaInspectionSchema.safeParse(raw);
     if (!parsed.success) {
-      collected.errors.push(
-        `${spec} ${handle.name} failed schema`,
-      );
+      collected.errors.push(`${spec} ${handle.name} failed schema`);
       return;
     }
     collected.media.push({
@@ -860,10 +856,7 @@ async function collectFromMedia(
       outcome: null,
       ok: parsed.data.ok,
       approvedFiles: parsed.data.approvedFiles.length,
-      totalBytes: parsed.data.approvedFiles.reduce(
-        (sum, f) => sum + (f.bytes ?? 0),
-        0,
-      ),
+      totalBytes: parsed.data.approvedFiles.reduce((sum, f) => sum + (f.bytes ?? 0), 0),
       step: step.stepName ?? "",
     });
     return;
@@ -936,10 +929,12 @@ async function collectFromSsh(
       return;
     }
     const ok = parsed.data.exitCode === 0 && parsed.data.error === undefined;
-    const detail = ok ? `exit=${parsed.data.exitCode}` : parsed.data.error ??
-      (parsed.data.exitCode === null
-        ? `killed by ${parsed.data.signal ?? "signal"}`
-        : `exit=${parsed.data.exitCode}`);
+    const detail = ok
+      ? `exit=${parsed.data.exitCode}`
+      : (parsed.data.error ??
+        (parsed.data.exitCode === null
+          ? `killed by ${parsed.data.signal ?? "signal"}`
+          : `exit=${parsed.data.exitCode}`));
     collected.ssh.push({
       spec: "runResult",
       host: parsed.data.host,
@@ -1000,9 +995,7 @@ async function collectFromSsh(
   }
 }
 
-export async function collect(
-  context: ReportContext,
-): Promise<Collected> {
+export async function collect(context: ReportContext): Promise<Collected> {
   const collected: Collected = {
     discoveries: [],
     catalogs: new Map(),
@@ -1017,13 +1010,13 @@ export async function collect(
   for (const step of context.stepExecutions ?? []) {
     const modelType = step.modelType ?? "";
     if (
-      step.status !== undefined && step.status !== "succeeded" &&
-      step.status !== "skipped" && KNOWN_MODEL_TYPES.has(modelType)
+      step.status !== undefined &&
+      step.status !== "succeeded" &&
+      step.status !== "skipped" &&
+      KNOWN_MODEL_TYPES.has(modelType)
     ) {
       collected.errors.push(
-        `step '${
-          step.stepName ?? modelType
-        }' status=${step.status} (${modelType})`,
+        `step '${step.stepName ?? modelType}' status=${step.status} (${modelType})`,
       );
     }
     for (const handle of step.dataHandles ?? []) {
@@ -1050,9 +1043,7 @@ export async function collect(
             break;
         }
       } catch (error) {
-        collected.errors.push(
-          `${modelType} ${spec} failed: ${bounded(String(error), 200)}`,
-        );
+        collected.errors.push(`${modelType} ${spec} failed: ${bounded(String(error), 200)}`);
       }
     }
   }
@@ -1060,6 +1051,9 @@ export async function collect(
     const planned: Array<[number[], CatalogRow["status"]]> = [
       [collected.plan.wanted, "wanted"],
       [collected.plan.retryable, "failed"],
+      [collected.plan.downloading, "downloading"],
+      [collected.plan.seeding, "seeding"],
+      [collected.plan.seedStopped, "seed-stopped"],
       [collected.plan.transferReady, "transfer-ready"],
       [collected.plan.cleanupPending, "cleanup-pending"],
     ];
@@ -1088,9 +1082,7 @@ export const report = {
     "observation status, built from exact producer contracts only.",
   scope: "workflow" as const,
   labels: ["hoardarr", "movies", "workflow-summary"],
-  execute: async (
-    context: ReportContext,
-  ): Promise<{ markdown: string; json: ReportJson }> => {
+  execute: async (context: ReportContext): Promise<{ markdown: string; json: ReportJson }> => {
     const workflowName = context.workflowName ?? "<unknown-workflow>";
     const generatedAt = new Date().toISOString();
     let collected: Collected = {
@@ -1110,9 +1102,7 @@ export const report = {
       degraded = isDegraded(collected);
     } catch (error) {
       degraded = true;
-      collected.errors.push(
-        `collector failed: ${bounded(String(error), 500)}`,
-      );
+      collected.errors.push(`collector failed: ${bounded(String(error), 500)}`);
     }
     tryLog(context.logger, "warn", "movie-run-summary degraded", {
       degraded,

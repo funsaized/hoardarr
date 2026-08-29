@@ -331,9 +331,15 @@ active. Inspect the relevant method summary if stopping Torlink fails.
 - Keep Torlink disabled at baseline. An active Torlink process blocks network
   restoration by design.
 - Treat `cleanup-pending` as a cleanup retry, not a reason to redownload.
-- Plan `downloading` and `seeding` buckets exist so in-flight torrents survive
-  across runs. The download job waits on items already in flight; do not delete
-  the catalog row for an in-flight torrent without first stopping it in Torlink.
+- Plan `downloading`, `seeding`, and `seedStopped` buckets exist so in-flight
+  torrents and pending metadata cleanup survive across runs. The download job
+  waits on items already in flight; do not delete their catalog rows manually.
+- `swamp workflow run movies` blocks through downloading and the five-minute
+  seed window. Let the command finish; terminating the client cancels the run
+  and invokes download recovery.
+- Movie rsync and remote checksum verification use one-hour operation timeouts.
+  A failed or interrupted copy remains `transfer-ready`; local cleanup is not
+  authorized until remote verification and catalog transition both succeed.
 
 ## Development
 

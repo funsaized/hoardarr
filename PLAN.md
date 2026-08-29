@@ -900,7 +900,7 @@ runs not providing catch-up for a missed exact trigger.
 3. Inspect staging disk capacity.
 4. Run idempotent weekly discovery.
 5. Reconcile Torlink status into the catalog.
-6. Plan wanted, retryable, downloading, seeding, transfer-ready, and cleanup-pending work. The downloading and seeding buckets carry in-flight torrents across runs so torrents that take longer than the run cadence are still waited on, seeded for five minutes, and cleaned up by a later run.
+6. Plan wanted, retryable, downloading, seeding, seed-stopped, transfer-ready, and cleanup-pending work. The active and seed-stopped buckets carry torrent work across runs so long downloads, the five-minute seed window, and metadata cleanup resume safely.
 7. Exit successfully with a report when no work exists.
 
 #### Download
@@ -915,6 +915,13 @@ runs not providing catch-up for a missed exact trigger.
 8. Control `remove` to remove torrent job and metadata while retaining payload.
 9. Stop Torlink.
 10. Assert the Torlink process is absent.
+
+The download branch resumes catalog rows already in `downloading`, `seeding`, or
+`seed-stopped` before starting transfer work. A paused seed becomes
+`seed-stopped`, Torlink metadata is removed while retaining its payload, and
+only successful removal advances it to `transfer-ready`. This makes both sides
+of metadata removal crash-safe and keeps transfer-ready as the durable invariant
+that seeding and metadata cleanup completed.
 
 Torlink must run with `--seed-time 5m` and without `--delete-files`. The native
 seed reaper checks every 30 seconds, so expected stop accuracy is approximately
@@ -932,10 +939,17 @@ seed reaper checks every 30 seconds, so expected stop accuracy is approximately
 8. Detect an existing final destination.
 9. Treat an identical destination as idempotent success.
 10. Treat a mismatched destination as a conflict and never overwrite it.
+
 11. Atomically rename the staging directory to the final destination.
 12. Record `transferred` in the catalog.
 13. Clean the local payload.
 14. Record local cleanup completion or `cleanup-pending`.
+
+The rsync and remote checksum steps have one-hour method timeouts because movie
+payload operations routinely exceed the SSH extension's five-minute default.
+Local cleanup runs only after the current run records a verified transfer, or
+against a pre-existing `cleanup-pending` row; a failed copy must leave its local
+payload intact.
 
 Swamp considers transfer complete after a checksum-verified local Mac copy.
 iCloud upload is asynchronous. Observe iCloud status when possible, but do not

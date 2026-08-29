@@ -240,12 +240,14 @@ Deno.test("pickBest chooses the highest-seeded acceptable release with stable ti
     },
   ]);
   assertEquals(tiedPick.release!.infoHash, "a", "alphabetical tie-break");
-  const none = testing.pickBest(movie, [{
-    infoHash: "x",
-    name: "Other.Movie.2026.1080p.WEB-DL",
-    sizeBytes: 5 * 1024 ** 3,
-    seeders: 50,
-  }]);
+  const none = testing.pickBest(movie, [
+    {
+      infoHash: "x",
+      name: "Other.Movie.2026.1080p.WEB-DL",
+      sizeBytes: 5 * 1024 ** 3,
+      seeders: 50,
+    },
+  ]);
   assertEquals(none.release, null, "no acceptable release");
 });
 
@@ -261,6 +263,7 @@ Deno.test("isSelectable admits wanted and retryable failed only", () => {
       "selected",
       "downloading",
       "seeding",
+      "seed-stopped",
       "transfer-ready",
       "transferred",
       "cleanup-pending",
@@ -292,9 +295,12 @@ Deno.test("isAllowedTransition matches the documented state machine", () => {
     ["downloading", "seeding", true],
     ["downloading", "failed", true],
     ["downloading", "transferred", false],
-    ["seeding", "transfer-ready", true],
+    ["seeding", "seed-stopped", true],
+    ["seeding", "transfer-ready", false],
     ["seeding", "failed", true],
     ["seeding", "transferred", false],
+    ["seed-stopped", "transfer-ready", true],
+    ["seed-stopped", "failed", true],
     ["transfer-ready", "transferred", true],
     ["transfer-ready", "failed", true],
     ["transfer-ready", "cleanup-pending", false],
@@ -420,12 +426,14 @@ Deno.test("select requires an existing movie and never creates one", async () =>
       items: [
         {
           tmdbId: 999,
-          releases: [{
-            infoHash: "h",
-            name: "Missing.Movie.2026.1080p.WEB-DL",
-            sizeBytes: 5 * 1024 ** 3,
-            seeders: 50,
-          }],
+          releases: [
+            {
+              infoHash: "h",
+              name: "Missing.Movie.2026.1080p.WEB-DL",
+              sizeBytes: 5 * 1024 ** 3,
+              seeders: 50,
+            },
+          ],
         },
       ],
     },
@@ -467,12 +475,14 @@ Deno.test("select skips ineligible statuses and only acts on wanted or retryable
     {
       items: ineligible.map((_item, i) => ({
         tmdbId: i + 1,
-        releases: [{
-          infoHash: "h",
-          name: "Movie.2026.1080p.WEB-DL",
-          sizeBytes: 5 * 1024 ** 3,
-          seeders: 50,
-        }],
+        releases: [
+          {
+            infoHash: "h",
+            name: "Movie.2026.1080p.WEB-DL",
+            sizeBytes: 5 * 1024 ** 3,
+            seeders: 50,
+          },
+        ],
       })),
     },
     context,
@@ -506,21 +516,25 @@ Deno.test("select updates infoHash for a match and noMatchReason otherwise", asy
       items: [
         {
           tmdbId: 1,
-          releases: [{
-            infoHash: "h1",
-            name: "Example.Movie.2026.1080p.WEB-DL.x264",
-            sizeBytes: 5 * 1024 ** 3,
-            seeders: 50,
-          }],
+          releases: [
+            {
+              infoHash: "h1",
+              name: "Example.Movie.2026.1080p.WEB-DL.x264",
+              sizeBytes: 5 * 1024 ** 3,
+              seeders: 50,
+            },
+          ],
         },
         {
           tmdbId: 2,
-          releases: [{
-            infoHash: "h2",
-            name: "Other.Movie.2026.1080p.HDCAM",
-            sizeBytes: 5 * 1024 ** 3,
-            seeders: 50,
-          }],
+          releases: [
+            {
+              infoHash: "h2",
+              name: "Other.Movie.2026.1080p.HDCAM",
+              sizeBytes: 5 * 1024 ** 3,
+              seeders: 50,
+            },
+          ],
         },
       ],
     },
@@ -554,12 +568,14 @@ Deno.test("select preserves attempts across selection", async () => {
       items: [
         {
           tmdbId: 1,
-          releases: [{
-            infoHash: "h",
-            name: "Retry.Movie.2026.1080p.WEB-DL",
-            sizeBytes: 5 * 1024 ** 3,
-            seeders: 50,
-          }],
+          releases: [
+            {
+              infoHash: "h",
+              name: "Retry.Movie.2026.1080p.WEB-DL",
+              sizeBytes: 5 * 1024 ** 3,
+              seeders: 50,
+            },
+          ],
         },
       ],
     },
@@ -576,6 +592,7 @@ Deno.test("transition applies every allowed change", async () => {
     "selected",
     "downloading",
     "seeding",
+    "seed-stopped",
     "transfer-ready",
     "transferred",
     "cleanup-pending",
@@ -587,25 +604,31 @@ Deno.test("transition applies every allowed change", async () => {
   for (const status of flow) {
     await testing.executeTransition(
       {
-        transitions: [{
-          tmdbId: 1,
-          to: status,
-          infoHash: i === 0 ? "h1" : undefined,
-          releaseName: i === 0 ? "Example.Movie.2026.1080p.WEB-DL" : undefined,
-          localPath: status === "cleanup-pending"
-            ? "/staging/movie-1"
-            : undefined,
-          remotePath: status === "transferred" ? "/remote/movie-1" : undefined,
-          transferredAt: status === "transferred"
-            ? "2026-08-21T09:00:00.000Z"
-            : undefined,
-          completedAt: status === "transfer-ready"
-            ? "2026-08-20T09:00:00.000Z"
-            : undefined,
-          error: status === "cleanup-pending"
-            ? "first cleanup failed"
-            : undefined,
-        }],
+        transitions: [
+          {
+            tmdbId: 1,
+            to: status,
+            infoHash: i === 0 ? "h1" : undefined,
+            releaseName: i === 0
+              ? "Example.Movie.2026.1080p.WEB-DL"
+              : undefined,
+            localPath: status === "cleanup-pending"
+              ? "/staging/movie-1"
+              : undefined,
+            remotePath: status === "transferred"
+              ? "/remote/movie-1"
+              : undefined,
+            transferredAt: status === "transferred"
+              ? "2026-08-21T09:00:00.000Z"
+              : undefined,
+            completedAt: status === "seed-stopped"
+              ? "2026-08-20T09:00:00.000Z"
+              : undefined,
+            error: status === "cleanup-pending"
+              ? "first cleanup failed"
+              : undefined,
+          },
+        ],
       },
       context,
     );
@@ -698,10 +721,9 @@ Deno.test("transition rejects transitions missing required fields for the target
   });
   await assertRejects(
     () =>
-      testing.executeTransition(
-        { transitions: [{ tmdbId: 1, to: "transfer-ready" }] },
-        context,
-      ),
+      testing.executeTransition({
+        transitions: [{ tmdbId: 1, to: "transfer-ready" }],
+      }, context),
     "transfer-ready requires",
   );
   await assertRejects(
@@ -716,12 +738,14 @@ Deno.test("transition rejects transitions missing required fields for the target
     () =>
       testing.executeTransition(
         {
-          transitions: [{
-            tmdbId: 1,
-            to: "transferred",
-            remotePath: "/r",
-            transferredAt: "2026-08-21T09:00:00.000Z",
-          }],
+          transitions: [
+            {
+              tmdbId: 1,
+              to: "transferred",
+              remotePath: "/r",
+              transferredAt: "2026-08-21T09:00:00.000Z",
+            },
+          ],
         },
         context,
       ),
@@ -744,10 +768,9 @@ Deno.test("transition validates against the merged next state, not just the patc
     }),
   });
   // downloading -> seeding: infoHash is in merged state, not the patch.
-  await testing.executeTransition(
-    { transitions: [{ tmdbId: 1, to: "seeding" }] },
-    context,
-  );
+  await testing.executeTransition({
+    transitions: [{ tmdbId: 1, to: "seeding" }],
+  }, context);
   assertEquals(
     (store.resources.get("catalog-movie-1") as Movie).status,
     "seeding",
@@ -758,32 +781,39 @@ Deno.test("transition validates against the merged next state, not just the patc
     "existing-hash",
     "infoHash preserved via merge",
   );
-  // seeding -> transfer-ready: completedAt from patch, infoHash from merge.
+  // seeding -> seed-stopped: completedAt from patch, infoHash from merge.
   await testing.executeTransition(
     {
-      transitions: [{
-        tmdbId: 1,
-        to: "transfer-ready",
-        completedAt: "2026-08-20T09:00:00.000Z",
-      }],
+      transitions: [
+        {
+          tmdbId: 1,
+          to: "seed-stopped",
+          completedAt: "2026-08-20T09:00:00.000Z",
+        },
+      ],
     },
     context,
   );
   assertEquals(
     (store.resources.get("catalog-movie-1") as Movie).status,
-    "transfer-ready",
-    "transfer-ready succeeds with merged infoHash and patched completedAt",
+    "seed-stopped",
+    "seed-stopped succeeds with merged infoHash and patched completedAt",
   );
+  await testing.executeTransition({
+    transitions: [{ tmdbId: 1, to: "transfer-ready" }],
+  }, context);
   // transfer-ready -> transferred: remotePath and transferredAt from patch,
   // infoHash from merged state.
   await testing.executeTransition(
     {
-      transitions: [{
-        tmdbId: 1,
-        to: "transferred",
-        remotePath: "/remote/movie-1",
-        transferredAt: "2026-08-21T09:00:00.000Z",
-      }],
+      transitions: [
+        {
+          tmdbId: 1,
+          to: "transferred",
+          remotePath: "/remote/movie-1",
+          transferredAt: "2026-08-21T09:00:00.000Z",
+        },
+      ],
     },
     context,
   );
@@ -800,10 +830,9 @@ Deno.test("transition fails when the merged state lacks a required field", async
   });
   await assertRejects(
     () =>
-      testing.executeTransition(
-        { transitions: [{ tmdbId: 1, to: "selected" }] },
-        context,
-      ),
+      testing.executeTransition({
+        transitions: [{ tmdbId: 1, to: "selected" }],
+      }, context),
     "selected requires infoHash",
   );
 });
@@ -855,12 +884,14 @@ Deno.test("transition same-state is idempotent and overwrites only the provided 
   });
   await testing.executeTransition(
     {
-      transitions: [{
-        tmdbId: 1,
-        to: "cleanup-pending",
-        localPath: "/staging/movie-1",
-        error: "second cleanup failed",
-      }],
+      transitions: [
+        {
+          tmdbId: 1,
+          to: "cleanup-pending",
+          localPath: "/staging/movie-1",
+          error: "second cleanup failed",
+        },
+      ],
     },
     context,
   );
@@ -883,13 +914,15 @@ Deno.test("cleanup success clears stale error even when the patch omits the erro
   });
   await testing.executeTransition(
     {
-      transitions: [{
-        tmdbId: 1,
-        to: "transferred",
-        remotePath: "/remote/movie-1",
-        transferredAt: "2026-08-22T09:00:00.000Z",
-        localCleanedAt: "2026-08-22T09:05:00.000Z",
-      }],
+      transitions: [
+        {
+          tmdbId: 1,
+          to: "transferred",
+          remotePath: "/remote/movie-1",
+          transferredAt: "2026-08-22T09:00:00.000Z",
+          localCleanedAt: "2026-08-22T09:05:00.000Z",
+        },
+      ],
     },
     context,
   );
@@ -924,14 +957,16 @@ Deno.test("cleanup success accepts an explicit error: null and clears the stale 
   });
   await testing.executeTransition(
     {
-      transitions: [{
-        tmdbId: 1,
-        to: "transferred",
-        remotePath: "/remote/movie-1",
-        transferredAt: "2026-08-22T09:00:00.000Z",
-        localCleanedAt: "2026-08-22T09:05:00.000Z",
-        error: null,
-      }],
+      transitions: [
+        {
+          tmdbId: 1,
+          to: "transferred",
+          remotePath: "/remote/movie-1",
+          transferredAt: "2026-08-22T09:00:00.000Z",
+          localCleanedAt: "2026-08-22T09:05:00.000Z",
+          error: null,
+        },
+      ],
     },
     context,
   );
@@ -954,14 +989,16 @@ Deno.test("cleanup success rejects an explicit non-null error", async () => {
     () =>
       testing.executeTransition(
         {
-          transitions: [{
-            tmdbId: 1,
-            to: "transferred",
-            remotePath: "/r",
-            transferredAt: "2026-08-22T09:00:00.000Z",
-            localCleanedAt: "2026-08-22T09:05:00.000Z",
-            error: "stale error",
-          }],
+          transitions: [
+            {
+              tmdbId: 1,
+              to: "transferred",
+              remotePath: "/r",
+              transferredAt: "2026-08-22T09:00:00.000Z",
+              localCleanedAt: "2026-08-22T09:05:00.000Z",
+              error: "stale error",
+            },
+          ],
         },
         context,
       ),
@@ -969,7 +1006,7 @@ Deno.test("cleanup success rejects an explicit non-null error", async () => {
   );
 });
 
-Deno.test("reconcile advances downloading to seeding and seeding to transfer-ready", async () => {
+Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped", async () => {
   const { context, store } = makeContext({
     "catalog-movie-1": baseMovie({
       tmdbId: 1,
@@ -1015,20 +1052,12 @@ Deno.test("reconcile advances downloading to seeding and seeding to transfer-rea
     "completedAt left null until transfer-ready",
   );
   const m2 = store.resources.get("catalog-movie-2") as Movie;
-  assertEquals(
-    m2.status,
-    "transfer-ready",
-    "seeding advanced to transfer-ready",
-  );
-  assertEquals(
-    m2.attempts,
-    2,
-    "attempts preserved on advance to transfer-ready",
-  );
+  assertEquals(m2.status, "seed-stopped", "seeding advanced to seed-stopped");
+  assertEquals(m2.attempts, 2, "attempts preserved on advance to seed-stopped");
   assertEquals(
     typeof m2.completedAt,
     "string",
-    "completedAt set on transfer-ready",
+    "completedAt set on seed-stopped",
   );
   const m3 = store.resources.get("catalog-movie-3") as Movie;
   assertEquals(
@@ -1044,7 +1073,7 @@ Deno.test("reconcile advances downloading to seeding and seeding to transfer-rea
   );
 });
 
-Deno.test("reconcile marks absent downloading or seeding as failed but never regresses selected or transfer-ready", async () => {
+Deno.test("reconcile fails absent active torrents but preserves durable checkpoints", async () => {
   const { context, store } = makeContext({
     "catalog-movie-1": baseMovie({
       tmdbId: 1,
@@ -1071,6 +1100,13 @@ Deno.test("reconcile marks absent downloading or seeding as failed but never reg
       completedAt: "2026-08-20T09:00:00.000Z",
       attempts: 1,
     }),
+    "catalog-movie-5": baseMovie({
+      tmdbId: 5,
+      status: "seed-stopped",
+      infoHash: "h5",
+      completedAt: "2026-08-20T09:00:00.000Z",
+      attempts: 1,
+    }),
   });
   await testing.executeReconcile({ snapshots: [] }, context);
   assertEquals(
@@ -1092,6 +1128,11 @@ Deno.test("reconcile marks absent downloading or seeding as failed but never reg
     (store.resources.get("catalog-movie-4") as Movie).status,
     "transfer-ready",
     "absent transfer-ready stays transfer-ready",
+  );
+  assertEquals(
+    (store.resources.get("catalog-movie-5") as Movie).status,
+    "seed-stopped",
+    "absent seed-stopped stays pending metadata removal",
   );
 });
 
@@ -1207,12 +1248,14 @@ Deno.test("cleanup failure stays cleanup-pending and records the error", async (
   });
   await testing.executeTransition(
     {
-      transitions: [{
-        tmdbId: 1,
-        to: "cleanup-pending",
-        localPath: "/staging/movie-1",
-        error: "cleanup-failed: permission denied",
-      }],
+      transitions: [
+        {
+          tmdbId: 1,
+          to: "cleanup-pending",
+          localPath: "/staging/movie-1",
+          error: "cleanup-failed: permission denied",
+        },
+      ],
     },
     context,
   );
@@ -1236,11 +1279,13 @@ Deno.test("interrupted download becomes retryable without incrementing attempts"
   });
   await testing.executeTransition(
     {
-      transitions: [{
-        tmdbId: 1,
-        to: "failed",
-        error: "download-interrupted",
-      }],
+      transitions: [
+        {
+          tmdbId: 1,
+          to: "failed",
+          error: "download-interrupted",
+        },
+      ],
     },
     context,
   );
@@ -1265,7 +1310,7 @@ Deno.test("interrupted download becomes retryable without incrementing attempts"
   );
 });
 
-Deno.test("plan categorizes wanted, retryable, downloading, seeding, transferReady, cleanupPending", async () => {
+Deno.test("plan categorizes every actionable lifecycle state", async () => {
   const { context, store } = makeContext({
     "catalog-movie-1": baseMovie({ tmdbId: 1, status: "wanted" }),
     "catalog-movie-2": baseMovie({ tmdbId: 2, status: "selected" }),
@@ -1277,6 +1322,7 @@ Deno.test("plan categorizes wanted, retryable, downloading, seeding, transferRea
     "catalog-movie-8": baseMovie({ tmdbId: 8, status: "ignored" }),
     "catalog-movie-9": baseMovie({ tmdbId: 9, status: "downloading" }),
     "catalog-movie-10": baseMovie({ tmdbId: 10, status: "seeding" }),
+    "catalog-movie-11": baseMovie({ tmdbId: 11, status: "seed-stopped" }),
   });
   const result = await testing.executePlan({}, context);
   const plan = store.resources.get("plan-current") as ReturnType<
@@ -1290,6 +1336,11 @@ Deno.test("plan categorizes wanted, retryable, downloading, seeding, transferRea
     "downloading isolates in-flight downloads",
   );
   assertEquals(plan.seeding, [10], "seeding isolates in-flight seeds");
+  assertEquals(
+    plan.seedStopped,
+    [11],
+    "seedStopped isolates metadata cleanup work",
+  );
   assertEquals(
     plan.transferReady,
     [5],
@@ -1331,7 +1382,7 @@ Deno.test("malformed catalog records are logged not swallowed", async () => {
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.08.29.2", "model version");
+  assertEquals(model.version, "2026.08.29.3", "model version");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
   for (
@@ -1345,28 +1396,34 @@ Deno.test("each catalog method logs entry and completion", async () => {
   const { context, store } = makeContext();
   await testing.executeIngest(
     {
-      discoveries: [{
-        tmdbId: 1,
-        title: "Hello",
-        year: 2026,
-        releaseDate: null,
-        overview: null,
-        discoveredAt: "2026-08-28T09:00:00.000Z",
-      }],
+      discoveries: [
+        {
+          tmdbId: 1,
+          title: "Hello",
+          year: 2026,
+          releaseDate: null,
+          overview: null,
+          discoveredAt: "2026-08-28T09:00:00.000Z",
+        },
+      ],
     },
     context,
   );
   await testing.executeSelect(
     {
-      items: [{
-        tmdbId: 1,
-        releases: [{
-          infoHash: "h",
-          name: "Hello.2026.1080p.WEB-DL",
-          sizeBytes: 5 * 1024 ** 3,
-          seeders: 50,
-        }],
-      }],
+      items: [
+        {
+          tmdbId: 1,
+          releases: [
+            {
+              infoHash: "h",
+              name: "Hello.2026.1080p.WEB-DL",
+              sizeBytes: 5 * 1024 ** 3,
+              seeders: 50,
+            },
+          ],
+        },
+      ],
     },
     context,
   );

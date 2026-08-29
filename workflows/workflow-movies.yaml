@@ -136,7 +136,7 @@ jobs:
         weight: 0
         allowFailure: false
       - name: plan-work
-        description: Persist wanted, retryable, transfer-ready, and cleanup-pending IDs.
+        description: Persist wanted, retryable, in-flight, transfer-ready, and cleanup-pending IDs.
         task:
           type: model_method
           modelIdOrName: movie-catalog
@@ -170,9 +170,16 @@ jobs:
       - name: enter-download-state
         description: Enter Amsterdam NordVPN state only when catalog download work exists.
         guard: >-
-          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) > 0 ||
+          ${{ inputs.dryRun ||
+            (size(data.latest("movie-catalog", "plan-current").attributes.transferReady) > 0 &&
+              size(data.latest("movie-catalog", "plan-current").attributes.downloading) +
+                size(data.latest("movie-catalog", "plan-current").attributes.seeding) +
+                size(data.latest("movie-catalog", "plan-current").attributes.seedStopped) == 0) ||
             size(data.latest("movie-catalog", "plan-current").attributes.wanted) +
-              size(data.latest("movie-catalog", "plan-current").attributes.retryable) == 0 }}
+              size(data.latest("movie-catalog", "plan-current").attributes.retryable) +
+              size(data.latest("movie-catalog", "plan-current").attributes.downloading) +
+              size(data.latest("movie-catalog", "plan-current").attributes.seeding) +
+              size(data.latest("movie-catalog", "plan-current").attributes.seedStopped) == 0 }}
         task:
           type: model_method
           modelIdOrName: network-session
@@ -232,7 +239,11 @@ jobs:
         allowFailure: false
       - name: select-releases
         description: Apply the catalog's deterministic release policy to all search results.
-        guard: '${{ size(data.latest("torlink", "search-current").?attributes.?queries.orValue([])) == 0 }}'
+        guard: >-
+          ${{ inputs.dryRun ||
+            size(data.query("modelName == 'torlink' && name == 'search-current' && workflowRunId == '" +
+              run.id + "' && stepName == 'search-wanted-movies'")) == 0 ||
+            size(data.latest("torlink", "search-current").?attributes.?queries.orValue([])) == 0 }}
         task:
           type: model_method
           modelIdOrName: movie-catalog
@@ -253,14 +264,16 @@ jobs:
         dependsOn:
           - step: search-wanted-movies
             condition:
-              type: succeeded
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
         weight: 0
         allowFailure: false
       - name: add-selected-torrents
         description: Batch selected info hashes through the loopback Torlink API.
         guard: >-
-          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) > 0 ||
-            size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+          ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
               data.latest("movie-catalog", "plan-current").attributes.retryable)
               .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "selected")) == 0 }}
         task:
@@ -288,7 +301,7 @@ jobs:
       - name: mark-downloading
         description: Batch selected catalog records into downloading state after add succeeds.
         guard: >-
-          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+          ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
             data.latest("movie-catalog", "plan-current").attributes.retryable)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "selected")) == 0 }}
         task:
@@ -343,9 +356,11 @@ jobs:
       - name: sync-seeding
         description: Capture the live seed state after completion.
         guard: >-
-          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) > 0 ||
+          ${{ inputs.dryRun ||
+            size(data.query("modelName == 'torlink-unit' && name == 'status' && workflowRunId == '" +
+              run.id + "' && stepName == 'start-torlink'")) == 0 ||
             !data.query("modelName == 'torlink-unit' && name == 'status' && workflowRunId == '" +
-            run.id + "' && stepName == 'start-torlink'")[0].attributes.active }}
+              run.id + "' && stepName == 'start-torlink'")[0].attributes.active }}
         task:
           type: model_method
           modelIdOrName: torlink
@@ -383,8 +398,9 @@ jobs:
       - name: wait-for-seed-stop
         description: Wait until Torlink's native five-minute seed timer pauses every seed.
         guard: >-
-          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+          ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
             data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.downloading +
             data.latest("movie-catalog", "plan-current").attributes.seeding)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")) == 0 }}
         task:
@@ -395,6 +411,7 @@ jobs:
             ids: >-
               ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
                   data.latest("movie-catalog", "plan-current").attributes.retryable +
+                  data.latest("movie-catalog", "plan-current").attributes.downloading +
                   data.latest("movie-catalog", "plan-current").attributes.seeding)
                 .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")
                 .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash) }}
@@ -410,8 +427,9 @@ jobs:
       - name: sync-seed-stopped
         description: Capture paused seed state before removing Torlink metadata.
         guard: >-
-          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+          ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
             data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.downloading +
             data.latest("movie-catalog", "plan-current").attributes.seeding)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")) == 0 }}
         task:
@@ -427,11 +445,12 @@ jobs:
                 - type: skipped
         weight: 0
         allowFailure: false
-      - name: reconcile-transfer-ready
-        description: Advance paused seeds to transfer-ready in one catalog call.
+      - name: reconcile-seed-stopped
+        description: Persist completed seed windows before removing Torlink metadata.
         guard: >-
-          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+          ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
             data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.downloading +
             data.latest("movie-catalog", "plan-current").attributes.seeding)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")) == 0 }}
         task:
@@ -459,9 +478,12 @@ jobs:
       - name: remove-torrent-metadata
         description: Batch-remove Torlink jobs while retaining verified local payload files.
         guard: >-
-          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
-            data.latest("movie-catalog", "plan-current").attributes.retryable)
-            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "transfer-ready")) == 0 }}
+          ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+            data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.downloading +
+            data.latest("movie-catalog", "plan-current").attributes.seeding +
+            data.latest("movie-catalog", "plan-current").attributes.seedStopped)
+            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seed-stopped")) == 0 }}
         task:
           type: model_method
           modelIdOrName: torlink
@@ -469,18 +491,52 @@ jobs:
           inputs:
             ids: >-
               ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
-                  data.latest("movie-catalog", "plan-current").attributes.retryable)
-                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "transfer-ready")
+                  data.latest("movie-catalog", "plan-current").attributes.retryable +
+                  data.latest("movie-catalog", "plan-current").attributes.downloading +
+                  data.latest("movie-catalog", "plan-current").attributes.seeding +
+                  data.latest("movie-catalog", "plan-current").attributes.seedStopped)
+                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seed-stopped")
                 .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash) }}
             action: remove
             confirmDeleteFiles: false
         dependsOn:
-          - step: reconcile-transfer-ready
+          - step: reconcile-seed-stopped
             condition:
               type: or
               conditions:
                 - type: succeeded
                 - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: mark-transfer-ready
+        description: Advance only successfully metadata-cleaned seeds to transfer-ready.
+        guard: >-
+          ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+            data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.downloading +
+            data.latest("movie-catalog", "plan-current").attributes.seeding +
+            data.latest("movie-catalog", "plan-current").attributes.seedStopped)
+            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seed-stopped")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: transition
+          inputs:
+            transitions: >-
+              ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
+                  data.latest("movie-catalog", "plan-current").attributes.retryable +
+                  data.latest("movie-catalog", "plan-current").attributes.downloading +
+                  data.latest("movie-catalog", "plan-current").attributes.seeding +
+                  data.latest("movie-catalog", "plan-current").attributes.seedStopped)
+                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seed-stopped")
+                .map(id, {
+                  "tmdbId": id,
+                  "to": "transfer-ready"
+                }) }}
+        dependsOn:
+          - step: remove-torrent-metadata
+            condition:
+              type: succeeded
         weight: 0
         allowFailure: false
       - name: stop-torlink
@@ -491,7 +547,7 @@ jobs:
           modelIdOrName: torlink-unit
           methodName: stopUser
         dependsOn:
-          - step: remove-torrent-metadata
+          - step: mark-transfer-ready
             condition:
               type: or
               conditions:
@@ -666,6 +722,7 @@ jobs:
           inputs:
             hosts: name:mini
             interpreter: sh
+            timeoutSec: 60
             script: |
               set -eu
               root='/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'
@@ -690,6 +747,7 @@ jobs:
             direction: to
             recursive: true
             useRsync: true
+            timeoutSec: 3600
         dependsOn:
           - step: prepare-remote
             condition:
@@ -705,6 +763,7 @@ jobs:
           inputs:
             hosts: name:mini
             interpreter: sh
+            timeoutSec: 3600
             script: |
               set -eu
               root='/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'
@@ -783,16 +842,20 @@ jobs:
       - name: cleanup-local
         description: Retry one authorized cleanup after exact local re-hash.
         guard: >-
-          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) +
-            size(data.latest("movie-catalog", "plan-current").attributes.cleanupPending) == 0 }}
+          ${{ inputs.dryRun ||
+            (size(data.query("modelName == 'movie-catalog' && workflowRunId == '" + run.id +
+              "' && stepName == 'mark-transferred'")) == 0 &&
+            size(data.latest("movie-catalog", "plan-current").attributes.cleanupPending) == 0) }}
         task:
           type: model_method
           modelIdOrName: media-files
           methodName: cleanup
           inputs:
             tmdbId: >-
-              ${{ (data.latest("movie-catalog", "plan-current").attributes.transferReady +
-                data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0] }}
+              ${{ size(data.query("modelName == 'movie-catalog' && workflowRunId == '" + run.id +
+                "' && stepName == 'mark-transferred'")) > 0 ?
+                data.latest("movie-catalog", "plan-current").attributes.transferReady[0] :
+                data.latest("movie-catalog", "plan-current").attributes.cleanupPending[0] }}
         dependsOn:
           - step: mark-transferred
             condition:
@@ -805,9 +868,7 @@ jobs:
       - name: mark-cleaned
         description: Return a successful cleanup record to transferred with its timestamp.
         guard: >-
-          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) +
-            size(data.latest("movie-catalog", "plan-current").attributes.cleanupPending) == 0 ||
-          size(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
+          ${{ inputs.dryRun || size(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
             "' && stepName == 'cleanup-local'")) == 0 ||
           !(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
             "' && stepName == 'cleanup-local'")[0].attributes.outcome
@@ -819,12 +880,18 @@ jobs:
           inputs:
             transitions:
               - tmdbId: >-
-                  ${{ (data.latest("movie-catalog", "plan-current").attributes.transferReady +
-                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0] }}
+                  ${{ size(data.query("modelName == 'movie-catalog' && workflowRunId == '" + run.id +
+                    "' && stepName == 'mark-transferred'")) > 0 ?
+                    data.latest("movie-catalog", "plan-current").attributes.transferReady[0] :
+                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending[0] }}
                 to: transferred
                 localCleanedAt: >-
-                  ${{ data.latest("media-files", "cleanup-" + string((data.latest("movie-catalog", "plan-current").attributes.transferReady +
-                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0])).attributes.performedAt }}
+                  ${{ data.latest("media-files", "cleanup-" + string(
+                    size(data.query("modelName == 'movie-catalog' && workflowRunId == '" + run.id +
+                      "' && stepName == 'mark-transferred'")) > 0 ?
+                      data.latest("movie-catalog", "plan-current").attributes.transferReady[0] :
+                      data.latest("movie-catalog", "plan-current").attributes.cleanupPending[0]
+                  )).attributes.performedAt }}
                 error: null
         dependsOn:
           - step: mark-cleanup-pending
@@ -838,9 +905,7 @@ jobs:
       - name: mark-cleanup-pending
         description: Preserve a denied or failed cleanup as retryable cleanup-pending state.
         guard: >-
-          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) +
-            size(data.latest("movie-catalog", "plan-current").attributes.cleanupPending) == 0 ||
-          size(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
+          ${{ inputs.dryRun || size(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
             "' && stepName == 'cleanup-local'")) == 0 ||
           !(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
             "' && stepName == 'cleanup-local'")[0].attributes.outcome
@@ -852,12 +917,18 @@ jobs:
           inputs:
             transitions:
               - tmdbId: >-
-                  ${{ (data.latest("movie-catalog", "plan-current").attributes.transferReady +
-                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0] }}
+                  ${{ size(data.query("modelName == 'movie-catalog' && workflowRunId == '" + run.id +
+                    "' && stepName == 'mark-transferred'")) > 0 ?
+                    data.latest("movie-catalog", "plan-current").attributes.transferReady[0] :
+                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending[0] }}
                 to: cleanup-pending
                 error: >-
-                  ${{ data.latest("media-files", "cleanup-" + string((data.latest("movie-catalog", "plan-current").attributes.transferReady +
-                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0])).attributes.reason.orValue("local cleanup failed") }}
+                  ${{ data.latest("media-files", "cleanup-" + string(
+                    size(data.query("modelName == 'movie-catalog' && workflowRunId == '" + run.id +
+                      "' && stepName == 'mark-transferred'")) > 0 ?
+                      data.latest("movie-catalog", "plan-current").attributes.transferReady[0] :
+                      data.latest("movie-catalog", "plan-current").attributes.cleanupPending[0]
+                  )).attributes.reason ?? "local cleanup failed" }}
         dependsOn:
           - step: cleanup-local
             condition:

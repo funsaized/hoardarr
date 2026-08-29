@@ -83,7 +83,7 @@ Every movie is keyed by TMDB ID rather than title or filename. Its catalog row
 moves through these states:
 
 ```text
-main path:  wanted -> selected -> downloading -> seeding -> transfer-ready -> transferred
+main path:  wanted -> selected -> downloading -> seeding -> seed-stopped -> transfer-ready -> transferred
 side state: failed          ignored                              cleanup-pending
 ```
 

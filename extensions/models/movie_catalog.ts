@@ -1,7 +1,7 @@
 /** Hoardarr local movie catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4";
 
-const MODEL_VERSION = "2026.08.29.2";
+const MODEL_VERSION = "2026.08.29.3";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -19,6 +19,7 @@ const MovieStatusSchema = z.enum([
   "selected",
   "downloading",
   "seeding",
+  "seed-stopped",
   "transfer-ready",
   "transferred",
   "cleanup-pending",
@@ -29,10 +30,16 @@ const MovieStatusSchema = z.enum([
 const DiscoveryRecordSchema = z.object({
   tmdbId: z.number().int().positive(),
   title: z.string().min(1).max(500),
-  releaseDate: z.string().regex(/^\d{4}(-\d{2}(-\d{2})?)?$/).nullable(),
+  releaseDate: z
+    .string()
+    .regex(/^\d{4}(-\d{2}(-\d{2})?)?$/)
+    .nullable(),
   year: z.number().int().min(1800).max(2200).nullable(),
   overview: z.string().max(5000).nullable(),
-  isoWeek: z.string().regex(/^\d{4}-W\d{2}$/).optional(),
+  isoWeek: z
+    .string()
+    .regex(/^\d{4}-W\d{2}$/)
+    .optional(),
   discoveredAt: z.iso.datetime(),
   region: z.string().length(2).optional(),
   language: z.string().min(2).max(10).optional(),
@@ -117,6 +124,7 @@ const PlanSchema = z.object({
   retryable: z.array(z.number().int().positive()),
   downloading: z.array(z.number().int().positive()),
   seeding: z.array(z.number().int().positive()),
+  seedStopped: z.array(z.number().int().positive()),
   transferReady: z.array(z.number().int().positive()),
   cleanupPending: z.array(z.number().int().positive()),
 });
@@ -148,9 +156,7 @@ type Context = {
   signal: AbortSignal;
   modelType: string;
   modelId: string;
-  readResource(
-    instanceName: string,
-  ): Promise<Record<string, unknown> | null>;
+  readResource(instanceName: string): Promise<Record<string, unknown> | null>;
   writeResource(
     specName: string,
     name: string,
@@ -166,15 +172,16 @@ type Context = {
 const ALLOWED_TRANSITIONS: Readonly<
   Record<MovieStatus, ReadonlyArray<MovieStatus>>
 > = {
-  "wanted": ["selected", "ignored", "failed"],
-  "selected": ["downloading", "wanted", "ignored", "failed"],
-  "downloading": ["seeding", "failed"],
-  "seeding": ["transfer-ready", "failed"],
+  wanted: ["selected", "ignored", "failed"],
+  selected: ["downloading", "wanted", "ignored", "failed"],
+  downloading: ["seeding", "failed"],
+  seeding: ["seed-stopped", "failed"],
+  "seed-stopped": ["transfer-ready", "failed"],
   "transfer-ready": ["transferred", "failed"],
-  "transferred": ["cleanup-pending"],
+  transferred: ["cleanup-pending"],
   "cleanup-pending": ["transferred"],
-  "failed": ["wanted", "ignored"],
-  "ignored": [],
+  failed: ["wanted", "ignored"],
+  ignored: [],
 };
 
 const TERMINAL_STATUSES = new Set<MovieStatus>([
@@ -223,8 +230,7 @@ function evaluateRelease(
   const releaseNormalized = normalize(release.name);
   const movieNormalized = normalize(movie.title);
   if (
-    movieNormalized.length > 0 &&
-    !releaseNormalized.includes(movieNormalized)
+    movieNormalized.length > 0 && !releaseNormalized.includes(movieNormalized)
   ) {
     reasons.push("title-mismatch");
   }
@@ -311,10 +317,7 @@ function createMovieFromDiscovery(discovery: DiscoveryRecord): Movie {
   };
 }
 
-function mergeDiscovery(
-  existing: Movie,
-  discovery: DiscoveryRecord,
-): Movie {
+function mergeDiscovery(existing: Movie, discovery: DiscoveryRecord): Movie {
   if (existing.status === "transferred" || existing.status === "ignored") {
     return existing;
   }
@@ -353,6 +356,10 @@ function validateTargetRequirements(
     case "downloading":
     case "seeding":
       if (!m.infoHash) return `${t.to} requires infoHash`;
+      break;
+    case "seed-stopped":
+      if (!m.infoHash) return "seed-stopped requires infoHash";
+      if (!m.completedAt) return "seed-stopped requires completedAt";
       break;
     case "transfer-ready":
       if (!m.infoHash) return "transfer-ready requires infoHash";
@@ -455,10 +462,11 @@ function advanceFromSnapshot(
 ): Movie | null {
   if (TERMINAL_STATUSES.has(movie.status)) return null;
   if (!movie.infoHash) return null;
-  // ponytail: transfer-ready is immutable - the torrent client may have
-  // purged the metadata after seed stop, but the local payload is already
-  // ready to transfer. Only active downloading/seeding react to snapshots.
-  if (movie.status === "transfer-ready") return null;
+  // seed-stopped and transfer-ready are durable workflow checkpoints. Torrent
+  // metadata may be absent while removal or transfer resumes in a later run.
+  if (movie.status === "seed-stopped" || movie.status === "transfer-ready") {
+    return null;
+  }
   if (!snapshot) {
     if (movie.status === "downloading" || movie.status === "seeding") {
       return { ...movie, status: "failed", error: "torrent-absent" };
@@ -484,19 +492,18 @@ function advanceFromSnapshot(
     }
     if (movie.status === "seeding") {
       if (
-        snapshot.status === "paused" || snapshot.status === "stopped" ||
+        snapshot.status === "paused" ||
+        snapshot.status === "stopped" ||
         snapshot.status === "seed-stopped"
       ) {
         return {
           ...movie,
-          status: "transfer-ready",
+          status: "seed-stopped",
           completedAt: movie.completedAt ?? now,
         };
       }
     }
-    if (
-      snapshot.status === "missing" || snapshot.status === "failed"
-    ) {
+    if (snapshot.status === "missing" || snapshot.status === "failed") {
       if (movie.status === "seeding") {
         return { ...movie, status: "failed", error: `seed-${snapshot.status}` };
       }
@@ -511,6 +518,7 @@ function computePlan(movies: ReadonlyArray<Movie>): Plan {
   const retryable: number[] = [];
   const downloading: number[] = [];
   const seeding: number[] = [];
+  const seedStopped: number[] = [];
   const transferReady: number[] = [];
   const cleanupPending: number[] = [];
   for (const movie of movies) {
@@ -524,6 +532,8 @@ function computePlan(movies: ReadonlyArray<Movie>): Plan {
       downloading.push(movie.tmdbId);
     } else if (movie.status === "seeding") {
       seeding.push(movie.tmdbId);
+    } else if (movie.status === "seed-stopped") {
+      seedStopped.push(movie.tmdbId);
     } else if (movie.status === "transfer-ready") {
       transferReady.push(movie.tmdbId);
     } else if (movie.status === "cleanup-pending") {
@@ -537,6 +547,7 @@ function computePlan(movies: ReadonlyArray<Movie>): Plan {
     retryable: uniqueSort(retryable),
     downloading: uniqueSort(downloading),
     seeding: uniqueSort(seeding),
+    seedStopped: uniqueSort(seedStopped),
     transferReady: uniqueSort(transferReady),
     cleanupPending: uniqueSort(cleanupPending),
   };
@@ -730,6 +741,7 @@ async function executePlan(
     retryable: plan.retryable.length,
     downloading: plan.downloading.length,
     seeding: plan.seeding.length,
+    seedStopped: plan.seedStopped.length,
     transferReady: plan.transferReady.length,
     cleanupPending: plan.cleanupPending.length,
   });
@@ -761,10 +773,8 @@ export const model = {
       description:
         "Ingest discovery records into the catalog without resetting existing state, especially transferred or ignored movies.",
       arguments: IngestArgsSchema,
-      execute: (
-        args: { discoveries: DiscoveryRecord[] },
-        context: Context,
-      ) => executeIngest(args, context),
+      execute: (args: { discoveries: DiscoveryRecord[] }, context: Context) =>
+        executeIngest(args, context),
     },
     select: {
       description:
@@ -782,16 +792,14 @@ export const model = {
     },
     reconcile: {
       description:
-        "Advance downloading to seeding to transfer-ready, or mark in-flight torrents failed when absent; never regresses terminal or transfer-ready catalog entries.",
+        "Advance downloading to seeding to seed-stopped, or mark active torrents failed when absent; never regresses durable seed-stopped, terminal, or transfer-ready entries.",
       arguments: ReconcileArgsSchema,
-      execute: (
-        args: { snapshots: TorrentSnapshot[] },
-        context: Context,
-      ) => executeReconcile(args, context),
+      execute: (args: { snapshots: TorrentSnapshot[] }, context: Context) =>
+        executeReconcile(args, context),
     },
     plan: {
       description:
-        "Compute the catalog plan listing wanted, retryable, downloading, seeding, transfer-ready, and cleanup-pending TMDB ids.",
+        "Compute the catalog plan listing wanted, retryable, downloading, seeding, seed-stopped, transfer-ready, and cleanup-pending TMDB ids.",
       arguments: PlanArgsSchema,
       execute: (_args: Record<string, never>, context: Context) =>
         executePlan(_args, context),

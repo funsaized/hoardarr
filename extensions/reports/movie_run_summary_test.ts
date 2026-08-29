@@ -1,10 +1,5 @@
 /// <reference lib="deno.ns" />
-import {
-  report,
-  type ReportContext,
-  type ReportJson,
-  testing,
-} from "./movie_run_summary.ts";
+import { report, type ReportContext, type ReportJson, testing } from "./movie_run_summary.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -294,10 +289,12 @@ function buildCompleteSteps(): StepInput[] {
             inspectedAt: "2026-08-28T17:00:00.000Z",
             ok: true,
             reason: null,
-            approvedFiles: [{
-              relativePath: "movie.mkv",
-              bytes: 1_500_000_000,
-            }],
+            approvedFiles: [
+              {
+                relativePath: "movie.mkv",
+                bytes: 1_500_000_000,
+              },
+            ],
             denied: [],
           },
         },
@@ -391,12 +388,7 @@ Deno.test("summarize counts partition the catalog by exact status", async () => 
   const steps = buildCompleteSteps();
   const context = makeContext(steps);
   const collected = await testing.collect(context);
-  const json = testing.renderJson(
-    collected,
-    "2026-08-28T19:00:00.000Z",
-    "hoardarr-movies",
-    false,
-  );
+  const json = testing.renderJson(collected, "2026-08-28T19:00:00.000Z", "hoardarr-movies", false);
   assert(json.counts.discovered === 2, "discovered count");
   assert(json.counts.wanted === 2, "wanted count");
   assert(json.counts.noAcceptableRelease === 1, "noAcceptableRelease count");
@@ -412,50 +404,27 @@ Deno.test("summarize counts partition the catalog by exact status", async () => 
 Deno.test("Markdown contains every required PLAN field heading", async () => {
   const steps = buildCompleteSteps();
   const collected = await testing.collect(makeContext(steps));
-  const markdown = testing.renderMarkdown(
-    collected,
-    "2026-08-28T19:00:00.000Z",
-    "hoardarr-movies",
-  );
-  assert(
-    markdown.startsWith("# Hoardarr Movie Run Summary"),
-    "markdown starts with the H1 title",
-  );
-  for (
-    const heading of [
-      "## Counts",
-      "## Catalog Detail",
-      "## Network Assertions",
-      "## Mac Destination Status",
-      "## iCloud Observation Status",
-    ]
-  ) {
+  const markdown = testing.renderMarkdown(collected, "2026-08-28T19:00:00.000Z", "hoardarr-movies");
+  assert(markdown.startsWith("# Hoardarr Movie Run Summary"), "markdown starts with the H1 title");
+  for (const heading of [
+    "## Counts",
+    "## Catalog Detail",
+    "## Network Assertions",
+    "## Mac Destination Status",
+    "## iCloud Observation Status",
+  ]) {
     assert(markdown.includes(heading), `missing heading ${heading}`);
   }
   assert(markdown.includes("Movie One"), "catalog title surfaces in markdown");
-  assert(
-    markdown.includes("Amsterdam"),
-    "network country/city surfaces in markdown",
-  );
-  assert(
-    markdown.includes("mac-mini"),
-    "ssh host surfaces in markdown",
-  );
-  assert(
-    markdown.includes("_Not observed"),
-    "iCloud observation reports unknown explicitly",
-  );
+  assert(markdown.includes("Amsterdam"), "network country/city surfaces in markdown");
+  assert(markdown.includes("mac-mini"), "ssh host surfaces in markdown");
+  assert(markdown.includes("_Not observed"), "iCloud observation reports unknown explicitly");
 });
 
 Deno.test("JSON output includes every PLAN field and reports degraded status", async () => {
   const steps = buildCompleteSteps();
   const collected = await testing.collect(makeContext(steps));
-  const json = testing.renderJson(
-    collected,
-    "2026-08-28T19:00:00.000Z",
-    "hoardarr-movies",
-    false,
-  );
+  const json = testing.renderJson(collected, "2026-08-28T19:00:00.000Z", "hoardarr-movies", false);
   const required: (keyof ReportJson)[] = [
     "report",
     "workflow",
@@ -531,6 +500,7 @@ Deno.test("report.execute degrades on failed/partial workflow without throwing",
             retryable: [600],
             downloading: [],
             seeding: [],
+            seedStopped: [],
             transferReady: [400],
             cleanupPending: [500],
           },
@@ -641,44 +611,25 @@ Deno.test("report.execute degrades on failed/partial workflow without throwing",
     result.json.errors.some((e) => e.includes("upstream TMDB unavailable")),
     "specific error recorded",
   );
-  assert(
-    result.json.counts.wanted === 2,
-    "wanted count includes plan fallback",
-  );
+  assert(result.json.counts.wanted === 2, "wanted count includes plan fallback");
   assert(result.json.counts.selected === 1, "selected count");
-  assert(
-    result.json.counts.cleanupPending === 1,
-    "plan cleanupPending adopted",
-  );
-  assert(
-    result.json.networkAssertions.length === 1,
-    "network assertion present",
-  );
-  assert(
-    result.json.networkAssertions[0].tailscaleOnline === true,
-    "tailscale online surfaced",
-  );
+  assert(result.json.counts.cleanupPending === 1, "plan cleanupPending adopted");
+  assert(result.json.networkAssertions.length === 1, "network assertion present");
+  assert(result.json.networkAssertions[0].tailscaleOnline === true, "tailscale online surfaced");
   assert(
     result.json.macDestinationStatus.some((row) => row.ok === false),
     "failed ssh runResult recorded as ok=false",
   );
   assert(
-    result.json.macDestinationStatus
-      .some((row) => row.detail?.includes("permission denied")),
+    result.json.macDestinationStatus.some((row) => row.detail?.includes("permission denied")),
     "ssh failure reason surfaces",
   );
   assert(
     result.json.iCloudObservationStatus.length === 0,
     "no iCloud handles means empty list, not invented data",
   );
-  assert(
-    result.markdown.includes("## Errors"),
-    "degraded markdown includes Errors section",
-  );
-  assert(
-    result.markdown.includes("_Not observed"),
-    "iCloud missing in markdown",
-  );
+  assert(result.markdown.includes("## Errors"), "degraded markdown includes Errors section");
+  assert(result.markdown.includes("_Not observed"), "iCloud missing in markdown");
 });
 
 Deno.test("report.execute ignores unknown spec handles and unknown model types", async () => {
@@ -719,6 +670,7 @@ Deno.test("report.execute ignores unknown spec handles and unknown model types",
             retryable: [],
             downloading: [],
             seeding: [],
+            seedStopped: [],
             transferReady: [],
             cleanupPending: [],
           },
@@ -734,10 +686,7 @@ Deno.test("report.execute ignores unknown spec handles and unknown model types",
   ];
   const context = makeContext(steps, "succeeded");
   const result = await report.execute(context);
-  assert(
-    result.json.discovered.length === 0,
-    "unknown model type or unknown spec is ignored",
-  );
+  assert(result.json.discovered.length === 0, "unknown model type or unknown spec is ignored");
   assert(result.json.errors.length > 0, "schema failure reported");
   assert(
     result.json.errors.some((e) => e.includes("digitalReleaseMovie")),
@@ -755,20 +704,24 @@ Deno.test("report.execute handles empty step list", async () => {
   assert(result.json.degraded === false, "no handles is not degraded");
   assert(result.json.counts.discovered === 0, "no discoveries");
   assert(result.json.iCloudObservationStatus.length === 0, "no iCloud");
-  assert(
-    result.markdown.includes("_Not observed"),
-    "iCloud reported as not observed",
-  );
+  assert(result.markdown.includes("_Not observed"), "iCloud reported as not observed");
 });
 
 Deno.test("guarded no-op steps do not degrade the report", async () => {
-  const result = await report.execute(makeContext([{
-    stepName: "discover",
-    status: "skipped",
-    modelType: "@keeb/tmdb-lookup",
-    modelId: "tmdb-1",
-    dataHandles: [],
-  }], "succeeded"));
+  const result = await report.execute(
+    makeContext(
+      [
+        {
+          stepName: "discover",
+          status: "skipped",
+          modelType: "@keeb/tmdb-lookup",
+          modelId: "tmdb-1",
+          dataHandles: [],
+        },
+      ],
+      "succeeded",
+    ),
+  );
   assert(result.json.degraded === false, "guarded step is not a failure");
   assert(result.json.errors.length === 0, "guarded step adds no error");
 });
@@ -805,12 +758,7 @@ Deno.test("catalog dedupe keeps later step handle for the same tmdbId", async ()
     },
   ];
   const collected = await testing.collect(makeContext(steps));
-  const json = testing.renderJson(
-    collected,
-    "2026-08-28T19:00:00.000Z",
-    "hoardarr-movies",
-    false,
-  );
+  const json = testing.renderJson(collected, "2026-08-28T19:00:00.000Z", "hoardarr-movies", false);
   assert(json.counts.wanted === 0, "earlier wanted row replaced");
   assert(json.counts.transferred === 1, "transferred wins on dedupe");
   assert(json.bytesTransferred === 1024, "bytes come from later row");
@@ -846,8 +794,9 @@ Deno.test("catalog plan rows fill gaps but never override step rows", async () =
             generatedAt: "2026-08-28T19:00:00.000Z",
             wanted: [200],
             retryable: [],
-            downloading: [],
-            seeding: [],
+            downloading: [400],
+            seeding: [500],
+            seedStopped: [600],
             transferReady: [],
             cleanupPending: [100, 300],
           },
@@ -856,12 +805,7 @@ Deno.test("catalog plan rows fill gaps but never override step rows", async () =
     },
   ];
   const collected = await testing.collect(makeContext(steps));
-  const json = testing.renderJson(
-    collected,
-    "2026-08-28T19:00:00.000Z",
-    "hoardarr-movies",
-    false,
-  );
+  const json = testing.renderJson(collected, "2026-08-28T19:00:00.000Z", "hoardarr-movies", false);
   assert(json.counts.transferred === 1, "step row still transferred");
   assert(json.bytesTransferred === 4096, "step bytes preserved over plan");
   assert(
@@ -873,10 +817,9 @@ Deno.test("catalog plan rows fill gaps but never override step rows", async () =
     !cleanupIds.includes(100),
     "plan did not downgrade tmdbId=100 from transferred to cleanup-pending",
   );
-  assert(
-    cleanupIds.includes(300),
-    "plan added tmdbId=300 as cleanup-pending",
-  );
+  assert(cleanupIds.includes(300), "plan added tmdbId=300 as cleanup-pending");
+  assert(json.counts.downloaded === 1, "plan added the downloading row");
+  assert(json.counts.seeded === 2, "plan added seeding and seed-stopped rows");
 });
 
 Deno.test("known step status non-succeeded degrades the report", async () => {
@@ -923,10 +866,7 @@ Deno.test("known step status non-succeeded degrades the report", async () => {
   ];
   const context = makeContext(steps, "succeeded");
   const result = await report.execute(context);
-  assert(
-    result.json.degraded === true,
-    "non-succeeded known step triggers degraded=true",
-  );
+  assert(result.json.degraded === true, "non-succeeded known step triggers degraded=true");
   assert(
     result.json.errors.some((e) => e.includes("status=failed")),
     "specific failure status recorded in errors",
@@ -936,20 +876,8 @@ Deno.test("known step status non-succeeded degrades the report", async () => {
 Deno.test("iCloud stays explicitly unknown when no producer is observed", async () => {
   const steps = buildCompleteSteps();
   const collected = await testing.collect(makeContext(steps));
-  const json = testing.renderJson(
-    collected,
-    "2026-08-28T19:00:00.000Z",
-    "hoardarr-movies",
-    false,
-  );
+  const json = testing.renderJson(collected, "2026-08-28T19:00:00.000Z", "hoardarr-movies", false);
   assert(json.iCloudObservationStatus.length === 0, "iCloud is not invented");
-  const markdown = testing.renderMarkdown(
-    collected,
-    "2026-08-28T19:00:00.000Z",
-    "hoardarr-movies",
-  );
-  assert(
-    markdown.includes("_Not observed"),
-    "iCloud section reports unknown explicitly",
-  );
+  const markdown = testing.renderMarkdown(collected, "2026-08-28T19:00:00.000Z", "hoardarr-movies");
+  assert(markdown.includes("_Not observed"), "iCloud section reports unknown explicitly");
 });
