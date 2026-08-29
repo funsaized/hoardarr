@@ -1107,8 +1107,9 @@ copy. A mismatched `Sintel-conflict` destination caused the production promotion
 script to exit 1 before rename or removal; follow-up hashes proved both the
 valid staged payload and conflicting final fixture remained untouched. SSH was
 closed, the safe network baseline was unchanged, and the local payload retained
-the same aggregate hash. Remote test and conflict fixtures remain for explicit
-cleanup approval.
+the same aggregate hash. After approval on 2026-08-29, the dedicated remote
+Stage 4 root and its test/conflict fixtures were deleted and verified absent;
+the local `45745` payload was already absent.
 
 - [x] Generate the local manifest.
 - [x] Copy through `@swamp/ssh`.
@@ -1116,7 +1117,7 @@ cleanup approval.
 - [x] Verify atomic rename.
 - [x] Test idempotent re-run against an identical destination.
 - [x] Test conflict behavior against a mismatched destination.
-- [ ] Delete only the disposable local test payload after user approval.
+- [x] Delete only the disposable test payloads after user approval.
 
 ### Stage 5: iCloud Path Transfer
 
