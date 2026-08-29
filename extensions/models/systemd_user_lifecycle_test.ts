@@ -367,6 +367,37 @@ Deno.test("stopUser issues stop without changing enablement", async () => {
   assert(field(writes[0], "active") === false, "post status inactive");
 });
 
+Deno.test("stopUser accepts a stopped unit in failed state", async () => {
+  const writes: StatusWrite[] = [];
+  const fake = makeRunner({
+    "/usr/bin/systemctl\u0001--user\u0001stop\u0001torlink.service": {
+      code: 0,
+    },
+    ...probeSeq({
+      active: { code: 3, stdout: "failed" },
+      show: {
+        code: 0,
+        stdout:
+          "ActiveState=failed\nActiveEnterTimestamp=2026-08-28 19:00:00 UTC\nResult=timeout\n",
+      },
+    }),
+  });
+  await callMethod(
+    "stopUser",
+    makeContext(baseGlobalArgs, writes),
+    fake.runner,
+  );
+  assert(field(writes[0], "active") === false, "failed unit is not active");
+  assert(
+    field(writes[0], "lastRunStatus") === "failed",
+    "failure remains visible in status",
+  );
+  assert(
+    field(writes[0], "lastRunDetail") === "Result=timeout",
+    "failure detail is retained",
+  );
+});
+
 Deno.test("stopUser throws when post-probe still shows active", async () => {
   const writes: StatusWrite[] = [];
   const fake = makeRunner({
@@ -485,7 +516,7 @@ Deno.test("startUser requires exact activeRaw === 'active' after probe", async (
   );
 });
 
-Deno.test("stopUser requires exact activeRaw === 'inactive' after probe", async () => {
+Deno.test("stopUser rejects a transient deactivating state", async () => {
   const writes: StatusWrite[] = [];
   // activeRaw 'deactivating' - transient state should not pass the
   // exact-match postcondition.

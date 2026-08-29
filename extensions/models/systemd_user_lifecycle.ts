@@ -12,9 +12,9 @@
  *   - `syncUser` probes without touching the unit.
  *
  * After every mutation, the post-state is asserted against the matching
- * exact postcondition (startUser active, stopUser inactive, enableUser
- * enabled, disableUser disabled). A missed postcondition throws and no
- * `status` resource is written.
+ * postcondition (startUser active, stopUser in a terminal non-active state,
+ * enableUser enabled, disableUser disabled). A missed postcondition throws
+ * and no `status` resource is written.
  *
  * @module
  */
@@ -437,7 +437,7 @@ function activeRequired(status: Status): string | null {
 }
 
 function inactiveRequired(status: Status): string | null {
-  return status.activeRaw === "inactive"
+  return status.activeRaw === "inactive" || status.activeRaw === "failed"
     ? null
     : `stopUser postcondition missed: activeRaw='${status.activeRaw}'`;
 }
