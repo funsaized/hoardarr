@@ -9,8 +9,8 @@ const NETWORK_TYPE = "hoardarr/network-session";
 const MEDIA_TYPE = "hoardarr/media-files";
 const SSH_TYPE = "@swamp/ssh";
 
-const TMDB_MOVIE_SPEC = "nowPlayingMovie";
-const TMDB_RUN_SPEC = "nowPlayingRun";
+const TMDB_MOVIE_SPEC = "digitalReleaseMovie";
+const TMDB_RUN_SPEC = "digitalReleaseRun";
 
 const CATALOG_MOVIE_SPEC = "movie";
 const CATALOG_PLAN_SPEC = "plan";

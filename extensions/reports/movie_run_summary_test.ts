@@ -79,7 +79,7 @@ function buildCompleteSteps(): StepInput[] {
         {
           name: "100",
           version: 1,
-          specName: "nowPlayingMovie",
+          specName: "digitalReleaseMovie",
           payload: {
             tmdbId: 100,
             title: "Movie One",
@@ -95,7 +95,7 @@ function buildCompleteSteps(): StepInput[] {
         {
           name: "101",
           version: 1,
-          specName: "nowPlayingMovie",
+          specName: "digitalReleaseMovie",
           payload: {
             tmdbId: 101,
             title: "Movie Two",
@@ -109,7 +109,7 @@ function buildCompleteSteps(): StepInput[] {
         {
           name: "week-2026-W34-US-en-US",
           version: 1,
-          specName: "nowPlayingRun",
+          specName: "digitalReleaseRun",
           payload: {
             isoWeek: "2026-W34",
             region: "US",
@@ -498,7 +498,7 @@ Deno.test("report.execute degrades on failed/partial workflow without throwing",
         {
           name: "100",
           version: 1,
-          specName: "nowPlayingMovie",
+          specName: "digitalReleaseMovie",
           readError: "upstream TMDB unavailable",
         },
       ],
@@ -722,7 +722,7 @@ Deno.test("report.execute ignores unknown spec handles and unknown model types",
         {
           name: "schema-broken",
           version: 1,
-          specName: "nowPlayingMovie",
+          specName: "digitalReleaseMovie",
           payload: { tmdbId: "not-a-number" },
         },
       ],
@@ -736,7 +736,7 @@ Deno.test("report.execute ignores unknown spec handles and unknown model types",
   );
   assert(result.json.errors.length > 0, "schema failure reported");
   assert(
-    result.json.errors.some((e) => e.includes("nowPlayingMovie")),
+    result.json.errors.some((e) => e.includes("digitalReleaseMovie")),
     "schema failure identifies the spec",
   );
   assert(
@@ -884,7 +884,7 @@ Deno.test("known step status non-succeeded degrades the report", async () => {
         {
           name: "week-2026-W34-US-en-US",
           version: 1,
-          specName: "nowPlayingRun",
+          specName: "digitalReleaseRun",
           payload: {
             isoWeek: "2026-W34",
             region: "US",

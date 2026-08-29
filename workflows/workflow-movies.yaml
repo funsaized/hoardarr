@@ -60,13 +60,13 @@ jobs:
         dependsOn: []
         weight: 0
         allowFailure: false
-      - name: discover-now-playing
+      - name: discover-digital-releases
         description: Fetch at most five movies once per ISO week.
         guard: '${{ inputs.dryRun == true }}'
         task:
           type: model_method
           modelIdOrName: movie-discovery
-          methodName: nowPlaying
+          methodName: digitalReleases
           inputs:
             region: US
             language: en-US
@@ -81,17 +81,17 @@ jobs:
         description: Preserve existing terminal catalog state while ingesting all discovered movies.
         guard: >-
           ${{ inputs.dryRun ||
-            size(data.findBySpec("movie-discovery", "nowPlayingMovie")) == 0 }}
+            size(data.findBySpec("movie-discovery", "digitalReleaseMovie")) == 0 }}
         task:
           type: model_method
           modelIdOrName: movie-catalog
           methodName: ingest
           inputs:
             discoveries: >-
-              ${{ data.findBySpec("movie-discovery", "nowPlayingMovie")
+              ${{ data.findBySpec("movie-discovery", "digitalReleaseMovie")
                 .map(movie, movie.attributes) }}
         dependsOn:
-          - step: discover-now-playing
+          - step: discover-digital-releases
             condition:
               type: or
               conditions:

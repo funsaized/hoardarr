@@ -1,4 +1,4 @@
-/** Weekly TMDB now-playing discovery extension for Hoardarr. @module */
+/** Weekly TMDB digital-release discovery extension for Hoardarr. @module */
 import { z } from "npm:zod@4";
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
@@ -6,9 +6,9 @@ const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_ERROR_BODY_BYTES = 8 * 1024;
 const FETCH_TIMEOUT_MS = 30_000;
 const TMDB_DEFAULT_PAGE_SIZE = 20;
-const SPEC_MOVIE = "nowPlayingMovie";
-const SPEC_RUN = "nowPlayingRun";
-const MOVIE_INSTANCE_PREFIX = "now-playing-movie-";
+const SPEC_MOVIE = "digitalReleaseMovie";
+const SPEC_RUN = "digitalReleaseRun";
+const MOVIE_INSTANCE_PREFIX = "digital-release-movie-";
 
 const NowPlayingArgsSchema = z.object({
   region: z
@@ -16,14 +16,14 @@ const NowPlayingArgsSchema = z.object({
     .length(2)
     .regex(/^[A-Z]{2}$/)
     .default("US")
-    .describe("ISO 3166-1 alpha-2 region for now-playing query"),
+    .describe("ISO 3166-1 alpha-2 region for digital-release query"),
   language: z
     .string()
     .min(2)
     .max(10)
     .regex(/^[a-z]{2}(-[A-Z]{2})?$/)
     .default("en-US")
-    .describe("BCP 47 language tag for now-playing query"),
+    .describe("BCP 47 language tag for digital-release query"),
   limit: z
     .number()
     .int()
@@ -120,7 +120,7 @@ function runMarkerName(
   region: string,
   language: string,
 ): string {
-  return `week-${week}-${region}-${language}`;
+  return `digital-week-${week}-${region}-${language}`;
 }
 
 function movieInstanceName(tmdbId: number): string {
@@ -189,10 +189,16 @@ async function tmdbNowPlaying(
   deps: FetchDeps = { fetchImpl: fetch },
 ): Promise<NowPlayingResponse> {
   if (signal.aborted) throw new Error("TMDB fetch cancelled before launch");
-  const url = new URL(`${TMDB_BASE}/movie/now_playing`);
+  const url = new URL(`${TMDB_BASE}/discover/movie`);
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("region", region);
   url.searchParams.set("language", language);
+  url.searchParams.set("with_release_type", "4");
+  url.searchParams.set(
+    "release_date.lte",
+    new Date().toISOString().slice(0, 10),
+  );
+  url.searchParams.set("sort_by", "popularity.desc");
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
   signal.addEventListener("abort", abort, { once: true });
@@ -220,7 +226,7 @@ async function tmdbNowPlaying(
     const text = await readBounded(
       response.body,
       MAX_RESPONSE_BYTES,
-      "TMDB now-playing response",
+      "TMDB digital-release response",
     );
     return NowPlayingResponseSchema.parse(JSON.parse(text));
   } finally {
@@ -344,23 +350,23 @@ export const extension = {
   resources: {
     [SPEC_MOVIE]: {
       description:
-        "One movie discovered in the current TMDB now-playing list; instance name is now-playing-movie-<tmdbId>.",
+        "One movie from the current US digital-release list; instance name is digital-release-movie-<tmdbId>.",
       schema: DiscoveredMovieSchema,
       lifetime: "infinite" as const,
       garbageCollection: 200,
     },
     [SPEC_RUN]: {
       description:
-        "Marker that records a completed TMDB now-playing ISO-week run with page totals and truncation flag.",
+        "Marker that records a completed TMDB digital-release ISO-week run with page totals and truncation flag.",
       schema: WeekRunSchema,
       lifetime: "infinite" as const,
       garbageCollection: 200,
     },
   },
   methods: [{
-    nowPlaying: {
+    digitalReleases: {
       description:
-        "Fetch the current TMDB now-playing list once per ISO week; dedupe by TMDB id, skip entries without a title, record honest page totals and a truncation flag in the run marker.",
+        "Fetch the most popular digitally released movies for a region once per ISO week; dedupe by TMDB id, skip entries without a title, and record page totals.",
       arguments: NowPlayingArgsSchema,
       execute: executeNowPlaying,
     },

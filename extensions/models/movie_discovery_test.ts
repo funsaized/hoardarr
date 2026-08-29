@@ -144,27 +144,27 @@ Deno.test("isoWeek produces ISO-8601 year-week across boundary days", () => {
   );
 });
 
-Deno.test("movie instance name is prefixed with now-playing-movie-", () => {
+Deno.test("movie instance name is prefixed with digital-release-movie-", () => {
   assertEquals(
     testing.movieInstanceName(550),
-    "now-playing-movie-550",
+    "digital-release-movie-550",
     "prefix encodes TMDB id",
   );
   assertEquals(
     testing.runMarkerName("2026-W34", "US", "en-US"),
-    "week-2026-W34-US-en-US",
+    "digital-week-2026-W34-US-en-US",
     "marker name encodes week+region+language",
   );
 });
 
-Deno.test("extension declares exactly two specs and the nowPlaying method", () => {
+Deno.test("extension declares exactly two specs and the digitalReleases method", () => {
   assertEquals(extension.type, "@keeb/tmdb-lookup", "extension target");
   assert(
-    "nowPlayingMovie" in extension.resources,
+    "digitalReleaseMovie" in extension.resources,
     "movie resource spec missing",
   );
   assert(
-    "nowPlayingRun" in extension.resources,
+    "digitalReleaseRun" in extension.resources,
     "run marker resource spec missing",
   );
   assert(
@@ -174,9 +174,9 @@ Deno.test("extension declares exactly two specs and the nowPlaying method", () =
   const method = extension.methods
     .flatMap((entry) => Object.values(entry))
     .find((m) =>
-      m.description.startsWith("Fetch the current TMDB now-playing")
+      m.description.startsWith("Fetch the most popular digitally released")
     );
-  assert(method, "nowPlaying method missing");
+  assert(method, "digitalReleases method missing");
 });
 
 Deno.test("toDiscovered returns null for entries without a title", () => {
@@ -220,25 +220,51 @@ Deno.test("nowPlaying fetches, writes one movie per id, and prefixes the instanc
   );
   assertEquals(env.fetchCalls.length, 1, "exactly one fetch expected");
   assert(
-    env.fetchCalls[0]!.includes("/movie/now_playing"),
-    "now_playing endpoint hit",
+    env.fetchCalls[0]!.includes("/discover/movie"),
+    "discover endpoint hit",
   );
   assert(env.fetchCalls[0]!.includes("region=US"), "region passed through");
+  assert(
+    env.fetchCalls[0]!.includes("with_release_type=4"),
+    "digital release type required",
+  );
+  assert(
+    env.fetchCalls[0]!.includes("release_date.lte="),
+    "future digital releases excluded",
+  );
+  assert(
+    env.fetchCalls[0]!.includes("sort_by=popularity.desc"),
+    "most popular releases returned first",
+  );
   assert(
     env.fetchCalls[0]!.includes("language=en-US"),
     "language passed through",
   );
-  const movieWrites = env.writes.filter((w) => w.spec === "nowPlayingMovie");
+  const movieWrites = env.writes.filter((w) =>
+    w.spec === "digitalReleaseMovie"
+  );
   assertEquals(movieWrites.length, 3, "one movie record per id");
   for (const write of movieWrites) {
     assert(
-      write.name.startsWith("now-playing-movie-"),
+      write.name.startsWith("digital-release-movie-"),
       `instance name must be prefixed: ${write.name}`,
     );
   }
-  assertEquals(movieWrites[0]!.name, "now-playing-movie-101", "TMDB id 101");
-  assertEquals(movieWrites[1]!.name, "now-playing-movie-202", "TMDB id 202");
-  assertEquals(movieWrites[2]!.name, "now-playing-movie-303", "TMDB id 303");
+  assertEquals(
+    movieWrites[0]!.name,
+    "digital-release-movie-101",
+    "TMDB id 101",
+  );
+  assertEquals(
+    movieWrites[1]!.name,
+    "digital-release-movie-202",
+    "TMDB id 202",
+  );
+  assertEquals(
+    movieWrites[2]!.name,
+    "digital-release-movie-303",
+    "TMDB id 303",
+  );
   assertEquals(result.dataHandles.length, 4, "three movies + one run marker");
 });
 
@@ -249,7 +275,7 @@ Deno.test("nowPlaying runs the marker last and reports honest page totals", asyn
     env.context,
     { fetchImpl: env.fetchImpl },
   );
-  const marker = env.writes.find((w) => w.spec === "nowPlayingRun");
+  const marker = env.writes.find((w) => w.spec === "digitalReleaseRun");
   assert(marker, "marker written");
   assertEquals(
     marker!.name,
@@ -272,9 +298,11 @@ Deno.test("nowPlaying runs the marker last and reports honest page totals", asyn
     "no skips when all entries valid",
   );
   const movieWriteIndex = env.writes.findIndex((w) =>
-    w.spec === "nowPlayingMovie"
+    w.spec === "digitalReleaseMovie"
   );
-  const markerIndex = env.writes.findIndex((w) => w.spec === "nowPlayingRun");
+  const markerIndex = env.writes.findIndex((w) =>
+    w.spec === "digitalReleaseRun"
+  );
   assert(
     markerIndex > movieWriteIndex,
     "marker must be written after every movie record",
@@ -303,7 +331,7 @@ Deno.test("nowPlaying flags truncated when the response has more pages than fetc
     env.context,
     { fetchImpl: env.fetchImpl },
   );
-  const marker = env.writes.find((w) => w.spec === "nowPlayingRun")!;
+  const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!;
   assertEquals(marker.data.truncated, true, "more pages ahead means truncated");
   assertEquals(marker.data.totalPages, 4, "totalPages surfaced");
   assertEquals(marker.data.totalResults, 200, "totalResults surfaced");
@@ -332,7 +360,7 @@ Deno.test("nowPlaying conservatively marks truncated when total_pages is omitted
     env.context,
     { fetchImpl: env.fetchImpl },
   );
-  const marker = env.writes.find((w) => w.spec === "nowPlayingRun")!.data;
+  const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.totalPages, null, "totalPages stays null when omitted");
   assertEquals(
     marker.truncated,
@@ -364,7 +392,7 @@ Deno.test("nowPlaying stays honest when total_pages is omitted but the page is p
     env.context,
     { fetchImpl: env.fetchImpl },
   );
-  const marker = env.writes.find((w) => w.spec === "nowPlayingRun")!.data;
+  const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.totalPages, null, "totalPages null");
   assertEquals(
     marker.truncated,
@@ -397,7 +425,7 @@ Deno.test("nowPlaying keeps explicit total_pages authoritative even on a full pa
     env.context,
     { fetchImpl: env.fetchImpl },
   );
-  const marker = env.writes.find((w) => w.spec === "nowPlayingRun")!.data;
+  const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.totalPages, 1, "explicit totalPages preserved");
   assertEquals(
     marker.truncated,
@@ -432,15 +460,15 @@ Deno.test("nowPlaying skips empty titles and counts them as skippedInvalid", asy
     { fetchImpl: env.fetchImpl },
   );
   const movieNames = env.writes
-    .filter((w) => w.spec === "nowPlayingMovie")
+    .filter((w) => w.spec === "digitalReleaseMovie")
     .map((w) => w.name)
     .sort();
   assertEquals(
     movieNames,
-    ["now-playing-movie-1", "now-playing-movie-4"],
+    ["digital-release-movie-1", "digital-release-movie-4"],
     "empty-title entries are skipped",
   );
-  const marker = env.writes.find((w) => w.spec === "nowPlayingRun")!.data;
+  const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.movieCount, 2, "movieCount excludes skipped entries");
   assertEquals(
     marker.skippedInvalid,
@@ -479,15 +507,15 @@ Deno.test("nowPlaying dedupes duplicate TMDB ids within the same response", asyn
     { fetchImpl: env.fetchImpl },
   );
   const movieNames = env.writes
-    .filter((w) => w.spec === "nowPlayingMovie")
+    .filter((w) => w.spec === "digitalReleaseMovie")
     .map((w) => w.name)
     .sort();
   assertEquals(
     movieNames,
-    ["now-playing-movie-10", "now-playing-movie-9"],
+    ["digital-release-movie-10", "digital-release-movie-9"],
     "duplicate TMDB ids collapse to one record",
   );
-  const marker = env.writes.find((w) => w.spec === "nowPlayingRun")!.data;
+  const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.movieCount, 2, "movieCount counts deduped ids");
 });
 
@@ -499,9 +527,9 @@ Deno.test("nowPlaying honours the limit and marks truncated when cap applies", a
     { fetchImpl: env.fetchImpl },
   );
   const movieCount =
-    env.writes.filter((w) => w.spec === "nowPlayingMovie").length;
+    env.writes.filter((w) => w.spec === "digitalReleaseMovie").length;
   assertEquals(movieCount, 2, "limit caps movie writes");
-  const marker = env.writes.find((w) => w.spec === "nowPlayingRun")!.data;
+  const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.truncated, true, "truncated when response count > limit");
 });
 
