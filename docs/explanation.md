@@ -195,7 +195,7 @@ They preserve structured failure context that terminal output alone may omit.
   New operators must adapt and test those values before bootstrap.
 - The workflow targets a Linux host, NordVPN, Tailscale, one Mac, and iCloud
   Drive. Other providers need model or workflow changes.
-- Discovery is capped at five movies per week and uses a fixed release policy.
+- Discovery is capped at ten movies per week and uses a fixed release policy.
 - One transfer per run favors predictable recovery over throughput.
 - `@funsaized/torlink` currently comes from a sibling source checkout rather
   than the older registry beta.

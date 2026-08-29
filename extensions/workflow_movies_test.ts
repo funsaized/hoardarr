@@ -8,6 +8,11 @@ const workflow = await Deno.readTextFile(
   new URL("../workflows/workflow-movies.yaml", import.meta.url),
 );
 
+Deno.test("weekly discovery queues at most ten movies", () => {
+  const discovery = step("discover-digital-releases");
+  assert(discovery.includes("limit: 10"), "weekly discovery limit must be ten");
+});
+
 function step(name: string): string {
   const marker = `      - name: ${name}\n`;
   const start = workflow.indexOf(marker);

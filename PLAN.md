@@ -644,7 +644,7 @@ Initial defaults:
 ```text
 region = US
 language = en-US
-maximum new movies per week = 5
+maximum new movies per week = 10
 ```
 
 ### Movie Catalog

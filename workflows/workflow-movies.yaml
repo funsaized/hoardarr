@@ -61,7 +61,7 @@ jobs:
         weight: 0
         allowFailure: false
       - name: discover-digital-releases
-        description: Fetch at most five movies once per ISO week.
+        description: Fetch at most ten movies once per ISO week.
         guard: '${{ inputs.dryRun == true }}'
         task:
           type: model_method
@@ -70,7 +70,7 @@ jobs:
           inputs:
             region: US
             language: en-US
-            limit: 5
+            limit: 10
         dependsOn:
           - step: inspect-network
             condition:
@@ -662,8 +662,8 @@ jobs:
               type: succeeded
         weight: 0
         allowFailure: false
-      # ponytail: one payload per 15-minute run avoids same-model lock loops;
-      # raise throughput only if the five-per-week discovery ceiling changes.
+      # ponytail: one payload per 15-minute run bounds transfer and cleanup
+      # concurrency while allowing the durable queue to drain between runs.
       - name: inspect-payload
         description: Reject unsafe or missing local payload entries before transfer.
         task:
