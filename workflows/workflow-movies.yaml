@@ -454,8 +454,7 @@ jobs:
         description: Batch-remove Torlink jobs while retaining verified local payload files.
         guard: >-
           ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
-            data.latest("movie-catalog", "plan-current").attributes.retryable +
-            data.latest("movie-catalog", "plan-current").attributes.transferReady)
+            data.latest("movie-catalog", "plan-current").attributes.retryable)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "transfer-ready")) == 0 }}
         task:
           type: model_method
@@ -464,8 +463,7 @@ jobs:
           inputs:
             ids: >-
               ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
-                  data.latest("movie-catalog", "plan-current").attributes.retryable +
-                  data.latest("movie-catalog", "plan-current").attributes.transferReady)
+                  data.latest("movie-catalog", "plan-current").attributes.retryable)
                 .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "transfer-ready")
                 .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash) }}
             action: remove
@@ -530,6 +528,18 @@ jobs:
         dependsOn: []
         weight: 0
         allowFailure: false
+      - name: refresh-transfer-plan
+        description: Refresh transfer-ready and cleanup-pending work after download reconciliation.
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: plan
+        dependsOn:
+          - step: enter-transfer-state
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
       - name: open-mac
         description: Open the verified SSH control connection for one transfer-ready movie.
         guard: >-
@@ -541,7 +551,7 @@ jobs:
           inputs:
             hosts: name:mini
         dependsOn:
-          - step: enter-transfer-state
+          - step: refresh-transfer-plan
             condition:
               type: succeeded
         weight: 0
