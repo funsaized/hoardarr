@@ -1,0 +1,8 @@
+type: hoardarr/media-files
+typeVersion: 2026.08.28.2
+id: e7cd747e-4f96-4015-bcae-b5683b4d0050
+name: media-files
+version: 1
+tags: {}
+globalArguments: {}
+methods: {}

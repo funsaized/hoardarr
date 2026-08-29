@@ -1,0 +1,87 @@
+id: 2ed2920a-9b95-417a-be5b-771c0d355d23
+name: hoardarr-bootstrap
+tags: {}
+jobs:
+  - name: main
+    description: Prepare the local host and verify the Mac destination.
+    steps:
+      - name: apply-local-bootstrap
+        description: Install verified user units without enabling or starting them.
+        task:
+          type: model_method
+          modelIdOrName: host-bootstrap
+          methodName: apply
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: apply-mac-fleet
+        description: Materialize the approved Mac destination.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: apply
+        dependsOn:
+          - step: apply-local-bootstrap
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: open-mac-connection
+        description: Open the SSH control connection to the Mac.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: open
+          inputs:
+            hosts: name:mini
+        dependsOn:
+          - step: apply-mac-fleet
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: check-mac-connection
+        description: Verify the approved Mac remains reachable.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: check
+          inputs:
+            hosts: name:mini
+        dependsOn:
+          - step: open-mac-connection
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: collect-mac-host-key
+        description: Record the Mac SSH host public key and fingerprint.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: collect-host-public-key
+          inputs:
+            hosts: name:mini
+        dependsOn:
+          - step: check-mac-connection
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: close-mac-connection
+        description: Close the SSH control connection.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: close
+          inputs:
+            hosts: name:mini
+        dependsOn:
+          - step: collect-mac-host-key
+            condition:
+              type: completed
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+version: 1

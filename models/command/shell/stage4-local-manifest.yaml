@@ -1,0 +1,8 @@
+type: command/shell
+typeVersion: 2026.02.09.1
+id: af1c9c6f-bcff-4957-b3ca-cbe70ee34b5f
+name: stage4-local-manifest
+version: 1
+tags: {}
+globalArguments: {}
+methods: {}

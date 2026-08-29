@@ -1,0 +1,955 @@
+id: 1d32fc82-fb12-4f75-a0e2-5215747326ad
+name: movies
+description: Reconcile weekly movie discovery, download, verified Mac transfer, and cleanup.
+version: 1
+tags:
+  app: hoardarr
+  media: movies
+concurrency: 1
+inputs:
+  type: object
+  properties:
+    dryRun:
+      type: boolean
+      default: true
+      description: Inspect and plan without discovery, network transitions, downloads, transfer, or cleanup.
+trigger:
+  schedule: "*/15 * * * *"
+  inputs:
+    dryRun: false
+reports:
+  require:
+    - hoardarr/movie-run-summary
+jobs:
+  - name: inspect-and-plan
+    description: Refresh live state, perform idempotent discovery, reconcile, and plan work.
+    steps:
+      - name: inspect-network
+        description: Record the live VPN, Tailscale, route, public IP, and Torlink state.
+        task:
+          type: model_method
+          modelIdOrName: network-session
+          methodName: inspect
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: inspect-torlink-unit
+        description: Record Torlink user-service state without changing it.
+        task:
+          type: model_method
+          modelIdOrName: torlink-unit
+          methodName: syncUser
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: inspect-staging-disk
+        description: Record free capacity for the fixed local staging filesystem.
+        task:
+          type: model_method
+          modelIdOrName: staging-disk
+          methodName: check
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: inspect-host
+        description: Recheck required local binaries, directories, and unit assets.
+        task:
+          type: model_method
+          modelIdOrName: host-bootstrap
+          methodName: inspect
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: discover-now-playing
+        description: Fetch at most five movies once per ISO week.
+        guard: '${{ inputs.dryRun == true }}'
+        task:
+          type: model_method
+          modelIdOrName: movie-discovery
+          methodName: nowPlaying
+          inputs:
+            region: US
+            language: en-US
+            limit: 5
+        dependsOn:
+          - step: inspect-network
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: ingest-discoveries
+        description: Preserve existing terminal catalog state while ingesting all discovered movies.
+        guard: >-
+          ${{ inputs.dryRun ||
+            size(data.findBySpec("movie-discovery", "nowPlayingMovie")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: ingest
+          inputs:
+            discoveries: >-
+              ${{ data.findBySpec("movie-discovery", "nowPlayingMovie")
+                .map(movie, movie.attributes) }}
+        dependsOn:
+          - step: discover-now-playing
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: sync-active-torlink
+        description: Snapshot Torlink only when its service is already active.
+        guard: >-
+          ${{ !data.query("modelName == 'torlink-unit' && name == 'status' && workflowRunId == '" +
+            run.id + "' && stepName == 'inspect-torlink-unit'")[0].attributes.active }}
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: sync
+        dependsOn:
+          - step: inspect-torlink-unit
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: reconcile-active-torrents
+        description: Advance catalog state from the fresh typed Torlink snapshot.
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: reconcile
+          inputs:
+            snapshots: >-
+              ${{ data.latest("torlink", "snapshot-current").attributes.torrents
+                .map(torrent, {
+                  "infoHash": torrent.infoHash,
+                  "kind": torrent.kind,
+                  "status": torrent.status,
+                  "progress": torrent.progress
+                }) }}
+        dependsOn:
+          - step: sync-active-torlink
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: plan-work
+        description: Persist wanted, retryable, transfer-ready, and cleanup-pending IDs.
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: plan
+        dependsOn:
+          - step: ingest-discoveries
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+          - step: reconcile-active-torrents
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+          - step: inspect-staging-disk
+            condition:
+              type: succeeded
+          - step: inspect-host
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+  - name: download
+    description: Enter the verified VPN state, batch download and seed, then stop Torlink.
+    steps:
+      - name: enter-download-state
+        description: Enter Amsterdam NordVPN state only when catalog download work exists.
+        guard: >-
+          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) > 0 ||
+            size(data.latest("movie-catalog", "plan-current").attributes.wanted) +
+              size(data.latest("movie-catalog", "plan-current").attributes.retryable) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: network-session
+          methodName: enter-download
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: start-torlink
+        description: Start Torlink only after the download-state invariant passes.
+        task:
+          type: model_method
+          modelIdOrName: torlink-unit
+          methodName: startUser
+        dependsOn:
+          - step: enter-download-state
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: assert-torlink-health
+        description: Require matching CLI and loopback API versions.
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: health
+        dependsOn:
+          - step: start-torlink
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: search-wanted-movies
+        description: Batch all wanted and retryable movie searches through one Torlink lock.
+        guard: >-
+          ${{ size(data.latest("movie-catalog", "plan-current").attributes.wanted) +
+            size(data.latest("movie-catalog", "plan-current").attributes.retryable) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: search
+          inputs:
+            queries: >-
+              ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
+                  data.latest("movie-catalog", "plan-current").attributes.retryable)
+                .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes)
+                .map(movie, {
+                  "key": string(movie.tmdbId),
+                  "query": movie.year == null ? movie.title :
+                    movie.title + " " + string(movie.year),
+                  "category": "movies"
+                }) }}
+        dependsOn:
+          - step: assert-torlink-health
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: select-releases
+        description: Apply the catalog's deterministic release policy to all search results.
+        guard: '${{ size(data.latest("torlink", "search-current").?attributes.?queries.orValue([])) == 0 }}'
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: select
+          inputs:
+            items: >-
+              ${{ data.latest("torlink", "search-current").attributes.queries
+                .map(query, {
+                  "tmdbId": int(query.key),
+                  "releases": query.results.map(release, {
+                    "infoHash": release.infoHash,
+                    "name": release.name,
+                    "sizeBytes": release.sizeBytes,
+                    "seeders": release.seeders,
+                    "source": release.source
+                  })
+                }) }}
+        dependsOn:
+          - step: search-wanted-movies
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: add-selected-torrents
+        description: Batch selected info hashes through the loopback Torlink API.
+        guard: >-
+          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) > 0 ||
+            size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+              data.latest("movie-catalog", "plan-current").attributes.retryable)
+              .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "selected")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: add
+          inputs:
+            inputs: >-
+              ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
+                  data.latest("movie-catalog", "plan-current").attributes.retryable)
+                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "selected")
+                .map(id, {
+                  "key": string(id),
+                  "input": data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash
+                }) }}
+        dependsOn:
+          - step: select-releases
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: mark-downloading
+        description: Batch selected catalog records into downloading state after add succeeds.
+        guard: >-
+          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "selected")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: transition
+          inputs:
+            transitions: >-
+              ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
+                  data.latest("movie-catalog", "plan-current").attributes.retryable)
+                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "selected")
+                .map(id, {
+                  "tmdbId": id,
+                  "to": "downloading"
+                }) }}
+        dependsOn:
+          - step: add-selected-torrents
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: wait-for-seeding
+        description: Wait for all active downloads to enter seeding.
+        guard: >-
+          ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "downloading")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: wait
+          inputs:
+            ids: >-
+              ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
+                  data.latest("movie-catalog", "plan-current").attributes.retryable)
+                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "downloading")
+                .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash) }}
+            until: seeding
+            pollSeconds: 30
+            timeoutSeconds: 172800
+        dependsOn:
+          - step: mark-downloading
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: sync-seeding
+        description: Capture the live seed state after completion.
+        guard: >-
+          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) > 0 ||
+            !data.query("modelName == 'torlink-unit' && name == 'status' && workflowRunId == '" +
+            run.id + "' && stepName == 'start-torlink'")[0].attributes.active }}
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: sync
+        dependsOn:
+          - step: wait-for-seeding
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: reconcile-seeding
+        description: Advance completed downloads to seeding in one catalog call.
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: reconcile
+          inputs:
+            snapshots: >-
+              ${{ data.latest("torlink", "snapshot-current").attributes.torrents
+                .map(torrent, {
+                  "infoHash": torrent.infoHash,
+                  "kind": torrent.kind,
+                  "status": torrent.status,
+                  "progress": torrent.progress
+                }) }}
+        dependsOn:
+          - step: sync-seeding
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: wait-for-seed-stop
+        description: Wait until Torlink's native five-minute seed timer pauses every seed.
+        guard: >-
+          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: wait
+          inputs:
+            ids: >-
+              ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
+                  data.latest("movie-catalog", "plan-current").attributes.retryable)
+                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")
+                .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash) }}
+            until: seed-stopped
+            pollSeconds: 30
+            timeoutSeconds: 1800
+        dependsOn:
+          - step: reconcile-seeding
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: sync-seed-stopped
+        description: Capture paused seed state before removing Torlink metadata.
+        guard: >-
+          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: sync
+        dependsOn:
+          - step: wait-for-seed-stop
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: reconcile-transfer-ready
+        description: Advance paused seeds to transfer-ready in one catalog call.
+        guard: >-
+          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: reconcile
+          inputs:
+            snapshots: >-
+              ${{ data.latest("torlink", "snapshot-current").attributes.torrents
+                .map(torrent, {
+                  "infoHash": torrent.infoHash,
+                  "kind": torrent.kind,
+                  "status": torrent.status,
+                  "progress": torrent.progress
+                }) }}
+        dependsOn:
+          - step: sync-seed-stopped
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: remove-torrent-metadata
+        description: Batch-remove Torlink jobs while retaining verified local payload files.
+        guard: >-
+          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+            data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.transferReady)
+            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "transfer-ready")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: control
+          inputs:
+            ids: >-
+              ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
+                  data.latest("movie-catalog", "plan-current").attributes.retryable +
+                  data.latest("movie-catalog", "plan-current").attributes.transferReady)
+                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "transfer-ready")
+                .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash) }}
+            action: remove
+            confirmDeleteFiles: false
+        dependsOn:
+          - step: reconcile-transfer-ready
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: stop-torlink
+        description: Stop Torlink after successful, empty, or failed selection branches.
+        guard: '${{ inputs.dryRun == true }}'
+        task:
+          type: model_method
+          modelIdOrName: torlink-unit
+          methodName: stopUser
+        dependsOn:
+          - step: remove-torrent-metadata
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: failed
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: assert-torlink-stopped
+        description: Fail unless the post-stop probe confirms Torlink is absent.
+        task:
+          type: assert
+          expr: >-
+            !data.query("modelName == 'torlink-unit' && name == 'status' && workflowRunId == '" +
+              run.id + "' && stepName == 'stop-torlink'")[0].attributes.active
+          message: Torlink must be inactive before leaving download state.
+          severity: high
+        dependsOn:
+          - step: stop-torlink
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+    dependsOn:
+      - job: inspect-and-plan
+        condition:
+          type: succeeded
+    weight: 0
+  - name: transfer
+    description: Restore Tailscale, transfer one payload safely, and retry one pending cleanup.
+    concurrency: 1
+    steps:
+      - name: enter-transfer-state
+        description: Restore the safe Tailscale state after every live download branch.
+        guard: '${{ inputs.dryRun == true }}'
+        task:
+          type: model_method
+          modelIdOrName: network-session
+          methodName: enter-transfer
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: open-mac
+        description: Open the verified SSH control connection for one transfer-ready movie.
+        guard: >-
+          ${{ size(data.latest("movie-catalog", "plan-current").attributes.transferReady) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: open
+          inputs:
+            hosts: name:mini
+        dependsOn:
+          - step: enter-transfer-state
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: assert-mac-open
+        description: Fail when the SSH extension records an unsuccessful open.
+        task:
+          type: assert
+          expr: >-
+            data.query("modelName == 'mac' && workflowRunId == '" + run.id +
+              "' && stepName == 'open-mac'")[0].attributes.outcome == "ok"
+          message: Mac SSH control connection must open successfully.
+          severity: high
+        dependsOn:
+          - step: open-mac
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: check-mac
+        description: Verify Mac connectivity before any remote write.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: check
+          inputs:
+            hosts: name:mini
+        dependsOn:
+          - step: assert-mac-open
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: assert-mac-check
+        description: Fail when the SSH extension records an unsuccessful connectivity check.
+        task:
+          type: assert
+          expr: >-
+            data.query("modelName == 'mac' && workflowRunId == '" + run.id +
+              "' && stepName == 'check-mac'")[0].attributes.outcome == "ok"
+          message: Mac SSH control connection must remain reachable.
+          severity: high
+        dependsOn:
+          - step: check-mac
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      # ponytail: one payload per 15-minute run avoids same-model lock loops;
+      # raise throughput only if the five-per-week discovery ceiling changes.
+      - name: inspect-payload
+        description: Reject unsafe or missing local payload entries before transfer.
+        task:
+          type: model_method
+          modelIdOrName: media-files
+          methodName: inspect
+          inputs:
+            tmdbId: >-
+              ${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}
+        dependsOn:
+          - step: stage-payload
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: stage-payload
+        description: Move allowlisted files from Torlink's exact payload name into the TMDB-id directory.
+        task:
+          type: model_method
+          modelIdOrName: media-files
+          methodName: stage
+          inputs:
+            tmdbId: >-
+              ${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}
+            sourceName: >-
+              ${{ data.latest("torlink", "snapshot-current").attributes.torrents
+                .filter(torrent, torrent.infoHash == data.latest("movie-catalog", "catalog-movie-" +
+                  string(data.latest("movie-catalog", "plan-current").attributes.transferReady[0])).attributes.infoHash)[0].name }}
+        dependsOn:
+          - step: assert-mac-check
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: manifest-payload
+        description: Produce a deterministic local SHA-256 manifest after inspection.
+        task:
+          type: model_method
+          modelIdOrName: media-files
+          methodName: manifest
+          inputs:
+            tmdbId: >-
+              ${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}
+        dependsOn:
+          - step: inspect-payload
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: prepare-remote
+        description: Create only the per-ID remote staging directory.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: script
+          inputs:
+            hosts: name:mini
+            interpreter: sh
+            script: |
+              set -eu
+              root='/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'
+              id='${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}'
+              mkdir -p "$root/.hoardarr-staging/$id"
+        dependsOn:
+          - step: manifest-payload
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: copy-payload
+        description: Rsync one validated payload into its isolated Mac staging directory.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: copy
+          inputs:
+            hosts: name:mini
+            src: '/home/saiguy/Downloads/hoardarr/movies/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/'
+            dst: '/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/.hoardarr-staging/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/'
+            direction: to
+            recursive: true
+            useRsync: true
+        dependsOn:
+          - step: prepare-remote
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: verify-and-promote
+        description: Compare aggregate SHA-256 and atomically rename without overwriting conflicts.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: script
+          inputs:
+            hosts: name:mini
+            interpreter: sh
+            script: |
+              set -eu
+              root='/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'
+              id='${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}'
+              expected='${{ data.latest("media-files", "manifest-" + string(data.latest("movie-catalog", "plan-current").attributes.transferReady[0])).attributes.aggregateSha256 }}'
+              stage="$root/.hoardarr-staging/$id"
+              final="$root/$id"
+              manifest_hash() {
+                dir=$1
+                test -d "$dir"
+                test -z "$(find "$dir" -type l -print -quit)"
+                (
+                  cd "$dir"
+                  find . -type f -print | LC_ALL=C sort |
+                    while IFS= read -r path; do
+                      rel=${path#./}
+                      hash=$(shasum -a 256 "$rel" | cut -d ' ' -f 1)
+                      printf '%s  %s\n' "$hash" "$rel"
+                    done | shasum -a 256 | cut -d ' ' -f 1
+                )
+              }
+              test "$(manifest_hash "$stage")" = "$expected"
+              if test -e "$final"; then
+                test "$(manifest_hash "$final")" = "$expected"
+                rm -rf "$stage"
+              else
+                mv "$stage" "$final"
+              fi
+        dependsOn:
+          - step: copy-payload
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: close-mac
+        description: Close the SSH control connection after remote verification.
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: close
+          inputs:
+            hosts: name:mini
+        dependsOn:
+          - step: verify-and-promote
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: mark-transferred
+        description: Record only the checksum-verified and atomically promoted payload.
+        guard: >-
+          ${{ size(data.latest("movie-catalog", "plan-current").attributes.transferReady) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: transition
+          inputs:
+            transitions: >-
+              ${{ [data.latest("movie-catalog", "plan-current").attributes.transferReady[0]]
+                .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes)
+                .map(movie, {
+                  "tmdbId": movie.tmdbId,
+                  "to": "transferred",
+                  "localPath": "/home/saiguy/Downloads/hoardarr/movies/" + string(movie.tmdbId),
+                  "remotePath": "/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/" + string(movie.tmdbId),
+                  "bytes": data.latest("media-files", "manifest-" + string(movie.tmdbId)).attributes.totalBytes,
+                  "sha256": data.latest("media-files", "manifest-" + string(movie.tmdbId)).attributes.aggregateSha256,
+                  "transferredAt": run.startedAt
+                }) }}
+        dependsOn:
+          - step: close-mac
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: cleanup-local
+        description: Retry one authorized cleanup after exact local re-hash.
+        guard: >-
+          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) +
+            size(data.latest("movie-catalog", "plan-current").attributes.cleanupPending) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: media-files
+          methodName: cleanup
+          inputs:
+            tmdbId: >-
+              ${{ (data.latest("movie-catalog", "plan-current").attributes.transferReady +
+                data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0] }}
+        dependsOn:
+          - step: mark-transferred
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: true
+      - name: mark-cleaned
+        description: Return a successful cleanup record to transferred with its timestamp.
+        guard: >-
+          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) +
+            size(data.latest("movie-catalog", "plan-current").attributes.cleanupPending) == 0 ||
+          size(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
+            "' && stepName == 'cleanup-local'")) == 0 ||
+          !(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
+            "' && stepName == 'cleanup-local'")[0].attributes.outcome
+                in ["deleted", "absent"]) }}
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: transition
+          inputs:
+            transitions:
+              - tmdbId: >-
+                  ${{ (data.latest("movie-catalog", "plan-current").attributes.transferReady +
+                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0] }}
+                to: transferred
+                localCleanedAt: >-
+                  ${{ data.latest("media-files", "cleanup-" + string((data.latest("movie-catalog", "plan-current").attributes.transferReady +
+                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0])).attributes.performedAt }}
+                error: null
+        dependsOn:
+          - step: mark-cleanup-pending
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: mark-cleanup-pending
+        description: Preserve a denied or failed cleanup as retryable cleanup-pending state.
+        guard: >-
+          ${{ inputs.dryRun || size(data.latest("movie-catalog", "plan-current").attributes.transferReady) +
+            size(data.latest("movie-catalog", "plan-current").attributes.cleanupPending) == 0 ||
+          size(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
+            "' && stepName == 'cleanup-local'")) == 0 ||
+          !(data.query("modelName == 'media-files' && workflowRunId == '" + run.id +
+            "' && stepName == 'cleanup-local'")[0].attributes.outcome
+                in ["denied", "failed"]) }}
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: transition
+          inputs:
+            transitions:
+              - tmdbId: >-
+                  ${{ (data.latest("movie-catalog", "plan-current").attributes.transferReady +
+                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0] }}
+                to: cleanup-pending
+                error: >-
+                  ${{ data.latest("media-files", "cleanup-" + string((data.latest("movie-catalog", "plan-current").attributes.transferReady +
+                    data.latest("movie-catalog", "plan-current").attributes.cleanupPending)[0])).attributes.reason.orValue("local cleanup failed") }}
+        dependsOn:
+          - step: cleanup-local
+            condition:
+              type: completed
+        weight: 0
+        allowFailure: false
+    dependsOn:
+      - job: download
+        condition:
+          type: succeeded
+    weight: 0
+  - name: recovery-download
+    description: Recover a failed download before any transfer job can run.
+    steps:
+      - name: recovery-download-stop-torlink
+        description: Stop Torlink before any network recovery action.
+        guard: '${{ inputs.dryRun == true }}'
+        task:
+          type: model_method
+          modelIdOrName: torlink-unit
+          methodName: stopUser
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: recovery-download-restore-network
+        description: Disconnect NordVPN, disable kill switch, and restore Tailscale.
+        task:
+          type: model_method
+          modelIdOrName: network-session
+          methodName: restore
+        dependsOn:
+          - step: recovery-download-stop-torlink
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: recovery-download-mark-retryable
+        description: Mark interrupted downloads failed so the next plan can retry them.
+        guard: >-
+          ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
+            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "downloading")) == 0 }}
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: transition
+          inputs:
+            transitions: >-
+              ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
+                  data.latest("movie-catalog", "plan-current").attributes.retryable)
+                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "downloading")
+                .map(id, {
+                  "tmdbId": id,
+                  "to": "failed",
+                  "error": "download-interrupted"
+                }) }}
+        dependsOn:
+          - step: recovery-download-restore-network
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+    dependsOn:
+      - job: download
+        condition:
+          type: failed
+    weight: 0
+  - name: recovery-transfer
+    description: Recover a failed transfer after Torlink has already been stopped.
+    steps:
+      - name: recovery-transfer-close-mac
+        description: Close any SSH control connection left by a failed transfer.
+        guard: '${{ inputs.dryRun == true }}'
+        task:
+          type: model_method
+          modelIdOrName: mac
+          methodName: close
+          inputs:
+            hosts: name:mini
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: recovery-transfer-stop-torlink
+        description: Reassert that Torlink is stopped before restoring networking.
+        task:
+          type: model_method
+          modelIdOrName: torlink-unit
+          methodName: stopUser
+        dependsOn:
+          - step: recovery-transfer-close-mac
+            condition:
+              type: completed
+        weight: 0
+        allowFailure: false
+      - name: recovery-transfer-restore-network
+        description: Disconnect NordVPN, disable kill switch, and restore Tailscale.
+        task:
+          type: model_method
+          modelIdOrName: network-session
+          methodName: restore
+        dependsOn:
+          - step: recovery-transfer-stop-torlink
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+    dependsOn:
+      - job: transfer
+        condition:
+          type: failed
+    weight: 0

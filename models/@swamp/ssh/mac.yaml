@@ -1,0 +1,33 @@
+type: '@swamp/ssh'
+typeVersion: 2026.07.28.1
+id: f0b51147-3032-4ab1-a9b1-593f726ada58
+name: mac
+version: 1
+tags: {}
+globalArguments:
+  name: hoardarr-mac
+  transport:
+    kind: ssh
+    user: saiguy
+    port: 22
+    auth:
+      kind: key
+    identityFile: /home/saiguy/.ssh/id_ed25519
+    identitiesOnly: true
+    knownHostsFile: /home/saiguy/.ssh/known_hosts
+    strictHostKeyChecking: 'yes'
+    connectTimeoutSec: 10
+    extraOptions: []
+    controlMaster:
+      enabled: true
+      persistSec: 600
+  hosts:
+    - name: mini
+      address: mini
+      tags:
+        - mac
+        - media
+      attrs:
+        tailscaleDns: mini.tail3e3e86.ts.net
+        tailscaleIp: 100.93.185.64
+methods: {}

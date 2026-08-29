@@ -1,0 +1,9 @@
+type: '@keeb/tmdb-lookup'
+typeVersion: 2026.07.03.1
+id: 3bd21ee6-cebf-4dc1-919e-f01291b97fbe
+name: movie-discovery
+version: 1
+tags: {}
+globalArguments:
+  apiKey: '${{ vault.get("hoardarr", "TMDB_API_KEY") }}'
+methods: {}

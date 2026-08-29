@@ -1,0 +1,16 @@
+type: '@aaronge/systemd-panel'
+typeVersion: 2026.08.27.2
+id: 6bf5f313-0062-4bab-890f-8f878508df51
+name: hoardarr-swamp-unit
+version: 1
+tags: {}
+globalArguments:
+  unit: hoardarr-swamp.service
+  logUnit: hoardarr-swamp.service
+  kind: service
+  label: Hoardarr-Swamp
+  useSudo: false
+  systemctlPath: /usr/bin/systemctl
+  journalctlPath: /usr/bin/journalctl
+  sudoPath: sudo
+methods: {}

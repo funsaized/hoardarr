@@ -1,0 +1,16 @@
+[Unit]
+Description=Hoardarr Swamp server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/home/saiguy
+Environment=PATH=/home/saiguy/.local/bin:/home/saiguy/.local/share/mise/installs/node/26.7.0/bin:/usr/local/bin:/usr/bin
+WorkingDirectory=/home/saiguy/Projects/hoardarr
+ExecStart=/home/saiguy/.local/bin/swamp serve --repo-dir /home/saiguy/Projects/hoardarr --host 127.0.0.1 --port 9090 --no-schedule
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

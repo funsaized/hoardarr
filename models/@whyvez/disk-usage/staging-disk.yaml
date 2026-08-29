@@ -1,0 +1,9 @@
+type: '@whyvez/disk-usage'
+typeVersion: 2026.05.28.1
+id: 79492295-e987-4afc-ae96-cb7e79f2d25c
+name: staging-disk
+version: 1
+tags: {}
+globalArguments:
+  path: /home/saiguy/Downloads/hoardarr/movies
+methods: {}

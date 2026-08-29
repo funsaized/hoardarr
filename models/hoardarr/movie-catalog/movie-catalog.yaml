@@ -1,0 +1,8 @@
+type: hoardarr/movie-catalog
+typeVersion: 2026.08.28.2
+id: c5268372-e27f-4829-8d97-dc1ad138f68a
+name: movie-catalog
+version: 1
+tags: {}
+globalArguments: {}
+methods: {}

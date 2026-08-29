@@ -1,0 +1,16 @@
+type: '@aaronge/systemd-panel'
+typeVersion: 2026.08.27.2
+id: 9cb1b4da-cebf-4588-8ff3-99fb035a599c
+name: torlink-unit
+version: 1
+tags: {}
+globalArguments:
+  unit: torlink.service
+  logUnit: torlink.service
+  kind: service
+  label: Torlink
+  useSudo: false
+  systemctlPath: /usr/bin/systemctl
+  journalctlPath: /usr/bin/journalctl
+  sudoPath: sudo
+methods: {}

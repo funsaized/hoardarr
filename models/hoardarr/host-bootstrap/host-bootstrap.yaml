@@ -1,0 +1,8 @@
+type: hoardarr/host-bootstrap
+typeVersion: 2026.08.28.1
+id: 63d4a2d1-2164-481b-8e1b-55552cd3d5ab
+name: host-bootstrap
+version: 1
+tags: {}
+globalArguments: {}
+methods: {}

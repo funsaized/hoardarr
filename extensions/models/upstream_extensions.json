@@ -1,0 +1,239 @@
+{
+  "@keeb/mms": {
+    "version": "2026.07.18.1",
+    "pulledAt": "2026-08-28T18:36:40.464Z",
+    "files": [
+      ".agents/skills/mms",
+      ".swamp/bundles/75ad9492/mms_dedup.js",
+      ".swamp/bundles/75ad9492/mms_downloader.js",
+      ".swamp/bundles/75ad9492/mms_organizer.js",
+      ".swamp/bundles/75ad9492/mms_source.js",
+      ".swamp/bundles/75ad9492/mms_subtitles.js",
+      ".swamp/bundles/75ad9492/rottentomatoes.js",
+      ".swamp/bundles/75ad9492/subsplease_schedule.js",
+      ".swamp/bundles/75ad9492/tmdb_lookup.js",
+      ".swamp/bundles/75ad9492/tv_recommender.js",
+      ".swamp/pulled-extensions/@keeb/mms/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@keeb/mms/files/README.md",
+      ".swamp/pulled-extensions/@keeb/mms/files/personas/host.md",
+      ".swamp/pulled-extensions/@keeb/mms/files/scripts/package.json",
+      ".swamp/pulled-extensions/@keeb/mms/files/scripts/rottentomatoes-scraper.ts",
+      ".swamp/pulled-extensions/@keeb/mms/manifest.yaml",
+      ".swamp/pulled-extensions/@keeb/mms/models/_lib/ollama.ts",
+      ".swamp/pulled-extensions/@keeb/mms/models/mms_dedup.ts",
+      ".swamp/pulled-extensions/@keeb/mms/models/mms_downloader.ts",
+      ".swamp/pulled-extensions/@keeb/mms/models/mms_organizer.ts",
+      ".swamp/pulled-extensions/@keeb/mms/models/mms_source.ts",
+      ".swamp/pulled-extensions/@keeb/mms/models/mms_subtitles.ts",
+      ".swamp/pulled-extensions/@keeb/mms/models/rottentomatoes.ts",
+      ".swamp/pulled-extensions/@keeb/mms/models/subsplease_schedule.ts",
+      ".swamp/pulled-extensions/@keeb/mms/models/tmdb_lookup.ts",
+      ".swamp/pulled-extensions/@keeb/mms/models/tv_recommender.ts",
+      ".swamp/pulled-extensions/@keeb/mms/reports/add_summary.ts",
+      ".swamp/pulled-extensions/@keeb/mms/reports/dedup_summary.ts",
+      ".swamp/pulled-extensions/@keeb/mms/reports/discovery_summary.ts",
+      ".swamp/pulled-extensions/@keeb/mms/reports/download_status.ts",
+      ".swamp/pulled-extensions/@keeb/mms/reports/tv_recommendations.ts",
+      ".swamp/report-bundles/c7fb3e13/add_summary.js",
+      ".swamp/report-bundles/c7fb3e13/dedup_summary.js",
+      ".swamp/report-bundles/c7fb3e13/discovery_summary.js",
+      ".swamp/report-bundles/c7fb3e13/download_status.js",
+      ".swamp/report-bundles/c7fb3e13/tv_recommendations.js"
+    ],
+    "checksum": "66693402c5e4a830f2aff47d33cc82612c5fb90f20689fc68cfc6aa0a392a0ff",
+    "filesChecksum": "aa5a313d67d647dfae082cd1e9e70771344599b44d49eb5a44593a13ea503c46",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@swamp/ssh": {
+    "version": "2026.07.28.1",
+    "pulledAt": "2026-08-28T18:36:48.425Z",
+    "files": [
+      ".swamp/bundles/464e926c/ssh.js",
+      ".swamp/pulled-extensions/@swamp/ssh/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@swamp/ssh/files/README.md",
+      ".swamp/pulled-extensions/@swamp/ssh/manifest.yaml",
+      ".swamp/pulled-extensions/@swamp/ssh/models/_lib/checks.ts",
+      ".swamp/pulled-extensions/@swamp/ssh/models/_lib/cidr.ts",
+      ".swamp/pulled-extensions/@swamp/ssh/models/_lib/control_master.ts",
+      ".swamp/pulled-extensions/@swamp/ssh/models/_lib/forwarding.ts",
+      ".swamp/pulled-extensions/@swamp/ssh/models/_lib/hosts.ts",
+      ".swamp/pulled-extensions/@swamp/ssh/models/_lib/operations.ts",
+      ".swamp/pulled-extensions/@swamp/ssh/models/_lib/runner.ts",
+      ".swamp/pulled-extensions/@swamp/ssh/models/_lib/schemas.ts",
+      ".swamp/pulled-extensions/@swamp/ssh/models/_lib/selectors.ts",
+      ".swamp/pulled-extensions/@swamp/ssh/models/ssh.ts"
+    ],
+    "checksum": "ac1b160bcf07876c341bf4f17a42817ba586f6e233da8a75afe6509eb2e9b422",
+    "filesChecksum": "5f123145ce45ae8bacb0eeb9286af60a45f19a2921f5de8ed37e1880b6e930a3",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@aaronge/systemd-panel": {
+    "version": "2026.08.27.2",
+    "pulledAt": "2026-08-28T18:36:56.927Z",
+    "files": [
+      ".swamp/bundles/c1933d15/systemd_unit.js",
+      ".swamp/pulled-extensions/@aaronge/systemd-panel/files/LICENSE",
+      ".swamp/pulled-extensions/@aaronge/systemd-panel/files/README.md",
+      ".swamp/pulled-extensions/@aaronge/systemd-panel/files/swamp-panel",
+      ".swamp/pulled-extensions/@aaronge/systemd-panel/manifest.yaml",
+      ".swamp/pulled-extensions/@aaronge/systemd-panel/models/systemd_unit.ts"
+    ],
+    "checksum": "e26139570c35b6e99eeb00d23b532340eab6ca906936fd5ee6b94b0a820744fe",
+    "filesChecksum": "fe53ab987572a7f64f2bc1c143d6b13678e64f366a4895dde5dcb6918a530a22",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@jentz/aws-rds-inventory-report": {
+    "version": "2026.07.19.0",
+    "pulledAt": "2026-08-28T19:27:51.201Z",
+    "files": [
+      ".swamp/pulled-extensions/@jentz/aws-rds-inventory-report/files/LICENSE.md",
+      ".swamp/pulled-extensions/@jentz/aws-rds-inventory-report/files/README.md",
+      ".swamp/pulled-extensions/@jentz/aws-rds-inventory-report/manifest.yaml",
+      ".swamp/pulled-extensions/@jentz/aws-rds-inventory-report/reports/aws_rds_inventory_report.ts",
+      ".swamp/report-bundles/e9408a57/aws_rds_inventory_report.js"
+    ],
+    "checksum": "0968f0bd3d6ec91b6253d2990d9c95fe0e6b6cfb617964b101a7b5682d2c9add",
+    "filesChecksum": "d73009ad7d15dbafebd699a4c70bfb6c296c3e4e4469ef5fd97b7d0732526dc7",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@jentz/triage-snapshot": {
+    "version": "2026.07.31.0",
+    "pulledAt": "2026-08-28T19:27:58.788Z",
+    "files": [
+      ".swamp/pulled-extensions/@jentz/triage-snapshot/files/LICENSE.md",
+      ".swamp/pulled-extensions/@jentz/triage-snapshot/files/README.md",
+      ".swamp/pulled-extensions/@jentz/triage-snapshot/manifest.yaml",
+      ".swamp/pulled-extensions/@jentz/triage-snapshot/reports/triage_snapshot.ts",
+      ".swamp/report-bundles/a17fff8b/triage_snapshot.js"
+    ],
+    "checksum": "3b0b8df0bc400f88fffee931e7c7cceb76a15a8151948ff3e59b755166d6f67e",
+    "filesChecksum": "a9910d3c2493ef2a83049c509c900755456c49432e1d1bb19f35ae48d0461c90",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@mccormick/fleet": {
+    "version": "2026.06.09.1",
+    "pulledAt": "2026-08-28T19:28:07.053Z",
+    "files": [
+      ".swamp/pulled-extensions/@mccormick/fleet/files/LICENSE.md",
+      ".swamp/pulled-extensions/@mccormick/fleet/files/README.md",
+      ".swamp/pulled-extensions/@mccormick/fleet/manifest.yaml",
+      ".swamp/pulled-extensions/@mccormick/fleet/reports/fleet_inventory.ts",
+      ".swamp/pulled-extensions/@mccormick/fleet/reports/render.ts",
+      ".swamp/report-bundles/313c8ebb/fleet_inventory.js"
+    ],
+    "checksum": "316b2fcde59fafd50bff18dfdb94916d6125015cef9c87b5cf6bb2c765f23fc4",
+    "filesChecksum": "fb9d8146330cacceb07ea0a461a04ab5fd397a9f3ec41a18650fcabecc8aa2fd",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@whyvez/disk-usage": {
+    "version": "2026.05.28.1",
+    "pulledAt": "2026-08-28T19:29:05.810Z",
+    "files": [
+      ".swamp/bundles/1d7cdeda/disk_usage.js",
+      ".swamp/pulled-extensions/@whyvez/disk-usage/manifest.yaml",
+      ".swamp/pulled-extensions/@whyvez/disk-usage/models/disk_usage.ts"
+    ],
+    "checksum": "e926cc58037b99a36bc0974c65135a4ddbe8eaf42fcb33357b7866c9aaa6b8b4",
+    "filesChecksum": "a8ed7361d6b10c4af5cb80931def988cfe3d1e566efb2bdbaac9e6b704d6e797",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@lint/media-cleaner": {
+    "version": "2026.05.21.1",
+    "pulledAt": "2026-08-28T19:29:05.847Z",
+    "files": [
+      ".swamp/bundles/28a304dc/media-cleaner.js",
+      ".swamp/pulled-extensions/@lint/media-cleaner/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@lint/media-cleaner/files/README.md",
+      ".swamp/pulled-extensions/@lint/media-cleaner/manifest.yaml",
+      ".swamp/pulled-extensions/@lint/media-cleaner/models/media-cleaner.ts"
+    ],
+    "checksum": "840a153fe41a99e6576785d585a6ce70c4aa153873fe5d8eb9c123a5c7504aef",
+    "filesChecksum": "4320c6fdb04bc40b443c44a5c24b4ac88009a5846414e2101c169a6a212d9541",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@lint/media-curator": {
+    "version": "2026.05.22.1",
+    "pulledAt": "2026-08-28T19:29:06.666Z",
+    "files": [
+      ".swamp/bundles/7de950e0/media-curator.js",
+      ".swamp/pulled-extensions/@lint/media-curator/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@lint/media-curator/files/README.md",
+      ".swamp/pulled-extensions/@lint/media-curator/manifest.yaml",
+      ".swamp/pulled-extensions/@lint/media-curator/models/media-curator.ts",
+      ".swamp/pulled-extensions/@lint/media-curator/workflows/weekly-media-refresh.yaml"
+    ],
+    "checksum": "4794a594db09e03e4a0b4146221b1ea4ac5d3570da42b13588215414511813db",
+    "filesChecksum": "9c8dcb737654793e27bbbd266418e2a69593c281c6fa3e7d2b5d64b7991573d4",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@lint/radarr": {
+    "version": "2026.05.21.2",
+    "pulledAt": "2026-08-28T19:29:07.547Z",
+    "files": [
+      ".swamp/bundles/3325e02b/radarr.js",
+      ".swamp/pulled-extensions/@lint/radarr/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@lint/radarr/files/README.md",
+      ".swamp/pulled-extensions/@lint/radarr/manifest.yaml",
+      ".swamp/pulled-extensions/@lint/radarr/models/radarr.ts"
+    ],
+    "checksum": "c213c67ef98a4f50a09dba33ab950df6422be93965fa5fe816fa8ad91af1a0a7",
+    "filesChecksum": "005656a49f54b225fec88943749b41b2d3bf99ebc7ea0b8e541611fd420de83c",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@lint/seerr": {
+    "version": "2026.05.21.3",
+    "pulledAt": "2026-08-28T19:29:08.485Z",
+    "files": [
+      ".swamp/bundles/d32bcee8/seerr.js",
+      ".swamp/pulled-extensions/@lint/seerr/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@lint/seerr/files/README.md",
+      ".swamp/pulled-extensions/@lint/seerr/manifest.yaml",
+      ".swamp/pulled-extensions/@lint/seerr/models/seerr.ts"
+    ],
+    "checksum": "32004ba4594521f12671974dcc74c30bfce9e1c6c9861fd21d873164e4ebcef8",
+    "filesChecksum": "3142f6304ede907da05040a387ddc50e7182c8cee486ee5022ee2c370f0e8d85",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@lint/tautulli": {
+    "version": "2026.07.01.1",
+    "pulledAt": "2026-08-28T19:29:09.441Z",
+    "files": [
+      ".swamp/bundles/c854dd75/tautulli.js",
+      ".swamp/pulled-extensions/@lint/tautulli/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@lint/tautulli/files/README.md",
+      ".swamp/pulled-extensions/@lint/tautulli/manifest.yaml",
+      ".swamp/pulled-extensions/@lint/tautulli/models/tautulli.ts"
+    ],
+    "checksum": "d00228c3e2fdd6a152649d757e16b7cfce7fab91821b8e4004982443f914b3dd",
+    "filesChecksum": "5cebfae5612e10e769346eb27532f9d38efe35ba8a139a8347a5a8d18072e84f",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@lint/plex": {
+    "version": "2026.06.22.1",
+    "pulledAt": "2026-08-28T19:29:10.384Z",
+    "files": [
+      ".swamp/bundles/99c003ae/plex.js",
+      ".swamp/pulled-extensions/@lint/plex/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@lint/plex/files/README.md",
+      ".swamp/pulled-extensions/@lint/plex/manifest.yaml",
+      ".swamp/pulled-extensions/@lint/plex/models/plex.ts"
+    ],
+    "checksum": "ad7c2eefcc8ea88e478988aa7ea521513c0be60b3a2cffa14416c7840004f27d",
+    "filesChecksum": "bf186b616d9d8578581e8ecccf0fd5c778abb3bb6c8891d13e31bee5274faf1c",
+    "serverUrl": "https://swamp-club.com"
+  },
+  "@kneel/plocate": {
+    "version": "2026.07.15.2",
+    "pulledAt": "2026-08-28T19:29:55.602Z",
+    "files": [
+      ".swamp/bundles/7aba1937/plocate.js",
+      ".swamp/pulled-extensions/@kneel/plocate/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@kneel/plocate/files/README.md",
+      ".swamp/pulled-extensions/@kneel/plocate/manifest.yaml",
+      ".swamp/pulled-extensions/@kneel/plocate/models/plocate.ts"
+    ],
+    "checksum": "6a861338ba5a6d12c2a1b0ff0067dc32f304fb9ab4bebf5ed52cec0d81b8fc99",
+    "filesChecksum": "b8f55c37580dec40576d080960b5b151bb877be44349cdf962af4f779ad68153",
+    "serverUrl": "https://swamp-club.com"
+  }
+}

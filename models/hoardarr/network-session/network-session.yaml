@@ -1,0 +1,8 @@
+type: hoardarr/network-session
+typeVersion: 2026.08.28.6
+id: 4cf29232-cee3-46e6-98a2-17ffdccc0890
+name: network-session
+version: 1
+tags: {}
+globalArguments: {}
+methods: {}

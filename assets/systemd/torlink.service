@@ -1,0 +1,16 @@
+[Unit]
+Description=Hoardarr Torlink server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/home/saiguy
+Environment=PATH=/home/saiguy/.local/share/mise/installs/node/26.7.0/bin:/usr/local/bin:/usr/bin
+Environment=TORLINK_STATE_DIR=/home/saiguy/.local/state/hoardarr/torlink
+WorkingDirectory=/home/saiguy/Projects/torlink
+ExecStart=/home/saiguy/.local/share/mise/installs/node/26.7.0/bin/node /home/saiguy/Projects/torlink/dist/cli.cjs serve --host 127.0.0.1 --port 9161 --to /home/saiguy/Downloads/hoardarr/movies --seed-time 5m
+Restart=no
+
+[Install]
+WantedBy=default.target

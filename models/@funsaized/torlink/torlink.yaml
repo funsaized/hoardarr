@@ -1,0 +1,11 @@
+type: '@funsaized/torlink'
+typeVersion: 2026.08.28.2
+id: 7a8fb228-4b71-4428-8885-03e5b89a8eca
+name: torlink
+version: 1
+tags: {}
+globalArguments:
+  binary: /home/saiguy/Projects/torlink/dist/cli.cjs
+  baseUrl: 'http://127.0.0.1:9161'
+  allowInsecureRemote: false
+methods: {}
