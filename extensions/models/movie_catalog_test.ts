@@ -1265,7 +1265,7 @@ Deno.test("interrupted download becomes retryable without incrementing attempts"
   );
 });
 
-Deno.test("plan categorizes wanted, retryable, transferReady, cleanupPending", async () => {
+Deno.test("plan categorizes wanted, retryable, downloading, seeding, transferReady, cleanupPending", async () => {
   const { context, store } = makeContext({
     "catalog-movie-1": baseMovie({ tmdbId: 1, status: "wanted" }),
     "catalog-movie-2": baseMovie({ tmdbId: 2, status: "selected" }),
@@ -1275,6 +1275,8 @@ Deno.test("plan categorizes wanted, retryable, transferReady, cleanupPending", a
     "catalog-movie-6": baseMovie({ tmdbId: 6, status: "cleanup-pending" }),
     "catalog-movie-7": baseMovie({ tmdbId: 7, status: "transferred" }),
     "catalog-movie-8": baseMovie({ tmdbId: 8, status: "ignored" }),
+    "catalog-movie-9": baseMovie({ tmdbId: 9, status: "downloading" }),
+    "catalog-movie-10": baseMovie({ tmdbId: 10, status: "seeding" }),
   });
   const result = await testing.executePlan({}, context);
   const plan = store.resources.get("plan-current") as ReturnType<
@@ -1282,6 +1284,12 @@ Deno.test("plan categorizes wanted, retryable, transferReady, cleanupPending", a
   >;
   assertEquals(plan.wanted, [1, 2], "wanted collects wanted and selected");
   assertEquals(plan.retryable, [3], "retryable excludes attempts over cap");
+  assertEquals(
+    plan.downloading,
+    [9],
+    "downloading isolates in-flight downloads",
+  );
+  assertEquals(plan.seeding, [10], "seeding isolates in-flight seeds");
   assertEquals(
     plan.transferReady,
     [5],
@@ -1323,7 +1331,7 @@ Deno.test("malformed catalog records are logged not swallowed", async () => {
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.08.28.2", "model version");
+  assertEquals(model.version, "2026.08.29.2", "model version");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
   for (

@@ -314,7 +314,8 @@ jobs:
         description: Wait for all active downloads to enter seeding.
         guard: >-
           ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
-            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.downloading)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "downloading")) == 0 }}
         task:
           type: model_method
@@ -323,7 +324,8 @@ jobs:
           inputs:
             ids: >-
               ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
-                  data.latest("movie-catalog", "plan-current").attributes.retryable)
+                  data.latest("movie-catalog", "plan-current").attributes.retryable +
+                  data.latest("movie-catalog", "plan-current").attributes.downloading)
                 .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "downloading")
                 .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash) }}
             until: seeding
@@ -382,7 +384,8 @@ jobs:
         description: Wait until Torlink's native five-minute seed timer pauses every seed.
         guard: >-
           ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
-            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.seeding)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")) == 0 }}
         task:
           type: model_method
@@ -391,7 +394,8 @@ jobs:
           inputs:
             ids: >-
               ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
-                  data.latest("movie-catalog", "plan-current").attributes.retryable)
+                  data.latest("movie-catalog", "plan-current").attributes.retryable +
+                  data.latest("movie-catalog", "plan-current").attributes.seeding)
                 .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")
                 .map(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash) }}
             until: seed-stopped
@@ -407,7 +411,8 @@ jobs:
         description: Capture paused seed state before removing Torlink metadata.
         guard: >-
           ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
-            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.seeding)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")) == 0 }}
         task:
           type: model_method
@@ -426,7 +431,8 @@ jobs:
         description: Advance paused seeds to transfer-ready in one catalog call.
         guard: >-
           ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
-            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.seeding)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "seeding")) == 0 }}
         task:
           type: model_method
@@ -892,7 +898,8 @@ jobs:
         description: Mark interrupted downloads failed so the next plan can retry them.
         guard: >-
           ${{ size((data.latest("movie-catalog", "plan-current").attributes.wanted +
-            data.latest("movie-catalog", "plan-current").attributes.retryable)
+            data.latest("movie-catalog", "plan-current").attributes.retryable +
+            data.latest("movie-catalog", "plan-current").attributes.downloading)
             .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "downloading")) == 0 }}
         task:
           type: model_method
@@ -901,7 +908,8 @@ jobs:
           inputs:
             transitions: >-
               ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
-                  data.latest("movie-catalog", "plan-current").attributes.retryable)
+                  data.latest("movie-catalog", "plan-current").attributes.retryable +
+                  data.latest("movie-catalog", "plan-current").attributes.downloading)
                 .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "downloading")
                 .map(id, {
                   "tmdbId": id,

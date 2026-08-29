@@ -331,6 +331,9 @@ active. Inspect the relevant method summary if stopping Torlink fails.
 - Keep Torlink disabled at baseline. An active Torlink process blocks network
   restoration by design.
 - Treat `cleanup-pending` as a cleanup retry, not a reason to redownload.
+- Plan `downloading` and `seeding` buckets exist so in-flight torrents survive
+  across runs. The download job waits on items already in flight; do not delete
+  the catalog row for an in-flight torrent without first stopping it in Torlink.
 
 ## Development
 

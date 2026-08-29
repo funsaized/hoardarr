@@ -1,7 +1,7 @@
 /** Hoardarr local movie catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4";
 
-const MODEL_VERSION = "2026.08.28.2";
+const MODEL_VERSION = "2026.08.29.2";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -115,6 +115,8 @@ const PlanSchema = z.object({
   generatedAt: z.iso.datetime(),
   wanted: z.array(z.number().int().positive()),
   retryable: z.array(z.number().int().positive()),
+  downloading: z.array(z.number().int().positive()),
+  seeding: z.array(z.number().int().positive()),
   transferReady: z.array(z.number().int().positive()),
   cleanupPending: z.array(z.number().int().positive()),
 });
@@ -507,6 +509,8 @@ function advanceFromSnapshot(
 function computePlan(movies: ReadonlyArray<Movie>): Plan {
   const wanted: number[] = [];
   const retryable: number[] = [];
+  const downloading: number[] = [];
+  const seeding: number[] = [];
   const transferReady: number[] = [];
   const cleanupPending: number[] = [];
   for (const movie of movies) {
@@ -516,6 +520,10 @@ function computePlan(movies: ReadonlyArray<Movie>): Plan {
       movie.status === "failed" && movie.attempts < MAX_RETRY_ATTEMPTS
     ) {
       retryable.push(movie.tmdbId);
+    } else if (movie.status === "downloading") {
+      downloading.push(movie.tmdbId);
+    } else if (movie.status === "seeding") {
+      seeding.push(movie.tmdbId);
     } else if (movie.status === "transfer-ready") {
       transferReady.push(movie.tmdbId);
     } else if (movie.status === "cleanup-pending") {
@@ -527,6 +535,8 @@ function computePlan(movies: ReadonlyArray<Movie>): Plan {
     generatedAt: new Date().toISOString(),
     wanted: uniqueSort(wanted),
     retryable: uniqueSort(retryable),
+    downloading: uniqueSort(downloading),
+    seeding: uniqueSort(seeding),
     transferReady: uniqueSort(transferReady),
     cleanupPending: uniqueSort(cleanupPending),
   };
@@ -718,6 +728,8 @@ async function executePlan(
   context.logger.info("plan computed", {
     wanted: plan.wanted.length,
     retryable: plan.retryable.length,
+    downloading: plan.downloading.length,
+    seeding: plan.seeding.length,
     transferReady: plan.transferReady.length,
     cleanupPending: plan.cleanupPending.length,
   });
@@ -779,7 +791,7 @@ export const model = {
     },
     plan: {
       description:
-        "Compute the catalog plan listing wanted, retryable, transfer-ready, and cleanup-pending TMDB ids.",
+        "Compute the catalog plan listing wanted, retryable, downloading, seeding, transfer-ready, and cleanup-pending TMDB ids.",
       arguments: PlanArgsSchema,
       execute: (_args: Record<string, never>, context: Context) =>
         executePlan(_args, context),

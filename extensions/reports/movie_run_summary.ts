@@ -88,6 +88,8 @@ const CatalogPlanSchema = z.object({
   generatedAt: z.iso.datetime(),
   wanted: z.array(z.number().int().positive()),
   retryable: z.array(z.number().int().positive()),
+  downloading: z.array(z.number().int().positive()),
+  seeding: z.array(z.number().int().positive()),
   transferReady: z.array(z.number().int().positive()),
   cleanupPending: z.array(z.number().int().positive()),
 });
@@ -252,6 +254,8 @@ export interface Collected {
   plan: {
     wanted: number[];
     retryable: number[];
+    downloading: number[];
+    seeding: number[];
     transferReady: number[];
     cleanupPending: number[];
   } | null;
@@ -758,6 +762,8 @@ async function collectFromCatalog(
     collected.plan = {
       wanted: parsed.data.wanted,
       retryable: parsed.data.retryable,
+      downloading: parsed.data.downloading,
+      seeding: parsed.data.seeding,
       transferReady: parsed.data.transferReady,
       cleanupPending: parsed.data.cleanupPending,
     };

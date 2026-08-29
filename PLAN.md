@@ -900,7 +900,7 @@ runs not providing catch-up for a missed exact trigger.
 3. Inspect staging disk capacity.
 4. Run idempotent weekly discovery.
 5. Reconcile Torlink status into the catalog.
-6. Plan wanted, retryable, transfer-ready, and cleanup-pending work.
+6. Plan wanted, retryable, downloading, seeding, transfer-ready, and cleanup-pending work. The downloading and seeding buckets carry in-flight torrents across runs so torrents that take longer than the run cadence are still waited on, seeded for five minutes, and cleaned up by a later run.
 7. Exit successfully with a report when no work exists.
 
 #### Download
