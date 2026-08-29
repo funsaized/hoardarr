@@ -75,7 +75,7 @@ Deno.test("unit assets preserve the bootstrap safety baseline", async () => {
     new URL("../../assets/systemd/torlink.service", import.meta.url),
   );
   assert(swamp.includes("--host 127.0.0.1"), "Swamp is not loopback-only");
-  assert(swamp.includes("--no-schedule"), "Swamp scheduling is enabled");
+  assert(!swamp.includes("--no-schedule"), "Swamp scheduling is disabled");
   assert(swamp.includes("Restart=on-failure"), "Swamp restart policy changed");
   assert(torlink.includes("--host 127.0.0.1"), "Torlink is not loopback-only");
   assert(torlink.includes("--seed-time 5m"), "Torlink seed time changed");
