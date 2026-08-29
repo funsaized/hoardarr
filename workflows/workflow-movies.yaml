@@ -14,7 +14,7 @@ inputs:
       default: true
       description: Inspect and plan without discovery, network transitions, downloads, transfer, or cleanup.
 trigger:
-  schedule: "*/15 * * * *"
+  schedule: "0 2,8,14,22 * * *"
   inputs:
     dryRun: false
 reports:
