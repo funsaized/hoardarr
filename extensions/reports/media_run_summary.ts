@@ -509,12 +509,12 @@ export function renderMarkdown(
     lines.push(
       "## Network Assertions",
       "",
-      "| step | kind | ok | country | city | publicIp | reason |",
-      "| --- | --- | --- | --- | --- | --- | --- |",
+      "| step | kind | vpn | tailscale | country | city | publicIp | reason |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
     );
     for (const row of collected.network)
       lines.push(
-        `| ${mdEscape(row.step)} | ${row.kind} | ${row.ok} | ${mdEscape(row.country ?? "")} | ${mdEscape(row.city ?? "")} | ${mdEscape(row.publicIp ?? "")} | ${mdEscape(row.reason ?? "")} |`,
+        `| ${mdEscape(row.step)} | ${row.kind} | ${row.nordvpnConnected ?? ""} | ${row.tailscaleOnline ?? ""} | ${mdEscape(row.country ?? "")} | ${mdEscape(row.city ?? "")} | ${mdEscape(row.publicIp ?? "")} | ${mdEscape(row.reason ?? "")} |`,
       );
     lines.push("");
   }

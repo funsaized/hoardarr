@@ -577,11 +577,11 @@ export function renderMarkdown(
     lines.push("_None._");
     lines.push("");
   } else {
-    lines.push("| step | kind | ok | country | city | publicIp | reason |");
-    lines.push("| --- | --- | --- | --- | --- | --- | --- |");
+    lines.push("| step | kind | vpn | tailscale | country | city | publicIp | reason |");
+    lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const row of collected.network) {
       lines.push(
-        `| ${mdEscape(row.step)} | ${row.kind} | ${row.ok} | ${mdEscape(
+        `| ${mdEscape(row.step)} | ${row.kind} | ${row.nordvpnConnected ?? ""} | ${row.tailscaleOnline ?? ""} | ${mdEscape(
           row.country ?? "",
         )} | ${mdEscape(row.city ?? "")} | ${mdEscape(row.publicIp ?? "")} | ${mdEscape(
           row.reason ?? "",
