@@ -213,6 +213,15 @@ Deno.test("download reconciles, plans, adds, and waits for both catalogs in one 
 
 Deno.test("movie-transfer preserves the original Mac Movies semantics and path", () => {
   const movieJobStart = jobStart("movie-transfer");
+  const stage = step("stage-payload", movieJobStart);
+  assert(
+    stage.includes("catalog-movie-") && stage.includes("attributes.releaseName"),
+    "movie staging must use the durable catalog release name",
+  );
+  assert(
+    !stage.includes("snapshot-current"),
+    "movie staging must not require removed torrent metadata",
+  );
   const copy = step("copy-payload", movieJobStart);
   assert(
     copy.includes(
@@ -263,6 +272,14 @@ Deno.test("episode-transfer targets the iCloud TV root with e-<id> naming", () =
   );
   const stage = step("stage-payload", epJobStart);
   assert(stage.includes("mediaKind: episode"), "episode stage must pass mediaKind=episode");
+  assert(
+    stage.includes("catalog-episode-") && stage.includes("attributes.releaseName"),
+    "episode staging must use the durable catalog release name",
+  );
+  assert(
+    !stage.includes("snapshot-current"),
+    "episode staging must not require removed torrent metadata",
+  );
   const manifest = step("manifest-payload", epJobStart);
   assert(manifest.includes("mediaKind: episode"), "episode manifest must pass mediaKind=episode");
   const prepare = step("prepare-remote", epJobStart);

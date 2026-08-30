@@ -1203,9 +1203,8 @@ jobs:
             tmdbId: >-
               ${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}
             sourceName: >-
-              ${{ data.latest("torlink", "snapshot-current").attributes.torrents
-                .filter(torrent, torrent.infoHash == data.latest("movie-catalog", "catalog-movie-" +
-                  string(data.latest("movie-catalog", "plan-current").attributes.transferReady[0])).attributes.infoHash)[0].name }}
+              ${{ data.latest("movie-catalog", "catalog-movie-" +
+                string(data.latest("movie-catalog", "plan-current").attributes.transferReady[0])).attributes.releaseName }}
         dependsOn:
           - step: assert-mac-check
             condition:
@@ -1572,9 +1571,8 @@ jobs:
             tmdbId: >-
               ${{ data.latest("episode-catalog", "plan-current").attributes.transferReady[0] }}
             sourceName: >-
-              ${{ data.latest("torlink", "snapshot-current").attributes.torrents
-                .filter(torrent, torrent.infoHash == data.latest("episode-catalog", "catalog-episode-" +
-                  string(data.latest("episode-catalog", "plan-current").attributes.transferReady[0])).attributes.infoHash)[0].name }}
+              ${{ data.latest("episode-catalog", "catalog-episode-" +
+                string(data.latest("episode-catalog", "plan-current").attributes.transferReady[0])).attributes.releaseName }}
             mediaKind: episode
         dependsOn:
           - step: assert-mac-check
