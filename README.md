@@ -60,13 +60,11 @@ your path differs.
 
 ## 2. Clone and build the dependencies
 
-Hoardarr currently loads `@funsaized/torlink` from a sibling source checkout.
-Clone all three repositories at the paths used by your deployment:
+Clone Hoardarr and Torlink at the paths used by your deployment:
 
 ```bash
 mkdir -p "$HOME/Projects"
 git clone https://github.com/baairon/torlink.git "$HOME/Projects/torlink"
-git clone https://github.com/funsaized/swamp-torlink.git "$HOME/Projects/swamp-torlink"
 git clone https://github.com/funsaized/hoardarr.git "$HOME/Projects/hoardarr"
 ```
 
@@ -79,35 +77,32 @@ npm run build
 node dist/cli.cjs search "ubuntu" --category movies
 ```
 
-The command must print one JSON document. Hoardarr requires a Torlink build with
-headless search and the pinned `@funsaized/torlink` type version
-`2026.08.28.2`.
+The command must print one JSON document. Hoardarr requires Torlink v1.8.0 or
+newer and the pinned `@funsaized/torlink` type version `2026.08.30.2`.
 
 ## 3. Install the Swamp extensions
 
-From the Hoardarr repository, register the local Torlink extension and pull the
-remaining dependencies:
+From the Hoardarr repository, pull the extension dependencies:
 
 ```bash
 cd "$HOME/Projects/hoardarr"
-swamp extension source add "$HOME/Projects/swamp-torlink" --only models --json
+swamp extension pull @funsaized/torlink --yes --json
 swamp extension pull @keeb/mms --yes --json
 swamp extension pull @swamp/ssh --yes --json
 swamp extension pull @aaronge/systemd-panel --yes --json
 swamp extension pull @whyvez/disk-usage --yes --json
 ```
 
-Do not pull the older `@funsaized/torlink` registry beta. Confirm that Swamp
-loaded the local source and the expected type:
+Confirm that Swamp loaded the expected registry extension and type:
 
 ```bash
-swamp extension source list --json
+swamp extension info @funsaized/torlink --json
 swamp doctor extensions --json
 swamp model type describe @funsaized/torlink --compact --json
 ```
 
 The extension doctor must pass. The Torlink type must be version
-`2026.08.28.2`.
+`2026.08.30.2`.
 
 ## 4. Configure the hosts
 
@@ -326,7 +321,7 @@ active. Inspect the relevant method summary if stopping Torlink fails.
 - Run `swamp help <command>` before assuming CLI syntax from an older guide.
 - Validate the workflow before every manual execution.
 - Inspect generated reports before retrying a failed method or workflow.
-- Confirm `@funsaized/torlink` came from the local source when its type is
+- Confirm `@funsaized/torlink` was pulled from the registry when its type is
   missing or has the wrong version.
 - Keep Torlink disabled at baseline. An active Torlink process blocks network
   restoration by design.

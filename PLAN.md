@@ -165,7 +165,7 @@ hoardarr/
 |   |   |-- movie_catalog.ts
 |   |   |-- movie_discovery.ts
 |   |   |-- network_session.ts
-|   |   `-- systemd_start_stop.ts
+|   |   `-- systemd_user_lifecycle.ts
 |   `-- reports/
 |       `-- movie_run_summary.ts
 `-- assets/
@@ -198,7 +198,7 @@ again before implementing those custom capabilities.
 - `@keeb/tailscale` covers remote installation and inventory, not local
   Tailscale lifecycle transitions, so `network_session.ts` remains necessary.
 - `@keeb/mms` still provides `@keeb/tmdb-lookup`; it has movie search but no
-  `now_playing` method, so extend that type for discovery.
+  digital-release discovery method, so extend that type for discovery.
 - `@aaronge/systemd-panel` provides `sync`, `enable`, and `disable`, but not the
   required independent `start` and `stop` methods, so extend that type.
 - `@wendy/rsync` exists, but `@swamp/ssh` already provides rsync-backed remote
@@ -522,18 +522,20 @@ quality checked
 dry-run passed
 user approval
 beta pushed
+stable pushed
 ```
 
 Beta `@funsaized/torlink@2026.08.28.1` was published while the Torlink PR was
-pending. The PR merged upstream as `8b1df42`; stable promotion remains blocked
-until a Torlink release contains that commit.
+pending. The PR merged upstream as `8b1df42` and shipped in Torlink v1.8.0.
+Stable `@funsaized/torlink@2026.08.30.2` is published with registry model and
+method documentation.
 
 ### Acceptance
 
 - The extension type loads in Hoardarr.
 - Unit and smoke tests pass.
-- The beta package is published if the user approves.
-- The stable promotion blocker, if any, is explicit.
+- The stable package is published after user approval.
+- Registry model and method documentation is visible.
 
 ## Phase 3: Hoardarr Bootstrap and Dependencies
 
@@ -631,7 +633,7 @@ Extend `@keeb/tmdb-lookup`; do not create a parallel TMDB client type.
 
 Required behavior:
 
-- Fetch US `now_playing` results.
+- Fetch US digital-release results from `/discover/movie?with_release_type=4`.
 - Write one movie resource per TMDB ID.
 - Record the ISO week and discovery timestamp.
 - Skip the external call when the current ISO week is already complete.
@@ -760,6 +762,7 @@ Methods:
 
 | Method | Purpose |
 | --- | --- |
+| `stage` | Move allowlisted files from the exact Torlink payload name into the TMDB-id staging directory |
 | `inspect` | Enumerate a completed payload beneath the configured staging root |
 | `manifest` | Produce a SHA-256 manifest for approved files |
 | `cleanup` | Remove only a previously inspected and verified local payload |
@@ -878,18 +881,18 @@ IP. Pin and verify the SSH host key.
 Create the workflow using `swamp workflow create movies --json` and preserve its
 assigned ID.
 
-Use a frequent reconciliation schedule rather than a fragile once-weekly exact
+Use a regular reconciliation schedule rather than a fragile once-weekly exact
 trigger:
 
 ```yaml
 trigger:
-  schedule: "*/15 * * * *"
+  schedule: "0 2,8,14,22 * * *"
 ```
 
 The movie discovery model performs the external TMDB call only once per ISO
 week. Every other run reconciles pending downloads, transfers, and cleanup.
-This makes restart recovery occur within 15 minutes despite scheduled Swamp
-runs not providing catch-up for a missed exact trigger.
+This gives four recovery opportunities per day despite scheduled Swamp runs not
+providing catch-up for a missed exact trigger.
 
 ### Workflow Jobs
 
@@ -996,7 +999,7 @@ not rely solely on old workflow status.
 - [x] Get the current workflow schema.
 - [x] Validate all required model method inputs.
 - [x] Validate all dependency references and failure conditions.
-- [ ] Evaluate with representative inputs.
+- [x] Evaluate with representative inputs.
 - [x] Verify no deprecated CEL paths.
 - [x] Verify no `command/shell` steps.
 - [x] Verify fan-out methods replace per-movie calls against the same model.
@@ -1005,11 +1008,8 @@ not rely solely on old workflow status.
 
 No-work run `20d030eb-2440-4a93-9e17-a50fd29a0624` succeeded with five
 inspection/planning steps, 33 guarded skips, no network-state change, and a
-non-degraded `hoardarr/movie-run-summary` report. Static `swamp workflow
-evaluate` remains blocked in Swamp `20260825.172854.0-sha.c1c7834b`: it eagerly
-converts wrapped input guards to booleans, then rejects them because the parsed
-workflow requires guard strings. Runtime execution requires and correctly
-handles the wrapped expressions.
+non-degraded `hoardarr/movie-run-summary` report. Static evaluation also passes
+with the current Swamp release.
 
 ### Acceptance
 
@@ -1049,7 +1049,7 @@ disconnected NordVPN, disabled the kill switch, and brought Tailscale up, but it
 method result was a false negative because the external public-IP service timed
 out. A fresh probe confirmed the safe baseline and the Mac check passed.
 Network-session `2026.08.28.6` now requires public-IP evidence only for download
-state, not local restore/transfer safety; all 43 network tests and the 149-test
+state, not local restore/transfer safety; all 44 network tests and the 149-test
 full suite pass. No additional transition cycle was run after that final
 correction; an idempotent live `.6` restore succeeded at the verified baseline.
 
@@ -1160,7 +1160,7 @@ VPN-owned default route, and Torlink inactive.
 - [x] Remove the test through an explicitly approved cleanup path.
 - [x] Record the user's waiver of a redundant Sintel transfer.
 
-### Stage 6: Failure Injection (Backlog)
+### Stage 6: Failure Injection
 
 Deferred by the user on 2026-08-29 until after the first live scheduled-equivalent
 end-to-end workflow run is verified.
@@ -1175,16 +1175,15 @@ and Torlink inactive and disabled.
 
 Failure injection began the same day. The complete network-session,
 systemd-user-lifecycle, media-files, movie-catalog, and Torlink extension suites
-passed (123 Hoardarr model tests plus 12 Torlink extension tests). These prove
-the existing all-source failure diagnostics, stuck-service stop refusal,
+passed (123 Hoardarr model tests plus 12 Torlink extension tests). These initially
+proved the existing all-source failure diagnostics, stuck-service stop refusal,
 no-network-mutation restore guard, cleanup authorization, cleanup-pending state,
-and persisted retry planning in isolation. They do not replace the unchecked
-workflow-level cases below. Failure recovery now transitions current-plan rows
+and persisted retry planning in isolation. Subsequent workflow-level cases
+exercised the same safeguards. Failure recovery now transitions current-plan rows
 still in `downloading` to `failed` with `download-interrupted` only after Torlink
 is stopped and the safe network baseline is restored. Existing planner behavior
 then includes those rows in `retryable` while preserving partial payload files.
-Stage 6 remains open until this workflow path and the remaining workflow/SSH
-injections are run.
+Subsequent workflow and SSH injections completed the stage.
 
 - [x] NordVPN connects to the wrong city: workflow fails before Torlink start.
 - [x] All Torlink sources fail: workflow restores network and reports failure.
@@ -1322,12 +1321,12 @@ Use conventional commits under 72 characters. Do not amend or force-push.
 
 ### Swamp Publication
 
-- Publish `@funsaized/torlink` beta after Gate F.
-- Update compatibility documentation to the Torlink PR commit or release.
-- Promote to stable only after the upstream release is available and Gate F is
-  approved again.
-- Verify with `swamp extension info @funsaized/torlink --json`.
-- Verify a clean Hoardarr checkout can pull and use the published extension.
+- [x] Publish `@funsaized/torlink` beta after Gate F.
+- [x] Update compatibility documentation to Torlink v1.8.0.
+- [x] Publish stable after the upstream release and renewed Gate F approval.
+- [x] Verify model and method metadata with
+      `swamp extension info @funsaized/torlink --json`.
+- [x] Verify Hoardarr can pull and use the published extension.
 
 ### Torlink Issue Comment
 
@@ -1349,7 +1348,7 @@ GitHub closes it if the maintainer merges the contribution.
 
 - Torlink PR is merged with passing checks.
 - `funsaized/swamp-torlink` contains tested extension source.
-- The beta extension is published if approved.
+- The stable extension is published after approval.
 - Hoardarr is documented and runs deterministically under Swamp.
 - The issue comment is posted after explicit approval.
 - All resulting URLs are returned to the user.
@@ -1358,12 +1357,12 @@ GitHub closes it if the maintainer merges the contribution.
 
 - [x] Torlink exposes tested JSON headless search through upstream commit
       `8b1df42`.
-- [ ] `@funsaized/torlink` provides health, batch search, batch add, sync, wait,
+- [x] `@funsaized/torlink` provides health, batch search, batch add, sync, wait,
       and batch control methods.
 - [ ] Hoardarr contains no application runtime outside Swamp models/workflows.
 - [ ] Omarchy user systemd runs `swamp serve`; it does not run a media script.
 - [ ] Swamp owns scheduling, overlap prevention, execution, data, and reports.
-- [ ] Weekly discovery is idempotent and reconciled every 15 minutes.
+- [ ] Weekly discovery is idempotent and reconciled four times per day.
 - [ ] Torlink cannot start before verified Amsterdam NordVPN state.
 - [ ] NordVPN cannot be disconnected while Torlink is running.
 - [ ] Tailscale is restored before Mac transfer.

@@ -725,7 +725,7 @@ jobs:
               type: succeeded
         weight: 0
         allowFailure: false
-      # ponytail: one payload per 15-minute run bounds transfer and cleanup
+      # ponytail: one payload per scheduled run bounds transfer and cleanup
       # concurrency while allowing the durable queue to drain between runs.
       - name: inspect-payload
         description: Reject unsafe or missing local payload entries before transfer.

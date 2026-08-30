@@ -40,7 +40,7 @@ Hoardarr combines upstream model types with local extensions:
 
 | Model | Responsibility |
 | --- | --- |
-| `movie-discovery` | Fetch up to five US digital releases once per ISO week. |
+| `movie-discovery` | Fetch up to ten US digital releases once per ISO week. |
 | `movie-catalog` | Preserve movie identity, selection results, and lifecycle state. |
 | `torlink` | Search, add, observe, wait for, and remove torrent metadata. |
 | `torlink-unit` | Start and stop the user-scoped Torlink service. |
@@ -197,8 +197,7 @@ They preserve structured failure context that terminal output alone may omit.
   Drive. Other providers need model or workflow changes.
 - Discovery is capped at ten movies per week and uses a fixed release policy.
 - One transfer per run favors predictable recovery over throughput.
-- `@funsaized/torlink` currently comes from a sibling source checkout rather
-  than the older registry beta.
+- `@funsaized/torlink` is pinned to a published stable registry version.
 - iCloud upload completion is not part of the cleanup decision.
 
 These limits are deliberate. Expand them when a real deployment needs more
