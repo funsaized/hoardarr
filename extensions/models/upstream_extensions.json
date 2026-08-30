@@ -235,5 +235,19 @@
     "checksum": "6a861338ba5a6d12c2a1b0ff0067dc32f304fb9ab4bebf5ed52cec0d81b8fc99",
     "filesChecksum": "b8f55c37580dec40576d080960b5b151bb877be44349cdf962af4f779ad68153",
     "serverUrl": "https://swamp-club.com"
+  },
+  "@funsaized/torlink": {
+    "version": "2026.08.30.1",
+    "pulledAt": "2026-08-30T17:29:35.535Z",
+    "files": [
+      ".swamp/bundles/c9956698/torlink.js",
+      ".swamp/pulled-extensions/@funsaized/torlink/files/LICENSE",
+      ".swamp/pulled-extensions/@funsaized/torlink/files/README.md",
+      ".swamp/pulled-extensions/@funsaized/torlink/manifest.yaml",
+      ".swamp/pulled-extensions/@funsaized/torlink/models/torlink.ts"
+    ],
+    "checksum": "5c6c23adb509fdf1ea775b230cd8804a7871ae767d71c0d9ea3ec06cb6b46545",
+    "filesChecksum": "75157c841bb3fa2f71aa65c1615d3f6dffa3961a2766e8428012596499e9d1e2",
+    "serverUrl": "https://swamp-club.com"
   }
 }
