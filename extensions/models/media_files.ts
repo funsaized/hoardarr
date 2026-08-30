@@ -7,6 +7,8 @@ const CONFIG = {
   stagingRoot: "/home/saiguy/Downloads/hoardarr/movies",
   catalogModelName: "movie-catalog",
   catalogModelType: "hoardarr/movie-catalog",
+  episodeCatalogModelName: "episode-catalog",
+  episodeCatalogModelType: "hoardarr/episode-catalog",
   sha256Binary: "/usr/bin/sha256sum",
 } as const;
 
@@ -189,6 +191,7 @@ export interface Context {
   globalArgs: {
     stagingRoot: string;
     catalogModelName: string;
+    episodeCatalogModelName?: string;
     sha256Binary: string;
   };
   readResource(name: string): Promise<Record<string, unknown> | null>;
@@ -227,6 +230,12 @@ export function validateTmdbId(raw: unknown): number {
   return raw;
 }
 
+type MediaKind = "movie" | "episode";
+
+function payloadKey(tmdbId: number, mediaKind: MediaKind = "movie"): string {
+  return mediaKind === "episode" ? `e-${tmdbId}` : String(tmdbId);
+}
+
 export function extensionOf(name: string): string | null {
   const base = name.slice(name.lastIndexOf("/") + 1);
   const dot = base.lastIndexOf(".");
@@ -252,8 +261,8 @@ export function safeBaseName(name: string): boolean {
   return true;
 }
 
-export function computeStagingDir(stagingRoot: string, tmdbId: number): string {
-  return `${stagingRoot.replace(/\/+$/, "")}/${tmdbId}`;
+export function computeStagingDir(stagingRoot: string, id: number | string): string {
+  return `${stagingRoot.replace(/\/+$/, "")}/${id}`;
 }
 
 export function isContained(childCanonical: string, parentCanonical: string): boolean {
@@ -834,28 +843,34 @@ function makeCleanupRecord(
 async function readCatalogSubset(
   context: Context,
   tmdbId: number,
+  mediaKind: MediaKind = "movie",
 ): Promise<{ status: string; remotePath: string | null; sha256: string | null } | null> {
-  const found = await context.definitionRepository.findByNameGlobal(
-    context.globalArgs.catalogModelName,
-  );
+  const catalogModelName =
+    mediaKind === "episode"
+      ? (context.globalArgs.episodeCatalogModelName ?? CONFIG.episodeCatalogModelName)
+      : context.globalArgs.catalogModelName;
+  const expectedType =
+    mediaKind === "episode" ? CONFIG.episodeCatalogModelType : CONFIG.catalogModelType;
+  const found = await context.definitionRepository.findByNameGlobal(catalogModelName);
   if (!found) {
     return null;
   }
   const catalogType = String(found.type);
-  if (catalogType !== CONFIG.catalogModelType) {
+  if (catalogType !== expectedType) {
     throw new Error(
-      `catalog lookup found wrong type: expected ${CONFIG.catalogModelType}, got ${catalogType}`,
+      `catalog lookup found wrong type: expected ${expectedType}, got ${catalogType}`,
     );
   }
   const records = await context.dataRepository.findAllForModel(
     catalogType,
     String(found.definition.id),
   );
-  const target = `catalog-movie-${tmdbId}`;
+  const target = mediaKind === "episode" ? `catalog-episode-${tmdbId}` : `catalog-movie-${tmdbId}`;
+  const expectedSpec = mediaKind === "episode" ? "episode" : "movie";
   let matched = false;
   for (const record of records) {
     if (record.name !== target) continue;
-    if (record.tags.specName !== "movie") continue;
+    if (record.tags.specName !== expectedSpec) continue;
     matched = true;
     break;
   }
@@ -880,28 +895,37 @@ async function readCatalogSubset(
   }
 }
 
-async function readOwnInspection(context: Context, tmdbId: number): Promise<Inspection | null> {
-  const raw = await context.readResource(`inspection-${tmdbId}`);
+async function readOwnInspection(
+  context: Context,
+  tmdbId: number,
+  mediaKind: MediaKind = "movie",
+): Promise<Inspection | null> {
+  const raw = await context.readResource(`inspection-${payloadKey(tmdbId, mediaKind)}`);
   if (!raw) return null;
   return InspectionSchema.parse(raw);
 }
 
-async function readOwnManifest(context: Context, tmdbId: number): Promise<Manifest | null> {
-  const raw = await context.readResource(`manifest-${tmdbId}`);
+async function readOwnManifest(
+  context: Context,
+  tmdbId: number,
+  mediaKind: MediaKind = "movie",
+): Promise<Manifest | null> {
+  const raw = await context.readResource(`manifest-${payloadKey(tmdbId, mediaKind)}`);
   if (!raw) return null;
   return ManifestSchema.parse(raw);
 }
 
 async function executeInspect(
-  args: { tmdbId: number },
+  args: { tmdbId: number; mediaKind?: MediaKind },
   context: Context,
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
   const tmdbId = validateTmdbId(args.tmdbId);
+  const key = payloadKey(tmdbId, args.mediaKind);
   context.logger.info("Hoardarr media-files inspect: tmdbId={tmdbId}", {
     tmdbId,
   });
   const canonicalStagingRoot = await canonicalizeRoot(context.globalArgs.stagingRoot);
-  const stagingDir = computeStagingDir(context.globalArgs.stagingRoot, tmdbId);
+  const stagingDir = computeStagingDir(context.globalArgs.stagingRoot, key);
 
   let canonicalStagingDir: string;
   let approved: EnumerateResult["approved"] = [];
@@ -942,7 +966,7 @@ async function executeInspect(
     ok,
     reason,
   };
-  const handle = await context.writeResource("inspection", `inspection-${tmdbId}`, record);
+  const handle = await context.writeResource("inspection", `inspection-${key}`, record);
   if (!ok) {
     throw new Error(`inspection not ok for tmdbId=${tmdbId}: ${reason}`);
   }
@@ -950,16 +974,17 @@ async function executeInspect(
 }
 
 async function executeStage(
-  args: { tmdbId: number; sourceName: string },
+  args: { tmdbId: number; sourceName: string; mediaKind?: MediaKind },
   context: Context,
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
   const tmdbId = validateTmdbId(args.tmdbId);
+  const key = payloadKey(tmdbId, args.mediaKind);
   if (!safeBaseName(args.sourceName)) {
     throw new Error(`unsafe torrent source name: ${JSON.stringify(args.sourceName)}`);
   }
   const root = context.globalArgs.stagingRoot.replace(/\/+$/, "");
   const source = `${root}/${args.sourceName}`;
-  const stagingDir = computeStagingDir(root, tmdbId);
+  const stagingDir = computeStagingDir(root, key);
   const movedFiles: string[] = [];
 
   let sourceInfo: Deno.FileInfo;
@@ -1017,7 +1042,7 @@ async function executeStage(
     }
   }
 
-  const handle = await context.writeResource("stage", `stage-${tmdbId}`, {
+  const handle = await context.writeResource("stage", `stage-${key}`, {
     tmdbId,
     stagedAt: new Date().toISOString(),
     sourceName: args.sourceName,
@@ -1028,18 +1053,19 @@ async function executeStage(
 }
 
 async function executeManifest(
-  args: { tmdbId: number },
+  args: { tmdbId: number; mediaKind?: MediaKind },
   context: Context,
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
   const tmdbId = validateTmdbId(args.tmdbId);
+  const key = payloadKey(tmdbId, args.mediaKind);
   context.logger.info("Hoardarr media-files manifest: tmdbId={tmdbId}", {
     tmdbId,
   });
   const canonicalStagingRoot = await canonicalizeRoot(context.globalArgs.stagingRoot);
-  const stagingDir = computeStagingDir(context.globalArgs.stagingRoot, tmdbId);
+  const stagingDir = computeStagingDir(context.globalArgs.stagingRoot, key);
   const canonicalStagingDir = await canonicalizeDir(stagingDir);
 
-  const priorInspection = await readOwnInspection(context, tmdbId);
+  const priorInspection = await readOwnInspection(context, tmdbId, args.mediaKind);
   if (!priorInspection) {
     throw new Error(`no prior inspection for tmdbId=${tmdbId}; run inspect first`);
   }
@@ -1105,7 +1131,7 @@ async function executeManifest(
     totalBytes: entries.reduce((sum, e) => sum + e.bytes, 0),
     aggregateSha256: aggregate,
   };
-  const handle = await context.writeResource("manifest", `manifest-${tmdbId}`, record);
+  const handle = await context.writeResource("manifest", `manifest-${key}`, record);
   return { dataHandles: [handle] };
 }
 
@@ -1124,28 +1150,29 @@ async function defaultRemoveEmptyDir(path: string): Promise<boolean> {
 }
 
 async function executeCleanup(
-  args: { tmdbId: number },
+  args: { tmdbId: number; mediaKind?: MediaKind },
   context: Context,
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
   const tmdbId = validateTmdbId(args.tmdbId);
+  const key = payloadKey(tmdbId, args.mediaKind);
   context.logger.info("Hoardarr media-files cleanup: tmdbId={tmdbId}", {
     tmdbId,
   });
   const canonicalStagingRoot = await canonicalizeRoot(context.globalArgs.stagingRoot);
-  const stagingDir = computeStagingDir(context.globalArgs.stagingRoot, tmdbId);
+  const stagingDir = computeStagingDir(context.globalArgs.stagingRoot, key);
 
   let canonicalStagingDir: string;
   try {
     canonicalStagingDir = await canonicalizeDir(stagingDir);
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
-      const absent = await persistAbsent(context, tmdbId, stagingDir, null);
+      const absent = await persistAbsent(context, tmdbId, stagingDir, null, key);
       return { dataHandles: [absent] };
     }
     throw error;
   }
 
-  const priorManifest = await readOwnManifest(context, tmdbId);
+  const priorManifest = await readOwnManifest(context, tmdbId, args.mediaKind);
   if (!priorManifest) {
     throw new Error(`no prior manifest for tmdbId=${tmdbId}; run manifest first`);
   }
@@ -1156,7 +1183,7 @@ async function executeCleanup(
     sha256: string | null;
   } | null;
   try {
-    catalog = await readCatalogSubset(context, tmdbId);
+    catalog = await readCatalogSubset(context, tmdbId, args.mediaKind);
   } catch (error) {
     context.logger.warning("Hoardarr media-files cleanup could not read catalog subset", {
       tmdbId,
@@ -1214,12 +1241,12 @@ async function executeCleanup(
       errors: outcome.errors,
     };
     const validRecord = CleanupSchema.parse(record);
-    const handle = await context.writeResource("cleanup", `cleanup-${tmdbId}`, validRecord);
+    const handle = await context.writeResource("cleanup", `cleanup-${key}`, validRecord);
     return { dataHandles: [handle] };
   } catch (error) {
     if (captures.value !== null) {
       try {
-        await context.writeResource("cleanup", `cleanup-${tmdbId}`, captures.value);
+        await context.writeResource("cleanup", `cleanup-${key}`, captures.value);
       } catch (writeError) {
         context.logger.warning(
           "Hoardarr media-files cleanup could not persist denied/failed record",
@@ -1239,6 +1266,7 @@ async function persistAbsent(
   tmdbId: number,
   stagingDir: string,
   catalog: { status: string; remotePath: string | null; sha256: string | null } | null,
+  key = String(tmdbId),
 ): Promise<{ name: string }> {
   const record: Cleanup = {
     tmdbId,
@@ -1258,7 +1286,7 @@ async function persistAbsent(
     errors: [],
   };
   const validRecord = CleanupSchema.parse(record);
-  return await context.writeResource("cleanup", `cleanup-${tmdbId}`, validRecord);
+  return await context.writeResource("cleanup", `cleanup-${key}`, validRecord);
 }
 
 /** Hoardarr local media filesystem model. */
@@ -1268,6 +1296,9 @@ export const model = {
   globalArguments: z.object({
     stagingRoot: z.literal(CONFIG.stagingRoot).default(CONFIG.stagingRoot),
     catalogModelName: z.literal(CONFIG.catalogModelName).default(CONFIG.catalogModelName),
+    episodeCatalogModelName: z
+      .literal(CONFIG.episodeCatalogModelName)
+      .default(CONFIG.episodeCatalogModelName),
     sha256Binary: z.literal(CONFIG.sha256Binary).default(CONFIG.sha256Binary),
   }),
   resources: {
@@ -1306,25 +1337,35 @@ export const model = {
       arguments: z.object({
         tmdbId: z.number().int().positive(),
         sourceName: z.string().min(1).max(500),
+        mediaKind: z.enum(["movie", "episode"]).default("movie"),
       }),
       execute: executeStage,
     },
     inspect: {
       description:
         "Read-only enumeration of the staging tree under <stagingRoot>/<tmdbId>; persists evidence then fails when denied entries are found or payload is missing.",
-      arguments: z.object({ tmdbId: z.number().int().positive() }),
+      arguments: z.object({
+        tmdbId: z.number().int().positive(),
+        mediaKind: z.enum(["movie", "episode"]).default("movie"),
+      }),
       execute: executeInspect,
     },
     manifest: {
       description:
         "Read-only SHA-256 manifest for files approved by a prior successful inspection with no denied entries.",
-      arguments: z.object({ tmdbId: z.number().int().positive() }),
+      arguments: z.object({
+        tmdbId: z.number().int().positive(),
+        mediaKind: z.enum(["movie", "episode"]).default("movie"),
+      }),
       execute: executeManifest,
     },
     cleanup: {
       description:
         "Delete only the previously inspected and verified local payload after transferred or cleanup-pending catalog authorization and exact re-hash; returns absent when the staging tree is already gone.",
-      arguments: z.object({ tmdbId: z.number().int().positive() }),
+      arguments: z.object({
+        tmdbId: z.number().int().positive(),
+        mediaKind: z.enum(["movie", "episode"]).default("movie"),
+      }),
       execute: executeCleanup,
     },
   },
@@ -1333,6 +1374,7 @@ export const model = {
 /** Pure helpers, schemas, and dependency-injected execute exposed to tests. */
 export const testing = {
   validateTmdbId,
+  payloadKey,
   isAllowedExtension,
   isBannedExtension,
   safeBaseName,
@@ -1346,6 +1388,7 @@ export const testing = {
   aggregateSha256,
   authorizeCatalog,
   performCleanup,
+  readCatalogSubset,
   schemas: {
     inspection: InspectionSchema,
     manifest: ManifestSchema,

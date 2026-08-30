@@ -1376,13 +1376,176 @@ GitHub closes it if the maintainer merges the contribution.
 
 ## Blocker Protocol
 
-When blocked:
-
 1. Stop before taking a risky workaround.
 2. Capture the exact command, exit status, relevant report, and minimal logs.
 3. State which acceptance criterion cannot pass.
 4. Explain what was tried, especially if two attempts failed.
 5. Offer the smallest concrete choices to the user.
-6. Keep completed work intact and do not revert unrelated changes.
-7. Resume from the failed phase only after the user resolves or approves the
-   blocker.
+ 6. Keep completed work intact and do not revert unrelated changes.
+ 7. Resume from the failed phase only after the user resolves or approves the
+    blocker.
+
+## Phase 10: TV Refactor into Unified Media System (2026-08-30)
+
+### Goal
+
+Refactor Hoardarr from a movies-only pipeline into a unified movies + TV
+system without disrupting the commissioned movies path. Introduce an
+`episode-catalog` model, a shared `media` workflow that batches both catalogs
+through one NordVPN/Torlink window, and a TV master list materialised from
+`models/hoardarr/episode-catalog/episode-catalog.yaml`. The unified path is
+manual-only until Gate E approves a schedule cutover.
+
+### Scope and boundaries
+
+- The `movies` workflow and its `dryRun: false` trigger remain the production
+  path. Its history, schedule, validation, and operational commands are
+  unchanged.
+- The new `media` workflow intentionally has **no** `trigger` block. It runs
+  only as a manual `swamp workflow run media --input dryRun=true` until Gate E.
+- `episode-catalog` keys records by TMDB episode id; movie-catalog keys
+  records by TMDB movie id. Catalog identity is the dedup authority.
+  Filesystem paths and LLM output are not dedup authority.
+- Catalog terminal statuses (`transferred`, `cleanup-pending`, `ignored`) are
+  preserved on ingest. New discoveries for a terminal id are dropped without
+  resetting state.
+- The `media` workflow searches, selects, adds, waits, reconciles, removes
+  Torlink metadata, and stops Torlink across both catalogs in one shared VPN
+  window. Movie transfer (and any movie cleanup) runs before a single episode
+  transfer per run.
+
+### TV master list (configured, not discovered)
+
+The master show list lives in
+`models/hoardarr/episode-catalog/episode-catalog.yaml` and is the only source
+of truth for which shows `airedEpisodes` polls. It is applied to a typed
+`show-list-current` resource by the `episode-catalog.configured` method so the
+workflow can pass it through CEL without re-reading the YAML.
+
+Initial configured shows (2026-08-30):
+
+```text
+Lanterns   tmdbId 95350  category tv
+The Pitt   tmdbId 250307 category tv
+```
+
+`movie-discovery.airedEpisodes` consumes that list and:
+
+- Walks each show's seasons; skips season 0 (specials).
+- Considers each episode whose `air_date` exists and is on or before today;
+  future-dated episodes are skipped.
+- Dedupes eligible episodes by TMDB episode id.
+- Sorts newest air date first, then newest season, then newest episode, then
+  smallest TMDB episode id.
+- Caps the result at ten per poll (default and current `media` input).
+- Applies the workflow-supplied `excludeIds` so ids already present in the
+  catalog are filtered out before the cap.
+
+### Implementation checklist
+
+Catalog and model surface:
+
+- [x] New `episode-catalog` model defined at
+      `extensions/models/episode_catalog.ts` with `configured`, `ingest`,
+      `select`, `transition`, `reconcile`, and `plan` methods.
+- [x] Episode schema keys records by `tmdbEpisodeId` and exposes the full
+      lifecycle (`wanted`, `selected`, `downloading`, `seeding`,
+      `seed-stopped`, `transfer-ready`, `transferred`, `cleanup-pending`,
+      `failed`, `ignored`).
+- [x] TV master list stored in
+      `models/hoardarr/episode-catalog/episode-catalog.yaml` with Lanterns
+      (95350) and The Pitt (250307).
+- [x] `movie-discovery.airedEpisodes` polls TMDB for newest aired missing
+      episodes, skips specials and future air dates, sorts newest-first, and
+      caps at ten.
+- [x] Ingest preserves terminal-status records; new discoveries for a terminal
+      id are dropped silently.
+- [x] Select applies the deterministic episode policy (token match,
+      1080p WEB-DL/WEBRip, no CAM/TS/TC/executables/archives, no season or
+      multi-episode packs, ≤ 8 GiB, ≥ 5 seeders, most-seeded wins, stable
+      name/infoHash tie-break).
+- [x] Transition enforces `ALLOWED_TRANSITIONS`, batch dedupes
+      `tmdbEpisodeId`, validates required fields per target, and treats
+      cleanup-pending → transferred as clearing any stale error.
+- [x] Reconcile advances downloading → seeding → seed-stopped from a single
+      Torlink snapshot, marks active torrents `failed` when absent, and never
+      regresses `seed-stopped`, `transfer-ready`, or terminal entries.
+- [x] Plan publishes wanted, retryable, downloading, seeding, seedStopped,
+      transferReady, and cleanupPending arrays keyed by TMDB episode id.
+
+Unified workflow:
+
+- [x] `media` workflow created at `workflows/workflow-media.yaml` with id
+      `507d22e7-9f78-4a93-bb10-d86ab2dba960` and `concurrency: 1`.
+- [x] `media` workflow has no `trigger` block. Manual `--input dryRun=true`
+      only, until Gate E.
+- [x] Inspect/plan job covers both movies and TV through a single Torlink
+      snapshot and one `plan` per catalog.
+- [x] Download job enters the VPN window once, then batch-searches both
+      catalogs with `m-<tmdbId>` and `e-<tmdbEpisodeId>` keys, batch-adds
+      selected info hashes, waits for both catalogs to reach seeding, waits
+      for both to reach seed-stopped, and batch-removes Torlink metadata with
+      `confirmDeleteFiles: false`.
+- [x] `movie-transfer` and `episode-transfer` jobs each transfer exactly one
+      payload per run; `movie-transfer` runs strictly before `episode-transfer`
+      and any movie cleanup is finalized before the first episode opens the
+      Mac connection.
+- [x] Episode transfer stages under `<staging>/e-<tmdbEpisodeId>`, prepares
+      `Media/TV/.hoardarr-staging/e-<tmdbEpisodeId>` on the Mac, and promotes
+      to `Media/TV/e-<tmdbEpisodeId>` only after a checksum-verified rename.
+- [x] Recovery jobs cover download, movie-transfer, and episode-transfer
+      failure paths; recovery closes SSH and reasserts Torlink stop before
+      network restore.
+- [x] `hoardarr/media-run-summary` report analyzes `media` workflow outputs
+      across both catalogs.
+
+Local identity and destinations:
+
+- [x] Local episode identity is the literal `e-<tmdbEpisodeId>` directory
+      name; this matches the `catalog-episode-<tmdbEpisodeId>` resource
+      instance and the staging path.
+- [x] Episode Mac destination is `Mobile Documents/com~apple~CloudDocs/Media/TV`,
+      with per-id `.hoardarr-staging/e-<id>` staging and final `e-<id>`.
+- [x] Movie destination remains `Media/Movies/<tmdbId>`; the Mac staging root
+      is per-id `.hoardarr-staging/<tmdbId>`.
+
+Tests and checks:
+
+- [x] `extensions/models/episode_catalog_test.ts` covers state machine,
+      transition validity, batch dedup, ingest terminal preservation,
+      selection policy, reconcile snapshot advancement, and plan buckets.
+- [x] `extensions/models/aired_episode_discovery_test.ts` covers
+      specials/future skip, excludeIds dedup, sort ordering, and cap.
+- [x] `extensions/workflow_media_test.ts` validates the unified workflow DAG,
+      guard conditions, key prefixes, and `concurrency: 1`.
+- [x] `extensions/reports/media_run_summary.ts` renders from fixture data for
+      both catalogs.
+- [x] `swamp workflow validate media --json` passes.
+- [x] `swamp workflow validate movies --json` still passes (production path
+      untouched).
+- [x] Read-only inspection commands pass against an empty catalogs and the
+      configured master list: `episode-catalog.configured`,
+      `episode-catalog.plan`, `movie-discovery.airedEpisodes`,
+      `media workflow run --input dryRun=true`.
+
+### Commissioning and cutover (unchecked, gated)
+
+- [ ] Gate C re-approval for any new live network transition or restore path
+      beyond what Phase 7 already commissioned.
+- [ ] Gate D re-approval for any live TV torrent or TV Mac transfer. No live
+      TV download, transfer, or cleanup has been run; the existing movies
+      commissioning record is the only verified end-to-end evidence.
+- [ ] Gate E cutover: enable a `media` workflow schedule, switch the active
+      systemd unit's scheduled workflow from `movies` to `media`, and
+      decommission the standalone `movies` trigger.
+- [ ] Verify the `media-run-summary` report from a real scheduled run covers
+      both catalogs end-to-end.
+- [ ] Confirm a full ISO-week cycle (one weekly movie discovery plus one
+      aired-episode poll) is idempotent under `media`.
+
+### Historical record preservation
+
+Phase 1 through Phase 9 are unchanged. The Phase 7 commissioning record
+describes movies-only end-to-end evidence (Stages 1 through 6). It does **not**
+describe a live TV download, transfer, or cleanup test, and this phase does
+not claim one.

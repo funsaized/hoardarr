@@ -1,9 +1,16 @@
 # Hoardarr
 
-Hoardarr is a self-hosted movie automation workflow built on
-[Swamp](https://github.com/swamp-club/swamp). It discovers digital releases,
-selects torrents with deterministic rules, downloads through NordVPN, and
-transfers verified media to a Mac running iCloud Drive.
+Hoardarr is a self-hosted movie and TV automation workflow built on
+[Swamp](https://github.com/swamp-club/swamp). It discovers digital releases
+and newly aired episodes, selects torrents with deterministic rules, downloads
+through NordVPN inside one shared VPN/Torlink window, and transfers verified
+media to a Mac running iCloud Drive.
+
+The unified `media` workflow batches movies and TV inside a single NordVPN
+download window, transfers movies and their local cleanup before one episode,
+and uses an `e-<tmdbEpisodeId>` local identity and `Media/TV` Mac destination
+for episodes. The `media` workflow has no trigger; the existing `movies`
+workflow remains the production path until the Gate E cutover.
 
 This guide takes you from a clone to a safe dry run. Live downloads, network
 changes, file transfers, cleanup, and scheduling are separate opt-in steps.
@@ -35,10 +42,11 @@ If your host differs, adapt the deployment before running the bootstrap:
 
 | Setting | Files to update |
 | --- | --- |
-| Linux user, home, binaries, and repository paths | `extensions/models/host_bootstrap.ts`, `extensions/models/media_files.ts`, `assets/systemd/*.service`, `models/@funsaized/torlink/torlink.yaml`, `models/@swamp/ssh/mac.yaml`, `models/@whyvez/disk-usage/staging-disk.yaml`, `vaults/local_encryption/*.yaml`, `workflows/workflow-movies.yaml` |
-| Mac user, host, SSH key, and iCloud path | `models/@swamp/ssh/mac.yaml`, `extensions/models/network_session.ts`, `workflows/workflow-hoardarr-bootstrap.yaml`, `workflows/workflow-movies.yaml` |
+| Linux user, home, binaries, and repository paths | `extensions/models/host_bootstrap.ts`, `extensions/models/media_files.ts`, `assets/systemd/*.service`, `models/@funsaized/torlink/torlink.yaml`, `models/@swamp/ssh/mac.yaml`, `models/@whyvez/disk-usage/staging-disk.yaml`, `vaults/local_encryption/*.yaml`, `workflows/workflow-movies.yaml`, `workflows/workflow-media.yaml` |
+| Mac user, host, SSH key, and iCloud path | `models/@swamp/ssh/mac.yaml`, `extensions/models/network_session.ts`, `workflows/workflow-hoardarr-bootstrap.yaml`, `workflows/workflow-movies.yaml`, `workflows/workflow-media.yaml` |
 | NordVPN country and city | `extensions/models/network_session.ts` |
-| Reconciliation schedule | `workflows/workflow-movies.yaml` |
+| Reconciliation schedule | `workflows/workflow-movies.yaml` (production); `workflows/workflow-media.yaml` is untriggered until Gate E |
+| TV master list (TMDB show ids) | `models/hoardarr/episode-catalog/episode-catalog.yaml` |
 
 Preserve existing model and workflow IDs. Run the tests and workflow validation
 after changing any deployment value.
@@ -153,11 +161,12 @@ workflow, command argument, issue, or commit.
 
 ## 6. Validate and bootstrap
 
-Validate both workflows before execution:
+Validate every workflow before execution:
 
 ```bash
 swamp workflow validate hoardarr-bootstrap --json
 swamp workflow validate movies --json
+swamp workflow validate media --json
 ```
 
 Run the bootstrap workflow:
@@ -184,6 +193,8 @@ swamp report get @swamp/workflow-summary --workflow hoardarr-bootstrap --json
 A dry run inspects the host and plans existing catalog work. It does not perform
 discovery, network transitions, downloads, transfers, or cleanup.
 
+Movies (production path with schedule):
+
 ```bash
 swamp workflow validate movies --json
 swamp workflow run movies --input dryRun=true
@@ -191,7 +202,26 @@ swamp report get hoardarr/movie-run-summary --workflow movies --markdown
 swamp data get movie-catalog plan-current --json
 ```
 
-Do not continue until the run succeeds and the report matches your expected
+Unified movies + TV (no trigger; dry-run only until Gate E cutover):
+
+```bash
+swamp workflow validate media --json
+swamp workflow run media --input dryRun=true
+swamp report get hoardarr/media-run-summary --workflow media --markdown
+swamp data get movie-catalog plan-current --json
+swamp data get episode-catalog plan-current --json
+swamp data get episode-catalog show-list-current --json
+```
+
+Inspect the episode-catalog master list and the latest aired-episode discovery:
+
+```bash
+swamp model get episode-catalog --json
+swamp model method run episode-catalog plan
+swamp data get movie-discovery aired-episode-run-current --json
+```
+
+Do not continue until the runs succeed and the reports match your expected
 catalog state.
 
 ## 8. Commission live network changes
@@ -242,7 +272,9 @@ swamp report get @swamp/method-summary --model network-session --json
 
 Review `workflows/workflow-movies.yaml` before the first live run. It can change
 network state, download torrents, write to the Mac, and delete a verified local
-payload after transfer.
+payload after transfer. The unified `media` workflow is currently dry-run only
+and intentionally has no schedule; do not run it with `dryRun=false` until Gate
+E authorises the cutover.
 
 ```bash
 swamp run history --active --json
@@ -259,7 +291,7 @@ not through Tailscale alone.
 
 The checked-in schedule runs at `02:00`, `08:00`, `14:00`, and `22:00` according
 to the Swamp server's cron interpretation. Change and revalidate the workflow if
-you want another schedule.
+you want another schedule. The `media` workflow stays untriggered until Gate E.
 
 Enable scheduling only after a live run and recovery have succeeded. Starting
 the Swamp service activates the checked-in `dryRun: false` trigger, so scheduled
@@ -284,14 +316,20 @@ Inspect active and recent runs:
 swamp run history --active --json
 swamp workflow history search --workflow movies --json
 swamp workflow history logs movies --json
+swamp workflow history search --workflow media --json
+swamp workflow history logs media --json
 ```
 
 Inspect reports and current state:
 
 ```bash
 swamp report get hoardarr/movie-run-summary --workflow movies --markdown
+swamp report get hoardarr/media-run-summary --workflow media --markdown
 swamp report get @swamp/workflow-summary --workflow movies --json
+swamp report get @swamp/workflow-summary --workflow media --json
 swamp data get movie-catalog plan-current --json
+swamp data get episode-catalog plan-current --json
+swamp data get episode-catalog show-list-current --json
 swamp data get torlink snapshot-current --json
 swamp model method run network-session inspect
 ```
@@ -345,6 +383,7 @@ DENO="$(swamp doctor extensions --json | jq -r .denoPath)"
 "$DENO" test --allow-all extensions
 swamp workflow validate hoardarr-bootstrap --json
 swamp workflow validate movies --json
+swamp workflow validate media --json
 ```
 
 Contributions are welcome. Open an issue before changing network or deletion

@@ -9,7 +9,10 @@ const TMDB_DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGES = 10;
 const SPEC_MOVIE = "digitalReleaseMovie";
 const SPEC_RUN = "digitalReleaseRun";
+const SPEC_EPISODE = "airedEpisode";
+const SPEC_EPISODE_RUN = "airedEpisodeRun";
 const MOVIE_INSTANCE_PREFIX = "digital-release-movie-";
+const EPISODE_INSTANCE_PREFIX = "aired-episode-";
 
 const NowPlayingArgsSchema = z.object({
   region: z
@@ -83,6 +86,64 @@ const NowPlayingResponseSchema = z.object({
   ),
 });
 
+const ShowConfigSchema = z.object({
+  tmdbId: z.number().int().positive(),
+  category: z.enum(["tv", "anime"]).default("tv"),
+});
+
+const AiredEpisodesArgsSchema = z.object({
+  shows: z.array(ShowConfigSchema).min(1).max(100),
+  excludeIds: z.array(z.number().int().positive()).max(20_000).default([]),
+  limit: z.number().int().min(1).max(50).default(10),
+});
+
+const AiredEpisodeSchema = z.object({
+  tmdbEpisodeId: z.number().int().positive(),
+  showTmdbId: z.number().int().positive(),
+  showName: z.string().min(1).max(500),
+  seasonNumber: z.number().int().positive(),
+  episodeNumber: z.number().int().positive(),
+  episodeTitle: z.string().min(1).max(500).nullable(),
+  airDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  discoveredAt: z.iso.datetime(),
+  category: z.enum(["tv", "anime"]),
+});
+
+const AiredEpisodeRunSchema = z.object({
+  polledAt: z.iso.datetime(),
+  showCount: z.number().int().nonnegative(),
+  eligibleCount: z.number().int().nonnegative(),
+  episodeCount: z.number().int().nonnegative(),
+  excludedCount: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+});
+
+const ShowDetailsResponseSchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string().min(1),
+  seasons: z
+    .array(
+      z.object({
+        season_number: z.number().int().nonnegative(),
+      }),
+    )
+    .default([]),
+});
+
+const SeasonResponseSchema = z.object({
+  episodes: z
+    .array(
+      z.object({
+        id: z.number().int().positive(),
+        name: z.string().nullable().optional(),
+        air_date: z.string().nullable().optional(),
+        episode_number: z.number().int().positive(),
+        season_number: z.number().int().positive(),
+      }),
+    )
+    .default([]),
+});
+
 type NowPlayingArgs = z.infer<typeof NowPlayingArgsSchema>;
 type ExecuteNowPlayingArgs = Omit<NowPlayingArgs, "excludeIds"> & {
   excludeIds?: number[];
@@ -90,6 +151,8 @@ type ExecuteNowPlayingArgs = Omit<NowPlayingArgs, "excludeIds"> & {
 type DiscoveredMovie = z.infer<typeof DiscoveredMovieSchema>;
 type NowPlayingResponse = z.infer<typeof NowPlayingResponseSchema>;
 type NowPlayingResult = NowPlayingResponse["results"][number];
+type AiredEpisodesArgs = z.infer<typeof AiredEpisodesArgsSchema>;
+type AiredEpisode = z.infer<typeof AiredEpisodeSchema>;
 
 type Context = {
   signal: AbortSignal;
@@ -108,20 +171,17 @@ type Context = {
 
 type FetchDeps = {
   fetchImpl: typeof fetch;
+  now?: () => Date;
 };
 
 function isoWeek(date: Date): string {
   // ponytail: ISO 8601 week - copy-once, deterministic. UTC anchor avoids
   // TZ drift across workflow runs.
-  const utc = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
-  );
+  const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const day = utc.getUTCDay() || 7;
   utc.setUTCDate(utc.getUTCDate() + 4 - day);
   const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(
-    ((utc.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7,
-  );
+  const week = Math.ceil(((utc.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
   return `${utc.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
@@ -131,6 +191,10 @@ function runMarkerName(week: string, region: string, language: string): string {
 
 function movieInstanceName(tmdbId: number): string {
   return `${MOVIE_INSTANCE_PREFIX}${tmdbId}`;
+}
+
+function episodeInstanceName(tmdbEpisodeId: number): string {
+  return `${EPISODE_INSTANCE_PREFIX}${tmdbEpisodeId}`;
 }
 
 function yearFromRelease(releaseDate: string | null): number | null {
@@ -177,11 +241,7 @@ async function readBounded(
 async function readErrorBody(response: Response): Promise<string> {
   if (!response.body) return "";
   try {
-    return await readBounded(
-      response.body,
-      MAX_ERROR_BODY_BYTES,
-      "TMDB error body",
-    );
+    return await readBounded(response.body, MAX_ERROR_BODY_BYTES, "TMDB error body");
   } catch {
     return "";
   }
@@ -201,10 +261,7 @@ async function tmdbNowPlaying(
   url.searchParams.set("region", region);
   url.searchParams.set("language", language);
   url.searchParams.set("with_release_type", "4");
-  url.searchParams.set(
-    "release_date.lte",
-    new Date().toISOString().slice(0, 10),
-  );
+  url.searchParams.set("release_date.lte", new Date().toISOString().slice(0, 10));
   url.searchParams.set("sort_by", "popularity.desc");
   url.searchParams.set("page", String(page));
   const controller = new AbortController();
@@ -220,8 +277,7 @@ async function tmdbNowPlaying(
     });
     if (!response.ok) {
       const body = await readErrorBody(response);
-      const retryAfter = response.headers.get("retry-after") ??
-        response.headers.get("Retry-After");
+      const retryAfter = response.headers.get("retry-after") ?? response.headers.get("Retry-After");
       const details: string[] = [];
       if (retryAfter) details.push(`Retry-After=${retryAfter}`);
       if (body) details.push(`body=${body.slice(0, 500)}`);
@@ -241,6 +297,133 @@ async function tmdbNowPlaying(
     clearTimeout(timer);
     signal.removeEventListener("abort", abort);
   }
+}
+
+async function tmdbGet<T>(
+  path: string,
+  apiKey: string,
+  schema: z.ZodType<T>,
+  signal: AbortSignal,
+  deps: FetchDeps = { fetchImpl: fetch },
+): Promise<T> {
+  if (signal.aborted) throw new Error("TMDB fetch cancelled before launch");
+  const url = new URL(`${TMDB_BASE}${path}`);
+  url.searchParams.set("api_key", apiKey);
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal.reason);
+  signal.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(
+    () => controller.abort(new Error("TMDB fetch timed out")),
+    FETCH_TIMEOUT_MS,
+  );
+  try {
+    const response = await deps.fetchImpl(url.toString(), {
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const body = await readErrorBody(response);
+      throw new Error(
+        `TMDB API error: HTTP ${response.status}${body ? ` body=${body.slice(0, 500)}` : ""}`,
+      );
+    }
+    if (!response.body) throw new Error("TMDB response had no body");
+    const text = await readBounded(response.body, MAX_RESPONSE_BYTES, "TMDB TV response");
+    return schema.parse(JSON.parse(text));
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+  }
+}
+
+async function executeAiredEpisodes(
+  args: AiredEpisodesArgs,
+  context: Context,
+  deps: FetchDeps = { fetchImpl: fetch },
+): Promise<{ dataHandles: Array<{ name: string }> }> {
+  const { apiKey } = context.globalArgs;
+  if (!apiKey) throw new Error("apiKey global argument is required");
+  const polledAt = (deps.now?.() ?? new Date()).toISOString();
+  const today = polledAt.slice(0, 10);
+  const excluded = new Set(args.excludeIds);
+  const seen = new Set<number>();
+  const eligible: AiredEpisode[] = [];
+  let excludedCount = 0;
+
+  for (const show of args.shows) {
+    const details = await tmdbGet(
+      `/tv/${show.tmdbId}`,
+      apiKey,
+      ShowDetailsResponseSchema,
+      context.signal,
+      deps,
+    );
+    for (const season of details.seasons) {
+      if (season.season_number === 0) continue;
+      const seasonData = await tmdbGet(
+        `/tv/${show.tmdbId}/season/${season.season_number}`,
+        apiKey,
+        SeasonResponseSchema,
+        context.signal,
+        deps,
+      );
+      for (const raw of seasonData.episodes) {
+        if (!raw.air_date || raw.air_date > today || seen.has(raw.id)) continue;
+        seen.add(raw.id);
+        if (excluded.has(raw.id)) {
+          excludedCount++;
+          continue;
+        }
+        eligible.push({
+          tmdbEpisodeId: raw.id,
+          showTmdbId: details.id,
+          showName: details.name,
+          seasonNumber: raw.season_number,
+          episodeNumber: raw.episode_number,
+          episodeTitle: raw.name?.trim() || null,
+          airDate: raw.air_date,
+          discoveredAt: polledAt,
+          category: show.category,
+        });
+      }
+    }
+  }
+
+  eligible.sort(
+    (a, b) =>
+      b.airDate.localeCompare(a.airDate) ||
+      b.seasonNumber - a.seasonNumber ||
+      b.episodeNumber - a.episodeNumber ||
+      a.tmdbEpisodeId - b.tmdbEpisodeId,
+  );
+  const selected = eligible.slice(0, args.limit);
+  const handles: Array<{ name: string }> = [];
+  for (const episode of selected) {
+    handles.push(
+      await context.writeResource(
+        SPEC_EPISODE,
+        episodeInstanceName(episode.tmdbEpisodeId),
+        episode,
+      ),
+    );
+  }
+  // Write the run marker last so partial TMDB failures never look complete.
+  handles.push(
+    await context.writeResource(SPEC_EPISODE_RUN, "aired-episode-run-current", {
+      polledAt,
+      showCount: args.shows.length,
+      eligibleCount: eligible.length,
+      episodeCount: selected.length,
+      excludedCount,
+      truncated: eligible.length > selected.length,
+    }),
+  );
+  context.logger.info("airedEpisodes completed", {
+    shows: args.shows.length,
+    eligible: eligible.length,
+    written: selected.length,
+    excluded: excludedCount,
+  });
+  return { dataHandles: handles };
 }
 
 function toDiscovered(
@@ -279,14 +462,11 @@ async function executeNowPlaying(
   context.logger.info("nowPlaying starting", { week, region, language, limit });
   const existing = await context.readResource(markerName);
   if (existing !== null) {
-    context.logger.info(
-      "nowPlaying already completed for the current ISO week",
-      {
-        week,
-        region,
-        language,
-      },
-    );
+    context.logger.info("nowPlaying already completed for the current ISO week", {
+      week,
+      region,
+      language,
+    });
     return { dataHandles: [] };
   }
   const discoveredAt = new Date().toISOString();
@@ -301,14 +481,7 @@ async function executeNowPlaying(
   let returnedResults = 0;
   let truncated = false;
   while (page <= MAX_PAGES && existingThisWeek.size + movies.length < limit) {
-    const response = await tmdbNowPlaying(
-      apiKey,
-      region,
-      language,
-      page,
-      context.signal,
-      deps,
-    );
+    const response = await tmdbNowPlaying(apiKey, region, language, page, context.signal, deps);
     totalPages = response.total_pages ?? null;
     totalResults = response.total_results ?? null;
     returnedResults += response.results.length;
@@ -337,9 +510,8 @@ async function executeNowPlaying(
         break;
       }
     }
-    const hasMorePages = totalPages !== null
-      ? page < totalPages
-      : response.results.length >= TMDB_DEFAULT_PAGE_SIZE;
+    const hasMorePages =
+      totalPages !== null ? page < totalPages : response.results.length >= TMDB_DEFAULT_PAGE_SIZE;
     if (existingThisWeek.size + movies.length === limit) {
       truncated = remainingOnPage || hasMorePages;
       break;
@@ -353,13 +525,7 @@ async function executeNowPlaying(
   }
   const handles: Array<{ name: string }> = [];
   for (const movie of movies) {
-    handles.push(
-      await context.writeResource(
-        SPEC_MOVIE,
-        movieInstanceName(movie.tmdbId),
-        movie,
-      ),
-    );
+    handles.push(await context.writeResource(SPEC_MOVIE, movieInstanceName(movie.tmdbId), movie));
   }
   // ponytail: write run marker last so partial failures retry next run.
   const marker = await context.writeResource(SPEC_RUN, markerName, {
@@ -405,6 +571,18 @@ export const extension = {
       lifetime: "infinite" as const,
       garbageCollection: 200,
     },
+    [SPEC_EPISODE]: {
+      description: "One aired episode missing from the caller's catalog, keyed by TMDB episode id.",
+      schema: AiredEpisodeSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 500,
+    },
+    [SPEC_EPISODE_RUN]: {
+      description: "Latest configured-show episode poll summary.",
+      schema: AiredEpisodeRunSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 50,
+    },
   },
   methods: [
     {
@@ -415,6 +593,14 @@ export const extension = {
         execute: executeNowPlaying,
       },
     },
+    {
+      airedEpisodes: {
+        description:
+          "Poll configured TMDB shows and write the newest aired episodes not present in the caller's catalog.",
+        arguments: AiredEpisodesArgsSchema,
+        execute: executeAiredEpisodes,
+      },
+    },
   ],
 };
 
@@ -423,14 +609,22 @@ export const testing = {
   isoWeek,
   runMarkerName,
   movieInstanceName,
+  episodeInstanceName,
   yearFromRelease,
   toDiscovered,
   tmdbNowPlaying,
+  tmdbGet,
   executeNowPlaying,
+  executeAiredEpisodes,
   schemas: {
     args: NowPlayingArgsSchema,
     movie: DiscoveredMovieSchema,
     run: WeekRunSchema,
     response: NowPlayingResponseSchema,
+    airedEpisodesArgs: AiredEpisodesArgsSchema,
+    airedEpisode: AiredEpisodeSchema,
+    airedEpisodeRun: AiredEpisodeRunSchema,
+    showDetails: ShowDetailsResponseSchema,
+    seasonResponse: SeasonResponseSchema,
   },
 };

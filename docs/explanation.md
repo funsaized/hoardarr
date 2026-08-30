@@ -13,7 +13,8 @@ The production path has five layers:
 ```text
 systemd user service
   -> swamp serve
-    -> movies workflow
+    -> movies workflow (production schedule)
+    -> media workflow (no trigger until Gate E cutover)
       -> typed model methods
         -> versioned data and reports
 ```
@@ -22,6 +23,10 @@ Systemd keeps the local Swamp server running. Swamp evaluates the schedule,
 workflow dependencies, guards, and CEL expressions. Model methods interact with
 NordVPN, Tailscale, Torlink, the local filesystem, and the Mac. Swamp persists
 their typed outputs and runs the summary reports.
+
+The `movies` workflow owns the current production schedule. The `media`
+workflow is the future unified path; it currently runs only as a manual dry
+run until Gate E approves a schedule cutover.
 
 No LLM or agent decides what to download, controls the network, or handles
 files. Agents are useful during development and troubleshooting, but they are
@@ -40,8 +45,9 @@ Hoardarr combines upstream model types with local extensions:
 
 | Model | Responsibility |
 | --- | --- |
-| `movie-discovery` | Fetch up to ten US digital releases once per ISO week. |
+| `movie-discovery` | Fetch up to ten US digital releases once per ISO week and poll TMDB for the newest aired episodes on a master show list. |
 | `movie-catalog` | Preserve movie identity, selection results, and lifecycle state. |
+| `episode-catalog` | Preserve episode identity (TMDB episode id), selection results, and lifecycle state for TV. |
 | `torlink` | Search, add, observe, wait for, and remove torrent metadata. |
 | `torlink-unit` | Start and stop the user-scoped Torlink service. |
 | `network-session` | Inspect and transition NordVPN and Tailscale state. |
@@ -52,35 +58,64 @@ Hoardarr combines upstream model types with local extensions:
 | `hoardarr-swamp-unit` | Enable, start, stop, and inspect the Swamp user service. |
 
 These boundaries keep policy out of generic integrations. For example, the
-Torlink model understands torrent operations, but the catalog decides whether a
-release is acceptable. The network model controls VPN state, but the workflow
-decides when a download phase may begin.
+Torlink model understands torrent operations, but each catalog decides whether
+a release is acceptable. The network model controls VPN state, but the
+workflow decides when a download phase may begin.
+
+Two catalogs share one workflow. `movie-catalog` keys records by TMDB movie
+id; `episode-catalog` keys records by TMDB episode id. The TV master list
+lives in `models/hoardarr/episode-catalog/episode-catalog.yaml` and is
+materialised by `episode-catalog.configured` into the typed `show-list-current`
+data before discovery runs. The `media` workflow fans movie and episode work
+through the same Torlink, network, and transfer primitives in one shared
+download window, then transfers movies (and any movie cleanup) before a single
+episode per run.
 
 ## Why Hoardarr uses a workflow
 
-The `movies` workflow coordinates operations that must happen in a strict order.
-It has five jobs:
+The `movies` workflow coordinates the current production path. The `media`
+workflow coordinates the unified movies + TV path once Gate E authorises
+scheduling. Both follow the same shape:
 
 1. `inspect-and-plan` refreshes live state and computes pending work.
 2. `download` establishes the VPN invariant, downloads, seeds, and stops Torlink.
-3. `transfer` restores Tailscale, verifies one payload, copies it, and cleans it.
-4. `recovery-download` stops Torlink and restores networking after download failure.
-5. `recovery-transfer` closes SSH and restores networking after transfer failure.
+3. `movie-transfer` and `episode-transfer` each restore Tailscale, verify one
+   payload, copy it, and clean it locally. Movie transfer (and any movie
+   cleanup) runs before a single episode transfer per run.
+4. `recovery-download` stops Torlink and restores networking after download
+   failure.
+5. `recovery-movie-transfer` and `recovery-transfer` close SSH and restore
+   networking after transfer failure.
 
 Guards turn already-completed actions into skips. This makes regular
-reconciliation more reliable than depending on one exact weekly run. Discovery
-still calls TMDB only once per ISO week, while later runs can resume downloads,
-transfers, or cleanup.
+reconciliation more reliable than depending on one exact weekly run. Movie
+discovery still calls TMDB only once per ISO week, while later runs can resume
+downloads, transfers, or cleanup. The episode master list is applied each
+plan, and `movie-discovery.airedEpisodes` is the only path that polls TMDB for
+newly aired episodes.
 
 Within a run, the workflow limits job concurrency to one. It also transfers at
-most one payload per run. That limit avoids model-lock contention and keeps
-failure recovery simple. Operators must still avoid starting a manual run while
-another scheduled or manual run is active.
+most one movie and at most one episode per run, with movie transfer strictly
+first. That limit avoids model-lock contention and keeps failure recovery
+simple. Operators must still avoid starting a manual run while another
+scheduled or manual run is active.
 
 ## Catalog state is the recovery plan
 
-Every movie is keyed by TMDB ID rather than title or filename. Its catalog row
-moves through these states:
+Every movie is keyed by TMDB movie id rather than title or filename. Every
+episode is keyed by TMDB episode id rather than show name, season/episode
+number, or filename. The catalogs, not the filesystem or any LLM, are the
+authority for identity, dedup, and terminality. A `wanted` row whose TMDB id
+already exists in a terminal state is preserved as-is on ingest.
+
+Movie lifecycle:
+
+```text
+main path:  wanted -> selected -> downloading -> seeding -> seed-stopped -> transfer-ready -> transferred
+side state: failed          ignored                              cleanup-pending
+```
+
+Episode lifecycle (TMDB episode id keyed):
 
 ```text
 main path:  wanted -> selected -> downloading -> seeding -> seed-stopped -> transfer-ready -> transferred
@@ -98,8 +133,10 @@ never prove that Torlink is stopped or that a VPN transition is safe.
 
 ## Release selection is deterministic
 
-Hoardarr does not use an LLM to rank search results. The catalog applies a small
+Hoardarr does not use an LLM to rank search results. The catalogs apply a small
 fixed policy:
+
+Movies:
 
 - Match the normalized movie title and year.
 - Require 1080p WEB-DL or WEBRip.
@@ -108,8 +145,33 @@ fixed policy:
 - Reject releases larger than 15 GiB.
 - Choose the acceptable result with the most seeders.
 
-When nothing qualifies, the catalog stores a no-match reason. A later
-reconciliation can search again without losing the movie.
+Episodes:
+
+- Match the normalized show name and the `SxxExx` (TV) or `sxNN` (anime)
+  episode token.
+- Require 1080p WEB-DL or WEBRip.
+- Reject CAM, TS, TC, executables, archives, season packs, and multi-episode
+  packs.
+- Reject releases larger than 8 GiB.
+- Require at least five seeders.
+- Choose the acceptable result with the most seeders, then name, then info
+  hash.
+
+When nothing qualifies, each catalog stores a no-match reason. A later
+reconciliation can search again without losing the record.
+
+## Aired-episode discovery is polling with a cap
+
+`movie-discovery.airedEpisodes` is the only path that polls TMDB for newly
+aired episodes. The master show list is the `episode-catalog` model argument
+configured in `models/hoardarr/episode-catalog/episode-catalog.yaml` and
+materialised through `episode-catalog.configured`. For each show, the method
+walks the show's seasons, skips season 0 (specials), and considers each
+episode whose `air_date` exists and is on or before today. Eligible episodes
+are deduped by TMDB episode id, sorted newest air date first then newest
+season then newest episode, and capped at ten. The `excludeIds` argument
+filters out ids already present in the catalog so reconciled runs do not
+rediscover the same episode.
 
 ## Network safety comes before availability
 
@@ -150,9 +212,12 @@ it resolves the payload beneath the configured staging root and rejects:
 - Files outside the media and subtitle allowlist.
 - Missing or unexpected payload entries.
 
-It creates a sorted SHA-256 manifest. The workflow copies the payload into a
-per-TMDB staging directory on the Mac, recomputes the aggregate hash, and only
-then renames the directory to its final location.
+It creates a sorted SHA-256 manifest. Movies stage into
+`<staging>/<tmdbId>` and promote to `Media/Movies/<tmdbId>` on the Mac.
+Episodes stage into `<staging>/e-<tmdbEpisodeId>` and promote to
+`Media/TV/e-<tmdbEpisodeId>`. In both cases the workflow copies the payload
+into a per-id remote staging directory, recomputes the aggregate hash, and
+only then renames the directory to its final location.
 
 An existing final directory is accepted only when its manifest is identical.
 A conflict fails without overwriting either copy. Local cleanup requires both a
@@ -182,9 +247,11 @@ an observation concern rather than authority for local deletion.
 
 ## Reports explain each run
 
-The `hoardarr/movie-run-summary` report analyzes workflow outputs. It summarizes
-discovery, selection, download, transfer, cleanup, network assertions, and Mac
-operations. Reports do not take actions or repair state.
+The `hoardarr/movie-run-summary` report analyzes the `movies` workflow
+outputs. The `hoardarr/media-run-summary` report analyzes the `media`
+workflow outputs and covers both movie and episode discovery, selection,
+download, transfer, cleanup, network assertions, and Mac operations. Reports
+do not take actions or repair state.
 
 Method and workflow summary reports are also the first troubleshooting source.
 They preserve structured failure context that terminal output alone may omit.
@@ -195,8 +262,10 @@ They preserve structured failure context that terminal output alone may omit.
   New operators must adapt and test those values before bootstrap.
 - The workflow targets a Linux host, NordVPN, Tailscale, one Mac, and iCloud
   Drive. Other providers need model or workflow changes.
-- Discovery is capped at ten movies per week and uses a fixed release policy.
-- One transfer per run favors predictable recovery over throughput.
+- Discovery is capped at ten movies per ISO week and ten aired episodes per
+  poll and uses a fixed release policy.
+- One movie transfer and one episode transfer per run (movie first) favor
+  predictable recovery over throughput.
 - `@funsaized/torlink` is pinned to a published stable registry version.
 - iCloud upload completion is not part of the cleanup decision.
 

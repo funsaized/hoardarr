@@ -1,0 +1,15 @@
+type: hoardarr/episode-catalog
+typeVersion: 2026.08.30.1
+id: 506fa64c-4e37-4d39-a468-5cd7cad946d3
+name: episode-catalog
+version: 1
+tags: {}
+globalArguments:
+  shows:
+    - tmdbId: 95350
+      name: Lanterns
+      category: tv
+    - tmdbId: 250307
+      name: The Pitt
+      category: tv
+methods: {}

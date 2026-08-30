@@ -5,6 +5,11 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+Deno.test("episode payload ids are namespaced from movie ids", () => {
+  assert(testing.payloadKey(42, "movie") === "42", "movie compatibility");
+  assert(testing.payloadKey(42, "episode") === "e-42", "episode namespace");
+});
+
 async function statExists(path: string): Promise<Deno.FileInfo | null> {
   try {
     return await Deno.stat(path);
@@ -67,6 +72,8 @@ interface FakeOptions {
   stagingRoot: string;
   catalogType: string;
   catalogId: string;
+  catalogName?: string;
+  catalogSpec?: "movie" | "episode";
   catalogResources?: Array<{ name: string; value: Record<string, unknown> }>;
 }
 
@@ -81,7 +88,7 @@ function makeContext(opts: FakeOptions): {
   const cleanupCalls: Array<{ path: string }> = [];
 
   for (const res of opts.catalogResources ?? []) {
-    store.resources.set(res.name, { value: res.value, specName: "movie" });
+    store.resources.set(res.name, { value: res.value, specName: opts.catalogSpec ?? "movie" });
   }
 
   const context: Context = {
@@ -91,6 +98,7 @@ function makeContext(opts: FakeOptions): {
     globalArgs: {
       stagingRoot: opts.stagingRoot,
       catalogModelName: "movie-catalog",
+      episodeCatalogModelName: "episode-catalog",
       sha256Binary: "/usr/bin/sha256sum",
     },
     readResource: (name): Promise<Record<string, unknown> | null> => {
@@ -104,7 +112,7 @@ function makeContext(opts: FakeOptions): {
     },
     definitionRepository: {
       findByNameGlobal: (name: string) => {
-        if (name !== "movie-catalog") return Promise.resolve(null);
+        if (name !== (opts.catalogName ?? "movie-catalog")) return Promise.resolve(null);
         return Promise.resolve({
           type: opts.catalogType,
           definition: { id: opts.catalogId },
@@ -121,7 +129,7 @@ function makeContext(opts: FakeOptions): {
         }
         const out: Array<{ name: string; tags: { specName?: string } }> = [];
         for (const [name, res] of store.resources) {
-          if (res.specName !== "movie") continue;
+          if (res.specName !== (opts.catalogSpec ?? "movie")) continue;
           out.push({ name, tags: { specName: res.specName } });
         }
         return Promise.resolve(out);
@@ -142,6 +150,25 @@ function makeContext(opts: FakeOptions): {
   };
   return { context, store, written, cleanupCalls };
 }
+
+Deno.test("episode cleanup authorization reads only the episode catalog namespace", async () => {
+  const { context } = makeContext({
+    stagingRoot: "/tmp/unused",
+    catalogName: "episode-catalog",
+    catalogType: "hoardarr/episode-catalog",
+    catalogId: "episodes-1",
+    catalogSpec: "episode",
+    catalogResources: [
+      {
+        name: "catalog-episode-42",
+        value: { status: "transferred", remotePath: "Media/TV/e-42", sha256: null },
+      },
+    ],
+  });
+  const catalog = await testing.readCatalogSubset(context, 42, "episode");
+  assert(catalog?.status === "transferred", "episode catalog row authorized");
+  assert(catalog?.remotePath === "Media/TV/e-42", "episode remote path preserved");
+});
 
 async function writePayload(
   stagingRoot: string,
@@ -453,7 +480,8 @@ Deno.test("stage moves only allowlisted files from the exact torrent directory",
 
     await model.methods.stage.execute({ tmdbId: 4242, sourceName }, context);
     const rerun = written.filter((entry) => entry.specName === "stage").at(-1);
-    assert((rerun?.value.movedFiles as string[]).length === 0, "rerun accepts staged media");
+    assert(rerun, "rerun stage evidence written");
+    assert((rerun.value.movedFiles as string[]).length === 0, "rerun accepts staged media");
   } finally {
     await Deno.remove(root, { recursive: true });
   }
