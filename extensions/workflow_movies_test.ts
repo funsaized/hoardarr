@@ -83,6 +83,31 @@ Deno.test("in-flight-only runs may continue after guarded discovery", () => {
   );
 });
 
+Deno.test("completed selected torrents are reconciled before add", () => {
+  const sync = step("sync-selected-torrents");
+  assert(
+    sync.includes("methodName: sync"),
+    "dedupe must refresh live Torlink state",
+  );
+  const reconcile = step("reconcile-selected-torrents");
+  assert(
+    reconcile.includes("- step: sync-selected-torrents") &&
+      reconcile.includes("methodName: reconcile"),
+    "dedupe must reconcile the refreshed torrent snapshot",
+  );
+  const refresh = step("refresh-download-plan");
+  assert(
+    refresh.includes("- step: select-releases") &&
+      refresh.includes("- step: reconcile-selected-torrents") &&
+      refresh.includes("methodName: plan"),
+    "dedupe must refresh the plan after successful selection and reconciliation",
+  );
+  assert(
+    step("add-selected-torrents").includes("- step: refresh-download-plan"),
+    "torrent add must use the deduplicated plan",
+  );
+});
+
 Deno.test("dry runs guard every resumable download mutation", () => {
   for (const name of [
     "mark-downloading",

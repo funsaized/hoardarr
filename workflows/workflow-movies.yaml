@@ -270,6 +270,69 @@ jobs:
                 - type: skipped
         weight: 0
         allowFailure: false
+      - name: sync-selected-torrents
+        description: Refresh Torlink state so completed selected torrents are not re-added.
+        guard: >-
+          ${{ inputs.dryRun ||
+            size(data.query("modelName == 'torlink-unit' && name == 'status' && workflowRunId == '" +
+              run.id + "' && stepName == 'start-torlink'")) == 0 ||
+            !data.query("modelName == 'torlink-unit' && name == 'status' && workflowRunId == '" +
+              run.id + "' && stepName == 'start-torlink'")[0].attributes.active }}
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: sync
+        dependsOn:
+          - step: select-releases
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
+      - name: reconcile-selected-torrents
+        description: Advance selected torrents already seeding or stopped past the add and download wait.
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: reconcile
+          inputs:
+            snapshots: >-
+              ${{ data.latest("torlink", "snapshot-current").attributes.torrents
+                .map(torrent, {
+                  "infoHash": torrent.infoHash,
+                  "kind": torrent.kind,
+                  "status": torrent.status,
+                  "progress": torrent.progress
+                }) }}
+        dependsOn:
+          - step: sync-selected-torrents
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: refresh-download-plan
+        description: Exclude reconciled completed torrents from add and wait inputs.
+        task:
+          type: model_method
+          modelIdOrName: movie-catalog
+          methodName: plan
+        dependsOn:
+          - step: select-releases
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+          - step: reconcile-selected-torrents
+            condition:
+              type: or
+              conditions:
+                - type: succeeded
+                - type: skipped
+        weight: 0
+        allowFailure: false
       - name: add-selected-torrents
         description: Batch selected info hashes through the loopback Torlink API.
         guard: >-
@@ -290,12 +353,9 @@ jobs:
                   "input": data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.infoHash
                 }) }}
         dependsOn:
-          - step: select-releases
+          - step: refresh-download-plan
             condition:
-              type: or
-              conditions:
-                - type: succeeded
-                - type: skipped
+              type: succeeded
         weight: 0
         allowFailure: false
       - name: mark-downloading

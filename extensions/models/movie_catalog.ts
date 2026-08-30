@@ -1,7 +1,7 @@
 /** Hoardarr local movie catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4";
 
-const MODEL_VERSION = "2026.08.29.3";
+const MODEL_VERSION = "2026.08.30.1";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -475,9 +475,12 @@ function advanceFromSnapshot(
   }
   if (snapshot.kind === "download") {
     if (snapshot.status === "completed") {
-      if (movie.status === "downloading") {
+      if (movie.status === "selected" || movie.status === "downloading") {
         return { ...movie, status: "seeding" };
       }
+    }
+    if (movie.status === "selected" && snapshot.status === "downloading") {
+      return { ...movie, status: "downloading" };
     }
     if (snapshot.status === "failed") {
       if (movie.status === "downloading") {
@@ -487,21 +490,25 @@ function advanceFromSnapshot(
     return null;
   }
   if (snapshot.kind === "seed") {
-    if (movie.status === "downloading" && snapshot.status === "seeding") {
+    if (
+      (movie.status === "selected" || movie.status === "downloading") &&
+      snapshot.status === "seeding"
+    ) {
       return { ...movie, status: "seeding" };
     }
-    if (movie.status === "seeding") {
-      if (
-        snapshot.status === "paused" ||
+    if (
+      (movie.status === "selected" ||
+        movie.status === "downloading" ||
+        movie.status === "seeding") &&
+      (snapshot.status === "paused" ||
         snapshot.status === "stopped" ||
-        snapshot.status === "seed-stopped"
-      ) {
-        return {
-          ...movie,
-          status: "seed-stopped",
-          completedAt: movie.completedAt ?? now,
-        };
-      }
+        snapshot.status === "seed-stopped")
+    ) {
+      return {
+        ...movie,
+        status: "seed-stopped",
+        completedAt: movie.completedAt ?? now,
+      };
     }
     if (snapshot.status === "missing" || snapshot.status === "failed") {
       if (movie.status === "seeding") {

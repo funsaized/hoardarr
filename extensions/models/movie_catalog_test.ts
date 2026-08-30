@@ -1032,6 +1032,32 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
       infoHash: "h4",
       attempts: 1,
     }),
+    "catalog-movie-5": baseMovie({
+      tmdbId: 5,
+      status: "selected",
+      infoHash: "h5",
+    }),
+    "catalog-movie-6": baseMovie({
+      tmdbId: 6,
+      status: "selected",
+      infoHash: "h6",
+    }),
+    "catalog-movie-7": baseMovie({
+      tmdbId: 7,
+      status: "selected",
+      infoHash: "h7",
+    }),
+    "catalog-movie-8": baseMovie({
+      tmdbId: 8,
+      status: "selected",
+      infoHash: "h8",
+    }),
+    "catalog-movie-9": baseMovie({
+      tmdbId: 9,
+      status: "downloading",
+      infoHash: "h9",
+      attempts: 1,
+    }),
   });
   await testing.executeReconcile(
     {
@@ -1040,6 +1066,11 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
         { infoHash: "h2", kind: "seed", status: "paused" },
         { infoHash: "h3", kind: "seed", status: "missing" },
         { infoHash: "h4", kind: "download", status: "completed" },
+        { infoHash: "h5", kind: "seed", status: "paused" },
+        { infoHash: "h6", kind: "seed", status: "seeding" },
+        { infoHash: "h7", kind: "download", status: "completed" },
+        { infoHash: "h8", kind: "download", status: "downloading" },
+        { infoHash: "h9", kind: "seed", status: "paused" },
       ],
     },
     context,
@@ -1071,6 +1102,35 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
     "seeding",
     "completed download remains supported",
   );
+  const m5 = store.resources.get("catalog-movie-5") as Movie;
+  assertEquals(
+    m5.status,
+    "seed-stopped",
+    "completed selected torrent is deduplicated",
+  );
+  assertEquals(
+    typeof m5.completedAt,
+    "string",
+    "deduplicated torrent records completion",
+  );
+  assertEquals(
+    (store.resources.get("catalog-movie-6") as Movie).status,
+    "seeding",
+    "selected torrent already seeding is deduplicated",
+  );
+  assertEquals(
+    (store.resources.get("catalog-movie-7") as Movie).status,
+    "seeding",
+    "selected completed download is deduplicated",
+  );
+  assertEquals(
+    (store.resources.get("catalog-movie-8") as Movie).status,
+    "downloading",
+    "selected active download is deduplicated",
+  );
+  const m9 = store.resources.get("catalog-movie-9") as Movie;
+  assertEquals(m9.status, "seed-stopped", "completed downloading torrent skips stale wait");
+  assertEquals(typeof m9.completedAt, "string", "completed downloading torrent records completion");
 });
 
 Deno.test("reconcile fails absent active torrents but preserves durable checkpoints", async () => {
@@ -1382,7 +1442,7 @@ Deno.test("malformed catalog records are logged not swallowed", async () => {
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.08.29.3", "model version");
+  assertEquals(model.version, "2026.08.30.1", "model version");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
   for (
