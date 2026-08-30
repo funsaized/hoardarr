@@ -6,6 +6,7 @@ const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_ERROR_BODY_BYTES = 8 * 1024;
 const FETCH_TIMEOUT_MS = 30_000;
 const TMDB_DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGES = 10;
 const SPEC_MOVIE = "digitalReleaseMovie";
 const SPEC_RUN = "digitalReleaseRun";
 const MOVIE_INSTANCE_PREFIX = "digital-release-movie-";
@@ -31,12 +32,20 @@ const NowPlayingArgsSchema = z.object({
     .max(50)
     .default(5)
     .describe("Maximum number of new movies to record this week"),
+  excludeIds: z
+    .array(z.number().int().positive())
+    .max(5000)
+    .default([])
+    .describe("TMDB ids already queued or completed in the movie catalog"),
 });
 
 const DiscoveredMovieSchema = z.object({
   tmdbId: z.number().int().positive(),
   title: z.string().min(1).max(500),
-  releaseDate: z.string().regex(/^\d{4}(-\d{2}(-\d{2})?)?$/).nullable(),
+  releaseDate: z
+    .string()
+    .regex(/^\d{4}(-\d{2}(-\d{2})?)?$/)
+    .nullable(),
   year: z.number().int().min(1800).max(2200).nullable(),
   overview: z.string().max(5000).nullable(),
   isoWeek: z.string().regex(/^\d{4}-W\d{2}$/),
@@ -75,6 +84,9 @@ const NowPlayingResponseSchema = z.object({
 });
 
 type NowPlayingArgs = z.infer<typeof NowPlayingArgsSchema>;
+type ExecuteNowPlayingArgs = Omit<NowPlayingArgs, "excludeIds"> & {
+  excludeIds?: number[];
+};
 type DiscoveredMovie = z.infer<typeof DiscoveredMovieSchema>;
 type NowPlayingResponse = z.infer<typeof NowPlayingResponseSchema>;
 type NowPlayingResult = NowPlayingResponse["results"][number];
@@ -82,9 +94,7 @@ type NowPlayingResult = NowPlayingResponse["results"][number];
 type Context = {
   signal: AbortSignal;
   globalArgs: { apiKey: string };
-  readResource(
-    instanceName: string,
-  ): Promise<Record<string, unknown> | null>;
+  readResource(instanceName: string): Promise<Record<string, unknown> | null>;
   writeResource(
     specName: string,
     name: string,
@@ -115,11 +125,7 @@ function isoWeek(date: Date): string {
   return `${utc.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-function runMarkerName(
-  week: string,
-  region: string,
-  language: string,
-): string {
+function runMarkerName(week: string, region: string, language: string): string {
   return `digital-week-${week}-${region}-${language}`;
 }
 
@@ -185,6 +191,7 @@ async function tmdbNowPlaying(
   apiKey: string,
   region: string,
   language: string,
+  page: number,
   signal: AbortSignal,
   deps: FetchDeps = { fetchImpl: fetch },
 ): Promise<NowPlayingResponse> {
@@ -199,6 +206,7 @@ async function tmdbNowPlaying(
     new Date().toISOString().slice(0, 10),
   );
   url.searchParams.set("sort_by", "popularity.desc");
+  url.searchParams.set("page", String(page));
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
   signal.addEventListener("abort", abort, { once: true });
@@ -259,11 +267,11 @@ function toDiscovered(
 }
 
 async function executeNowPlaying(
-  args: NowPlayingArgs,
+  args: ExecuteNowPlayingArgs,
   context: Context,
   deps: FetchDeps = { fetchImpl: fetch },
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
-  const { region, language, limit } = args;
+  const { region, language, limit, excludeIds = [] } = args;
   const { apiKey } = context.globalArgs;
   if (!apiKey) throw new Error("apiKey global argument is required");
   const week = isoWeek(new Date());
@@ -273,31 +281,75 @@ async function executeNowPlaying(
   if (existing !== null) {
     context.logger.info(
       "nowPlaying already completed for the current ISO week",
-      { week, region, language },
+      {
+        week,
+        region,
+        language,
+      },
     );
     return { dataHandles: [] };
   }
-  const response = await tmdbNowPlaying(
-    apiKey,
-    region,
-    language,
-    context.signal,
-    deps,
-  );
   const discoveredAt = new Date().toISOString();
-  const slice = response.results.slice(0, limit);
   const seen = new Set<number>();
+  const excluded = new Set(excludeIds);
+  const existingThisWeek = new Set<number>();
   const movies: DiscoveredMovie[] = [];
   let skippedInvalid = 0;
-  for (const raw of slice) {
-    if (seen.has(raw.id)) continue;
-    seen.add(raw.id);
-    const movie = toDiscovered(raw, week, region, language, discoveredAt);
-    if (!movie) {
-      skippedInvalid++;
-      continue;
+  let page = 1;
+  let totalPages: number | null = null;
+  let totalResults: number | null = null;
+  let returnedResults = 0;
+  let truncated = false;
+  while (page <= MAX_PAGES && existingThisWeek.size + movies.length < limit) {
+    const response = await tmdbNowPlaying(
+      apiKey,
+      region,
+      language,
+      page,
+      context.signal,
+      deps,
+    );
+    totalPages = response.total_pages ?? null;
+    totalResults = response.total_results ?? null;
+    returnedResults += response.results.length;
+    let remainingOnPage = false;
+    for (const [index, raw] of response.results.entries()) {
+      if (seen.has(raw.id)) continue;
+      seen.add(raw.id);
+      if (excluded.has(raw.id)) continue;
+      const prior = await context.readResource(movieInstanceName(raw.id));
+      if (prior !== null) {
+        if (prior.isoWeek === week) existingThisWeek.add(raw.id);
+        if (existingThisWeek.size + movies.length === limit) {
+          remainingOnPage = index < response.results.length - 1;
+          break;
+        }
+        continue;
+      }
+      const movie = toDiscovered(raw, week, region, language, discoveredAt);
+      if (!movie) {
+        skippedInvalid++;
+        continue;
+      }
+      movies.push(movie);
+      if (existingThisWeek.size + movies.length === limit) {
+        remainingOnPage = index < response.results.length - 1;
+        break;
+      }
     }
-    movies.push(movie);
+    const hasMorePages = totalPages !== null
+      ? page < totalPages
+      : response.results.length >= TMDB_DEFAULT_PAGE_SIZE;
+    if (existingThisWeek.size + movies.length === limit) {
+      truncated = remainingOnPage || hasMorePages;
+      break;
+    }
+    if (!hasMorePages) break;
+    if (page === MAX_PAGES) {
+      truncated = true;
+      break;
+    }
+    page++;
   }
   const handles: Array<{ name: string }> = [];
   for (const movie of movies) {
@@ -310,26 +362,17 @@ async function executeNowPlaying(
     );
   }
   // ponytail: write run marker last so partial failures retry next run.
-  const totalPages = response.total_pages ?? null;
-  const totalResults = response.total_results ?? null;
-  // ponytail: when total_pages is omitted and the provider returned a full
-  // page, conservatively assume more pages exist; explicit totals stay
-  // authoritative when present.
-  const truncated = response.results.length > limit ||
-    (totalPages !== null
-      ? totalPages > response.page
-      : response.results.length >= TMDB_DEFAULT_PAGE_SIZE);
   const marker = await context.writeResource(SPEC_RUN, markerName, {
     isoWeek: week,
     region,
     language,
     completedAt: discoveredAt,
-    movieCount: movies.length,
+    movieCount: existingThisWeek.size + movies.length,
     skippedInvalid,
-    page: response.page,
+    page,
     totalPages,
     totalResults,
-    returnedResults: response.results.length,
+    returnedResults,
     truncated,
   });
   handles.push(marker);
@@ -363,14 +406,16 @@ export const extension = {
       garbageCollection: 200,
     },
   },
-  methods: [{
-    digitalReleases: {
-      description:
-        "Fetch the most popular digitally released movies for a region once per ISO week; dedupe by TMDB id, skip entries without a title, and record page totals.",
-      arguments: NowPlayingArgsSchema,
-      execute: executeNowPlaying,
+  methods: [
+    {
+      digitalReleases: {
+        description:
+          "Fetch new popular digital releases once per ISO week, excluding known TMDB ids and paging until the limit is met.",
+        arguments: NowPlayingArgsSchema,
+        execute: executeNowPlaying,
+      },
     },
-  }],
+  ],
 };
 
 /** Pure helpers and dependency-injected execute exposed to unit tests. */

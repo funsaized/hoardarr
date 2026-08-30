@@ -38,11 +38,13 @@ type ContextBundle = {
   logs: LogCall[];
 };
 
-function makeContext(options: {
-  resources?: Map<string, Record<string, unknown>>;
-  fetchImpl?: typeof fetch;
-  logs?: LogCall[];
-} = {}): ContextBundle {
+function makeContext(
+  options: {
+    resources?: Map<string, Record<string, unknown>>;
+    fetchImpl?: typeof fetch;
+    logs?: LogCall[];
+  } = {},
+): ContextBundle {
   const resources = options.resources ??
     new Map<string, Record<string, unknown>>();
   const writes: ContextBundle["writes"] = [];
@@ -174,7 +176,7 @@ Deno.test("extension declares exactly two specs and the digitalReleases method",
   const method = extension.methods
     .flatMap((entry) => Object.values(entry))
     .find((m) =>
-      m.description.startsWith("Fetch the most popular digitally released")
+      m.description.startsWith("Fetch new popular digital releases")
     );
   assert(method, "digitalReleases method missing");
 });
@@ -273,7 +275,9 @@ Deno.test("nowPlaying runs the marker last and reports honest page totals", asyn
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   const marker = env.writes.find((w) => w.spec === "digitalReleaseRun");
   assert(marker, "marker written");
@@ -309,30 +313,35 @@ Deno.test("nowPlaying runs the marker last and reports honest page totals", asyn
   );
 });
 
-Deno.test("nowPlaying flags truncated when the response has more pages than fetched", async () => {
+Deno.test("nowPlaying exhausts available pages when it cannot fill the limit", async () => {
+  let fetchCount = 0;
   const env = makeContext({
-    fetchImpl: () =>
-      Promise.resolve(
+    fetchImpl: () => {
+      fetchCount++;
+      return Promise.resolve(
         new Response(
           JSON.stringify({
             page: 1,
             total_pages: 4,
             total_results: 200,
-            results: [
-              { id: 1, title: "Only one", release_date: null },
-            ],
+            results: [{ id: 1, title: "Only one", release_date: null }],
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         ),
-      ),
+      );
+    },
   });
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!;
-  assertEquals(marker.data.truncated, true, "more pages ahead means truncated");
+  assertEquals(fetchCount, 4, "all reported pages fetched");
+  assertEquals(marker.data.page, 4, "last fetched page recorded");
+  assertEquals(marker.data.truncated, false, "all reported pages exhausted");
   assertEquals(marker.data.totalPages, 4, "totalPages surfaced");
   assertEquals(marker.data.totalResults, 200, "totalResults surfaced");
 });
@@ -358,7 +367,9 @@ Deno.test("nowPlaying conservatively marks truncated when total_pages is omitted
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.totalPages, null, "totalPages stays null when omitted");
@@ -390,7 +401,9 @@ Deno.test("nowPlaying stays honest when total_pages is omitted but the page is p
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.totalPages, null, "totalPages null");
@@ -423,7 +436,9 @@ Deno.test("nowPlaying keeps explicit total_pages authoritative even on a full pa
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 20 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.totalPages, 1, "explicit totalPages preserved");
@@ -457,7 +472,9 @@ Deno.test("nowPlaying skips empty titles and counts them as skippedInvalid", asy
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   const movieNames = env.writes
     .filter((w) => w.spec === "digitalReleaseMovie")
@@ -504,7 +521,9 @@ Deno.test("nowPlaying dedupes duplicate TMDB ids within the same response", asyn
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   const movieNames = env.writes
     .filter((w) => w.spec === "digitalReleaseMovie")
@@ -519,12 +538,126 @@ Deno.test("nowPlaying dedupes duplicate TMDB ids within the same response", asyn
   assertEquals(marker.movieCount, 2, "movieCount counts deduped ids");
 });
 
+Deno.test("nowPlaying pages past catalog and discovery ids to fill the limit", async () => {
+  let fetchCount = 0;
+  const resources = new Map<string, Record<string, unknown>>([
+    ["digital-release-movie-2", { tmdbId: 2 }],
+  ]);
+  const env = makeContext({
+    resources,
+    fetchImpl: (input) => {
+      fetchCount++;
+      const page = new URL(input.toString()).searchParams.get("page");
+      const results = page === "1"
+        ? [
+          { id: 1, title: "Catalog Movie", release_date: null },
+          { id: 2, title: "Prior Discovery", release_date: null },
+        ]
+        : [
+          { id: 3, title: "New Three", release_date: null },
+          { id: 4, title: "New Four", release_date: null },
+        ];
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            page: Number(page),
+            total_pages: 2,
+            total_results: 4,
+            results,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    },
+  });
+  await testing.executeNowPlaying(
+    { region: "US", language: "en-US", limit: 2, excludeIds: [1] },
+    env.context,
+    { fetchImpl: env.fetchImpl },
+  );
+  assertEquals(fetchCount, 2, "second page fetched for unseen movies");
+  assertEquals(
+    env.writes.filter((write) => write.spec === "digitalReleaseMovie").map((
+      write,
+    ) => write.name),
+    ["digital-release-movie-3", "digital-release-movie-4"],
+    "only unseen movies written",
+  );
+});
+
+Deno.test("nowPlaying retry counts same-week resources toward the limit", async () => {
+  const resources = new Map<string, Record<string, unknown>>([
+    ["digital-release-movie-101", { tmdbId: 101, isoWeek: CURRENT_WEEK }],
+    ["digital-release-movie-202", { tmdbId: 202, isoWeek: CURRENT_WEEK }],
+  ]);
+  const env = makeContext({ resources });
+  await testing.executeNowPlaying(
+    { region: "US", language: "en-US", limit: 3 },
+    env.context,
+    { fetchImpl: env.fetchImpl },
+  );
+  assertEquals(
+    env.writes
+      .filter((write) => write.spec === "digitalReleaseMovie")
+      .map((write) => write.name),
+    ["digital-release-movie-303"],
+    "retry only writes the remaining weekly slot",
+  );
+  const marker = env.writes.find((write) =>
+    write.spec === "digitalReleaseRun"
+  )!;
+  assertEquals(
+    marker.data.movieCount,
+    3,
+    "marker counts prior and new weekly movies",
+  );
+});
+
+Deno.test("nowPlaying stops after ten pages when every movie is known", async () => {
+  let fetchCount = 0;
+  const env = makeContext({
+    fetchImpl: (input) => {
+      fetchCount++;
+      const page = Number(new URL(input.toString()).searchParams.get("page"));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            page,
+            total_pages: 20,
+            total_results: 20,
+            results: [{ id: page, title: `Known ${page}`, release_date: null }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    },
+  });
+  await testing.executeNowPlaying(
+    {
+      region: "US",
+      language: "en-US",
+      limit: 5,
+      excludeIds: Array.from({ length: 20 }, (_, index) => index + 1),
+    },
+    env.context,
+    { fetchImpl: env.fetchImpl },
+  );
+  const marker = env.writes.find((write) =>
+    write.spec === "digitalReleaseRun"
+  )!;
+  assertEquals(fetchCount, 10, "TMDB requests are bounded");
+  assertEquals(marker.data.movieCount, 0, "known movies are not rewritten");
+  assertEquals(marker.data.truncated, true, "remaining pages are reported");
+});
+
 Deno.test("nowPlaying honours the limit and marks truncated when cap applies", async () => {
   const env = makeContext();
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 2 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   const movieCount =
     env.writes.filter((w) => w.spec === "digitalReleaseMovie").length;
@@ -552,12 +685,16 @@ Deno.test("nowPlaying is idempotent for the same ISO week and never fetches twic
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   assertEquals(env.fetchCalls.length, 0, "no fetch when marker exists");
   assertEquals(env.writes.length, 0, "no writes on repeat");
@@ -569,7 +706,9 @@ Deno.test("nowPlaying separates different regions and languages into independent
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   assert(
     env.writes.some((w) => w.name === CURRENT_MARKER),
@@ -587,7 +726,9 @@ Deno.test("nowPlaying never persists or logs the apiKey", async () => {
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   for (const write of env.writes) {
     assert(
@@ -609,16 +750,13 @@ Deno.test("nowPlaying error message includes a bounded body and the Retry-After 
   const env = makeContext({
     fetchImpl: () =>
       Promise.resolve(
-        new Response(
-          JSON.stringify({ status_message: "rate limited" }),
-          {
-            status: 429,
-            headers: {
-              "content-type": "application/json",
-              "retry-after": "42",
-            },
+        new Response(JSON.stringify({ status_message: "rate limited" }), {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+            "retry-after": "42",
           },
-        ),
+        }),
       ),
   });
   let message = "";
@@ -626,7 +764,9 @@ Deno.test("nowPlaying error message includes a bounded body and the Retry-After 
     await testing.executeNowPlaying(
       { region: "US", language: "en-US", limit: 5 },
       env.context,
-      { fetchImpl: env.fetchImpl },
+      {
+        fetchImpl: env.fetchImpl,
+      },
     );
   } catch (error) {
     message = error instanceof Error ? error.message : String(error);
@@ -642,7 +782,9 @@ Deno.test("nowPlaying logs entry and completion", async () => {
   await testing.executeNowPlaying(
     { region: "US", language: "en-US", limit: 5 },
     env.context,
-    { fetchImpl: env.fetchImpl },
+    {
+      fetchImpl: env.fetchImpl,
+    },
   );
   assert(
     logs.some((c) => c.msg === "nowPlaying starting"),

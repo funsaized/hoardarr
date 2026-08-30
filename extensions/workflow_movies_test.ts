@@ -11,6 +11,11 @@ const workflow = await Deno.readTextFile(
 Deno.test("weekly discovery queues at most ten movies", () => {
   const discovery = step("discover-digital-releases");
   assert(discovery.includes("limit: 10"), "weekly discovery limit must be ten");
+  assert(
+    discovery.includes("excludeIds:") &&
+      discovery.includes('data.findBySpec("movie-catalog", "movie")'),
+    "weekly discovery must exclude every catalog movie",
+  );
 });
 
 function step(name: string): string {

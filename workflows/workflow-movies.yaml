@@ -71,6 +71,9 @@ jobs:
             region: US
             language: en-US
             limit: 10
+            excludeIds: >-
+              ${{ data.findBySpec("movie-catalog", "movie")
+                .map(movie, movie.attributes.tmdbId) }}
         dependsOn:
           - step: inspect-network
             condition:
