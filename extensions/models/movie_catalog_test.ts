@@ -20,16 +20,11 @@ function assertEquals<T>(actual: T, expected: T, message: string) {
   }
   if (!sameDeep) {
     throw new Error(
-      `${message}: expected ${JSON.stringify(expected)}, got ${
-        JSON.stringify(actual)
-      }`,
+      `${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
     );
   }
 }
-async function assertRejects(
-  fn: () => Promise<unknown>,
-  includes: string,
-): Promise<void> {
+async function assertRejects(fn: () => Promise<unknown>, includes: string): Promise<void> {
   let message = "";
   try {
     await fn();
@@ -62,36 +57,28 @@ function makeContext(initial: Record<string, Record<string, unknown>> = {}): {
     signal: new AbortController().signal,
     modelType: "hoardarr/movie-catalog",
     modelId: "movie-catalog",
-    readResource: (name: string) =>
-      Promise.resolve(store.resources.get(name) ?? null),
-    writeResource: (
-      spec: string,
-      name: string,
-      data: Record<string, unknown>,
-    ) => {
+    readResource: (name: string) => Promise.resolve(store.resources.get(name) ?? null),
+    writeResource: (spec: string, name: string, data: Record<string, unknown>) => {
       store.writes.push({ spec, name, data });
       store.resources.set(name, data);
       return Promise.resolve({ name });
     },
     dataRepository: {
       findAllForModel: (_type: string, _modelId: string) => {
-        const records: Array<{ name: string; tags: { specName?: string } }> =
-          [];
+        const records: Array<{ name: string; tags: { specName?: string } }> = [];
         for (const [name] of store.resources.entries()) {
           const inferredSpec = name.startsWith("plan-")
             ? "plan"
             : name.startsWith("catalog-movie-")
-            ? "movie"
-            : undefined;
+              ? "movie"
+              : undefined;
           records.push({ name, tags: { specName: inferredSpec } });
         }
         return Promise.resolve(records);
       },
       getContent: (_type: string, _modelId: string, name: string) => {
         const value = store.resources.get(name);
-        return Promise.resolve(
-          value ? new TextEncoder().encode(JSON.stringify(value)) : null,
-        );
+        return Promise.resolve(value ? new TextEncoder().encode(JSON.stringify(value)) : null);
       },
     },
     logger: {
@@ -178,10 +165,7 @@ Deno.test("evaluateRelease applies the deterministic policy", () => {
       expected: "title-mismatch",
     },
   ];
-  const tweaks: Record<
-    string,
-    Partial<{ seeders: number; sizeBytes: number }>
-  > = {
+  const tweaks: Record<string, Partial<{ seeders: number; sizeBytes: number }>> = {
     "low-seeders": { seeders: 4 },
     "too-large": { sizeBytes: 16 * 1024 ** 3 },
   };
@@ -195,10 +179,7 @@ Deno.test("evaluateRelease applies the deterministic policy", () => {
     };
     const result = testing.evaluateRelease(movie, release);
     assert(!result.ok, `${c.expected} should reject`);
-    assert(
-      result.reasons.includes(c.expected),
-      `${c.expected} reason recorded`,
-    );
+    assert(result.reasons.includes(c.expected), `${c.expected} reason recorded`);
   }
 });
 
@@ -258,22 +239,17 @@ Deno.test("isSelectable admits wanted and retryable failed only", () => {
     testing.isSelectable(baseMovie({ status: "failed", attempts: 2 })),
     "failed with attempts < cap is selectable",
   );
-  for (
-    const status of [
-      "selected",
-      "downloading",
-      "seeding",
-      "seed-stopped",
-      "transfer-ready",
-      "transferred",
-      "cleanup-pending",
-      "ignored",
-    ] as const
-  ) {
-    assert(
-      !testing.isSelectable(baseMovie({ status })),
-      `${status} is not selectable`,
-    );
+  for (const status of [
+    "selected",
+    "downloading",
+    "seeding",
+    "seed-stopped",
+    "transfer-ready",
+    "transferred",
+    "cleanup-pending",
+    "ignored",
+  ] as const) {
+    assert(!testing.isSelectable(baseMovie({ status })), `${status} is not selectable`);
   }
   assert(
     !testing.isSelectable(baseMovie({ status: "failed", attempts: 3 })),
@@ -439,11 +415,7 @@ Deno.test("select requires an existing movie and never creates one", async () =>
     },
     context,
   );
-  assertEquals(
-    store.resources.get("catalog-movie-999"),
-    undefined,
-    "select never creates a movie",
-  );
+  assertEquals(store.resources.get("catalog-movie-999"), undefined, "select never creates a movie");
 });
 
 Deno.test("select skips ineligible statuses and only acts on wanted or retryable failed", async () => {
@@ -489,10 +461,7 @@ Deno.test("select skips ineligible statuses and only acts on wanted or retryable
   );
   assertEquals(result.dataHandles.length, 0, "no ineligible movie is touched");
   for (let i = 1; i < id; i++) {
-    assert(
-      store.resources.has(`catalog-movie-${i}`),
-      `movie ${i} was preserved`,
-    );
+    assert(store.resources.has(`catalog-movie-${i}`), `movie ${i} was preserved`);
   }
 });
 
@@ -609,24 +578,12 @@ Deno.test("transition applies every allowed change", async () => {
             tmdbId: 1,
             to: status,
             infoHash: i === 0 ? "h1" : undefined,
-            releaseName: i === 0
-              ? "Example.Movie.2026.1080p.WEB-DL"
-              : undefined,
-            localPath: status === "cleanup-pending"
-              ? "/staging/movie-1"
-              : undefined,
-            remotePath: status === "transferred"
-              ? "/remote/movie-1"
-              : undefined,
-            transferredAt: status === "transferred"
-              ? "2026-08-21T09:00:00.000Z"
-              : undefined,
-            completedAt: status === "seed-stopped"
-              ? "2026-08-20T09:00:00.000Z"
-              : undefined,
-            error: status === "cleanup-pending"
-              ? "first cleanup failed"
-              : undefined,
+            releaseName: i === 0 ? "Example.Movie.2026.1080p.WEB-DL" : undefined,
+            localPath: status === "cleanup-pending" ? "/staging/movie-1" : undefined,
+            remotePath: status === "transferred" ? "/remote/movie-1" : undefined,
+            transferredAt: status === "transferred" ? "2026-08-21T09:00:00.000Z" : undefined,
+            completedAt: status === "seed-stopped" ? "2026-08-20T09:00:00.000Z" : undefined,
+            error: status === "cleanup-pending" ? "first cleanup failed" : undefined,
           },
         ],
       },
@@ -721,17 +678,16 @@ Deno.test("transition rejects transitions missing required fields for the target
   });
   await assertRejects(
     () =>
-      testing.executeTransition({
-        transitions: [{ tmdbId: 1, to: "transfer-ready" }],
-      }, context),
+      testing.executeTransition(
+        {
+          transitions: [{ tmdbId: 1, to: "transfer-ready" }],
+        },
+        context,
+      ),
     "transfer-ready requires",
   );
   await assertRejects(
-    () =>
-      testing.executeTransition(
-        { transitions: [{ tmdbId: 1, to: "failed" }] },
-        context,
-      ),
+    () => testing.executeTransition({ transitions: [{ tmdbId: 1, to: "failed" }] }, context),
     "failed requires error",
   );
   await assertRejects(
@@ -768,9 +724,12 @@ Deno.test("transition validates against the merged next state, not just the patc
     }),
   });
   // downloading -> seeding: infoHash is in merged state, not the patch.
-  await testing.executeTransition({
-    transitions: [{ tmdbId: 1, to: "seeding" }],
-  }, context);
+  await testing.executeTransition(
+    {
+      transitions: [{ tmdbId: 1, to: "seeding" }],
+    },
+    context,
+  );
   assertEquals(
     (store.resources.get("catalog-movie-1") as Movie).status,
     "seeding",
@@ -799,9 +758,12 @@ Deno.test("transition validates against the merged next state, not just the patc
     "seed-stopped",
     "seed-stopped succeeds with merged infoHash and patched completedAt",
   );
-  await testing.executeTransition({
-    transitions: [{ tmdbId: 1, to: "transfer-ready" }],
-  }, context);
+  await testing.executeTransition(
+    {
+      transitions: [{ tmdbId: 1, to: "transfer-ready" }],
+    },
+    context,
+  );
   // transfer-ready -> transferred: remotePath and transferredAt from patch,
   // infoHash from merged state.
   await testing.executeTransition(
@@ -830,9 +792,12 @@ Deno.test("transition fails when the merged state lacks a required field", async
   });
   await assertRejects(
     () =>
-      testing.executeTransition({
-        transitions: [{ tmdbId: 1, to: "selected" }],
-      }, context),
+      testing.executeTransition(
+        {
+          transitions: [{ tmdbId: 1, to: "selected" }],
+        },
+        context,
+      ),
     "selected requires infoHash",
   );
 });
@@ -927,21 +892,9 @@ Deno.test("cleanup success clears stale error even when the patch omits the erro
     context,
   );
   const movie = store.resources.get("catalog-movie-1") as Movie;
-  assertEquals(
-    movie.status,
-    "transferred",
-    "cleanup success transitions to transferred",
-  );
-  assertEquals(
-    movie.error,
-    null,
-    "stale error auto-cleared when patch omits error",
-  );
-  assertEquals(
-    movie.localCleanedAt,
-    "2026-08-22T09:05:00.000Z",
-    "localCleanedAt set",
-  );
+  assertEquals(movie.status, "transferred", "cleanup success transitions to transferred");
+  assertEquals(movie.error, null, "stale error auto-cleared when patch omits error");
+  assertEquals(movie.localCleanedAt, "2026-08-22T09:05:00.000Z", "localCleanedAt set");
 });
 
 Deno.test("cleanup success accepts an explicit error: null and clears the stale error", async () => {
@@ -1064,7 +1017,7 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
       snapshots: [
         { infoHash: "h1", kind: "seed", status: "seeding" },
         { infoHash: "h2", kind: "seed", status: "paused" },
-        { infoHash: "h3", kind: "seed", status: "missing" },
+        { infoHash: "h3", name: "Canonical Movie Payload", kind: "seed", status: "missing" },
         { infoHash: "h4", kind: "download", status: "completed" },
         { infoHash: "h5", kind: "seed", status: "paused" },
         { infoHash: "h6", kind: "seed", status: "seeding" },
@@ -1085,11 +1038,7 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
   const m2 = store.resources.get("catalog-movie-2") as Movie;
   assertEquals(m2.status, "seed-stopped", "seeding advanced to seed-stopped");
   assertEquals(m2.attempts, 2, "attempts preserved on advance to seed-stopped");
-  assertEquals(
-    typeof m2.completedAt,
-    "string",
-    "completedAt set on seed-stopped",
-  );
+  assertEquals(typeof m2.completedAt, "string", "completedAt set on seed-stopped");
   const m3 = store.resources.get("catalog-movie-3") as Movie;
   assertEquals(
     m3.status,
@@ -1098,21 +1047,18 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
   );
   assertEquals(m3.attempts, 3, "attempts preserved on no-op reconcile");
   assertEquals(
+    m3.releaseName,
+    "Canonical Movie Payload",
+    "transfer-ready payload name repaired from snapshot",
+  );
+  assertEquals(
     (store.resources.get("catalog-movie-4") as Movie).status,
     "seeding",
     "completed download remains supported",
   );
   const m5 = store.resources.get("catalog-movie-5") as Movie;
-  assertEquals(
-    m5.status,
-    "seed-stopped",
-    "completed selected torrent is deduplicated",
-  );
-  assertEquals(
-    typeof m5.completedAt,
-    "string",
-    "deduplicated torrent records completion",
-  );
+  assertEquals(m5.status, "seed-stopped", "completed selected torrent is deduplicated");
+  assertEquals(typeof m5.completedAt, "string", "deduplicated torrent records completion");
   assertEquals(
     (store.resources.get("catalog-movie-6") as Movie).status,
     "seeding",
@@ -1210,11 +1156,7 @@ Deno.test("reconcile with empty snapshots is a stable no-op", async () => {
   const before = new Map(store.resources);
   await testing.executeReconcile({ snapshots: [] }, context);
   assertEquals(store.writes.length, 0, "no writes on empty reconcile");
-  assertEquals(
-    store.resources.size,
-    before.size,
-    "no resource added or removed",
-  );
+  assertEquals(store.resources.size, before.size, "no resource added or removed");
 });
 
 Deno.test("reconcile never regresses transfer-ready under any present snapshot", async () => {
@@ -1239,16 +1181,8 @@ Deno.test("reconcile never regresses transfer-ready under any present snapshot",
     context,
   );
   const movie = store.resources.get("catalog-movie-1") as Movie;
-  assertEquals(
-    movie.status,
-    "transfer-ready",
-    "transfer-ready stays pending transfer",
-  );
-  assertEquals(
-    movie.completedAt,
-    "2026-08-20T09:00:00.000Z",
-    "completedAt preserved",
-  );
+  assertEquals(movie.status, "transfer-ready", "transfer-ready stays pending transfer");
+  assertEquals(movie.completedAt, "2026-08-20T09:00:00.000Z", "completedAt preserved");
   assertEquals(movie.attempts, 1, "attempts preserved");
 });
 
@@ -1321,11 +1255,7 @@ Deno.test("cleanup failure stays cleanup-pending and records the error", async (
   );
   const movie = store.resources.get("catalog-movie-1") as Movie;
   assertEquals(movie.status, "cleanup-pending", "status is cleanup-pending");
-  assertEquals(
-    movie.error,
-    "cleanup-failed: permission denied",
-    "error captured",
-  );
+  assertEquals(movie.error, "cleanup-failed: permission denied", "error captured");
 });
 
 Deno.test("interrupted download becomes retryable without incrementing attempts", async () => {
@@ -1352,22 +1282,12 @@ Deno.test("interrupted download becomes retryable without incrementing attempts"
   await testing.executePlan({}, context);
 
   const movie = store.resources.get("catalog-movie-1") as Movie;
-  const plan = store.resources.get("plan-current") as ReturnType<
-    typeof testing.schemas.plan.parse
-  >;
+  const plan = store.resources.get("plan-current") as ReturnType<typeof testing.schemas.plan.parse>;
   assertEquals(movie.status, "failed", "interrupted download is failed");
-  assertEquals(
-    movie.error,
-    "download-interrupted",
-    "recovery reason is retained",
-  );
+  assertEquals(movie.error, "download-interrupted", "recovery reason is retained");
   assertEquals(movie.infoHash, "h1", "partial torrent identity is preserved");
   assertEquals(movie.attempts, 1, "recovery does not consume another attempt");
-  assertEquals(
-    plan.retryable,
-    [1],
-    "next plan retries the interrupted download",
-  );
+  assertEquals(plan.retryable, [1], "next plan retries the interrupted download");
 });
 
 Deno.test("plan categorizes every actionable lifecycle state", async () => {
@@ -1385,56 +1305,30 @@ Deno.test("plan categorizes every actionable lifecycle state", async () => {
     "catalog-movie-11": baseMovie({ tmdbId: 11, status: "seed-stopped" }),
   });
   const result = await testing.executePlan({}, context);
-  const plan = store.resources.get("plan-current") as ReturnType<
-    typeof testing.schemas.plan.parse
-  >;
+  const plan = store.resources.get("plan-current") as ReturnType<typeof testing.schemas.plan.parse>;
   assertEquals(plan.wanted, [1, 2], "wanted collects wanted and selected");
   assertEquals(plan.retryable, [3], "retryable excludes attempts over cap");
-  assertEquals(
-    plan.downloading,
-    [9],
-    "downloading isolates in-flight downloads",
-  );
+  assertEquals(plan.downloading, [9], "downloading isolates in-flight downloads");
   assertEquals(plan.seeding, [10], "seeding isolates in-flight seeds");
-  assertEquals(
-    plan.seedStopped,
-    [11],
-    "seedStopped isolates metadata cleanup work",
-  );
-  assertEquals(
-    plan.transferReady,
-    [5],
-    "transferReady isolates transfer-ready",
-  );
-  assertEquals(
-    plan.cleanupPending,
-    [6],
-    "cleanupPending isolates cleanup-pending",
-  );
+  assertEquals(plan.seedStopped, [11], "seedStopped isolates metadata cleanup work");
+  assertEquals(plan.transferReady, [5], "transferReady isolates transfer-ready");
+  assertEquals(plan.cleanupPending, [6], "cleanupPending isolates cleanup-pending");
   assertEquals(result.dataHandles.length, 1, "one plan resource written");
 });
 
 Deno.test("malformed catalog records are logged not swallowed", async () => {
   const { context, store } = makeContext();
-  store.resources.set(
-    "catalog-movie-1",
-    baseMovie({ tmdbId: 1, status: "wanted" }),
-  );
+  store.resources.set("catalog-movie-1", baseMovie({ tmdbId: 1, status: "wanted" }));
   store.resources.set("catalog-movie-2", {
     ...baseMovie({ tmdbId: 2 }),
     title: null,
   });
   const before = store.logs.length;
-  const movies = await (await import("./movie_catalog.ts")).testing.executePlan(
-    {},
-    context,
-  );
+  const movies = await (await import("./movie_catalog.ts")).testing.executePlan({}, context);
   assertEquals(movies.dataHandles.length, 1, "plan still written");
   const warning = store.logs
     .slice(before)
-    .find((c) =>
-      c.level === "warning" && c.msg === "Discarded malformed catalog records"
-    );
+    .find((c) => c.level === "warning" && c.msg === "Discarded malformed catalog records");
   assert(warning, "warning logged for malformed record");
   const names = (warning!.props as { names: string[] }).names;
   assert(names.includes("catalog-movie-2"), "malformed name recorded");
@@ -1442,12 +1336,10 @@ Deno.test("malformed catalog records are logged not swallowed", async () => {
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.08.30.1", "model version");
+  assertEquals(model.version, "2026.08.30.2", "model version");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
-  for (
-    const method of ["ingest", "select", "transition", "reconcile", "plan"]
-  ) {
+  for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
     assert(method in model.methods, `${method} method present`);
   }
 });
@@ -1493,15 +1385,13 @@ Deno.test("each catalog method logs entry and completion", async () => {
   );
   await testing.executeReconcile({ snapshots: [] }, context);
   await testing.executePlan({}, context);
-  for (
-    const start of [
-      "ingest starting",
-      "select starting",
-      "transition starting",
-      "reconcile starting",
-      "plan starting",
-    ]
-  ) {
+  for (const start of [
+    "ingest starting",
+    "select starting",
+    "transition starting",
+    "reconcile starting",
+    "plan starting",
+  ]) {
     assert(
       store.logs.some((c) => c.level === "info" && c.msg === start),
       `${start} logged`,

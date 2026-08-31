@@ -1,7 +1,7 @@
 /** Safe local payload filesystem model for Hoardarr. @module */
 import { z } from "npm:zod@4";
 
-const VERSION = "2026.08.29.1";
+const VERSION = "2026.08.30.1";
 
 const CONFIG = {
   stagingRoot: "/home/saiguy/Downloads/hoardarr/movies",
@@ -1244,18 +1244,33 @@ async function executeCleanup(
     const handle = await context.writeResource("cleanup", `cleanup-${key}`, validRecord);
     return { dataHandles: [handle] };
   } catch (error) {
-    if (captures.value !== null) {
-      try {
-        await context.writeResource("cleanup", `cleanup-${key}`, captures.value);
-      } catch (writeError) {
-        context.logger.warning(
-          "Hoardarr media-files cleanup could not persist denied/failed record",
-          {
-            tmdbId,
-            error: bounded(String(writeError), 300),
-          },
-        );
-      }
+    const failure = bounded(String(error), 500);
+    const record =
+      captures.value ??
+      CleanupSchema.parse({
+        tmdbId,
+        performedAt: new Date().toISOString(),
+        stagingDir,
+        outcome: "failed",
+        reason: `cleanup failed unexpectedly: ${failure}`,
+        approvedFiles: priorManifest.entries.map((entry) => entry.relativePath),
+        deletedFiles: [],
+        reHashedEntries: [],
+        catalogStatus: catalog?.status ?? null,
+        catalogRemotePath: catalog?.remotePath ?? null,
+        catalogSha256:
+          typeof catalog?.sha256 === "string" && /^[0-9a-f]{64}$/.test(catalog.sha256)
+            ? catalog.sha256
+            : null,
+        errors: [failure],
+      });
+    try {
+      await context.writeResource("cleanup", `cleanup-${key}`, record);
+    } catch (writeError) {
+      context.logger.warning("Hoardarr media-files cleanup could not persist failure record", {
+        tmdbId,
+        error: bounded(String(writeError), 300),
+      });
     }
     throw error;
   }

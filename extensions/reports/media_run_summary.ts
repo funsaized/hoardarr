@@ -5,8 +5,10 @@ const REPORT_NAME = "hoardarr/media-run-summary";
 const TMDB = "@keeb/tmdb-lookup",
   MOVIE_CAT = "hoardarr/movie-catalog",
   EPISODE_CAT = "hoardarr/episode-catalog",
-  NETWORK = "hoardarr/network-session";
-const KNOWN = new Set([TMDB, MOVIE_CAT, EPISODE_CAT, NETWORK]);
+  NETWORK = "hoardarr/network-session",
+  MEDIA_FILES = "hoardarr/media-files",
+  SSH = "@swamp/ssh";
+const KNOWN = new Set([TMDB, MOVIE_CAT, EPISODE_CAT, NETWORK, MEDIA_FILES, SSH]);
 const DECODER = new TextDecoder();
 
 const STATUSES = [
@@ -797,7 +799,7 @@ export async function collect(context: ReportContext): Promise<Collected> {
 }
 
 export const report = {
-  name: REPORT_NAME,
+  name: "hoardarr/media-run-summary",
   description:
     "Hoardarr unified media workflow summary — discovered/wanted/selected/downloading/transferred/cleanup counts across movie and episode catalogs, plus network safety evidence.",
   scope: "workflow" as const,

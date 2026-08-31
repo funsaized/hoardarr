@@ -1,7 +1,7 @@
 /** Hoardarr local episode catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4";
 
-const MODEL_VERSION = "2026.08.30.1";
+const MODEL_VERSION = "2026.08.30.2";
 const SPEC_EPISODE = "episode";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -100,6 +100,7 @@ const TransitionArgsSchema = z.object({
 
 const TorrentSnapshotSchema = z.object({
   infoHash: z.string().min(1).max(200),
+  name: z.string().min(1).max(500).optional(),
   kind: z.enum(["download", "seed"]),
   status: z.string().min(1).max(100),
   progress: z.number().min(0).max(100).nullable().optional(),
@@ -529,10 +530,15 @@ function advanceFromSnapshot(
 ): Episode | null {
   if (TERMINAL_STATUSES.has(episode.status)) return null;
   if (!episode.infoHash) return null;
+  const current =
+    snapshot?.name !== undefined && snapshot.name !== episode.releaseName
+      ? { ...episode, releaseName: snapshot.name }
+      : episode;
   // seed-stopped and transfer-ready are durable workflow checkpoints. Torrent
-  // metadata may be absent while removal or transfer resumes in a later run.
+  // metadata may be absent while removal or transfer resumes in a later run,
+  // but a present snapshot can still repair the durable payload name.
   if (episode.status === "seed-stopped" || episode.status === "transfer-ready") {
-    return null;
+    return current === episode ? null : current;
   }
   if (!snapshot) {
     if (episode.status === "downloading" || episode.status === "seeding") {
@@ -543,25 +549,25 @@ function advanceFromSnapshot(
   if (snapshot.kind === "download") {
     if (snapshot.status === "completed") {
       if (episode.status === "selected" || episode.status === "downloading") {
-        return { ...episode, status: "seeding" };
+        return { ...current, status: "seeding" };
       }
     }
     if (episode.status === "selected" && snapshot.status === "downloading") {
-      return { ...episode, status: "downloading" };
+      return { ...current, status: "downloading" };
     }
     if (snapshot.status === "failed") {
       if (episode.status === "downloading") {
-        return { ...episode, status: "failed", error: "download-failed" };
+        return { ...current, status: "failed", error: "download-failed" };
       }
     }
-    return null;
+    return current === episode ? null : current;
   }
   if (snapshot.kind === "seed") {
     if (
       (episode.status === "selected" || episode.status === "downloading") &&
       snapshot.status === "seeding"
     ) {
-      return { ...episode, status: "seeding" };
+      return { ...current, status: "seeding" };
     }
     if (
       (episode.status === "selected" ||
@@ -572,17 +578,17 @@ function advanceFromSnapshot(
         snapshot.status === "seed-stopped")
     ) {
       return {
-        ...episode,
+        ...current,
         status: "seed-stopped",
         completedAt: episode.completedAt ?? now,
       };
     }
     if (snapshot.status === "missing" || snapshot.status === "failed") {
       if (episode.status === "seeding") {
-        return { ...episode, status: "failed", error: `seed-${snapshot.status}` };
+        return { ...current, status: "failed", error: `seed-${snapshot.status}` };
       }
     }
-    return null;
+    return current === episode ? null : current;
   }
   return null;
 }

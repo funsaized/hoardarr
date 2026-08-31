@@ -493,24 +493,26 @@ Deno.test("plan rows fill gaps but never override step rows", async () => {
   assert(json.counts.transferReady === 1, "transfer-ready is separate from downloading");
 });
 
-Deno.test("failed known step degrades the report", async () => {
-  const result = await report.execute(
-    makeContext(
-      [
-        {
-          stepName: "discover",
-          status: "failed",
-          modelType: "@keeb/tmdb-lookup",
-          modelId: "t",
-          dataHandles: [],
-        },
-      ],
-      "succeeded",
-    ),
-  );
-  assert(result.json.degraded === true, "failed step triggers degraded");
-  assert(
-    result.json.errors.some((e) => e.includes("status=failed")),
-    "step status recorded in errors",
-  );
+Deno.test("failed workflow producers degrade the report", async () => {
+  for (const modelType of ["@keeb/tmdb-lookup", "hoardarr/media-files", "@swamp/ssh"]) {
+    const result = await report.execute(
+      makeContext(
+        [
+          {
+            stepName: "failed-step",
+            status: "failed",
+            modelType,
+            modelId: "producer",
+            dataHandles: [],
+          },
+        ],
+        "succeeded",
+      ),
+    );
+    assert(result.json.degraded === true, `${modelType} failure must degrade`);
+    assert(
+      result.json.errors.some((e) => e.includes(`status=failed (${modelType})`)),
+      `${modelType} status must be recorded in errors`,
+    );
+  }
 });

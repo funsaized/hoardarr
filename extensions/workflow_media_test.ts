@@ -29,7 +29,7 @@ function jobBlock(name: string): string {
   return next < 0 ? rest : rest.slice(0, next);
 }
 
-Deno.test("workflow preserves scaffold UUID and gates on dryRun input", () => {
+Deno.test("workflow preserves scaffold UUID and owns the live production schedule", () => {
   assert(
     workflow.includes("id: 507d22e7-9f78-4a93-bb10-d86ab2dba960"),
     "scaffold UUID must be preserved exactly",
@@ -41,8 +41,14 @@ Deno.test("workflow preserves scaffold UUID and gates on dryRun input", () => {
     ),
     "dryRun input must default to true",
   );
-  assert(!workflow.includes("\ntrigger:"), "no trigger/schedule while production-gated");
-  assert(!/schedule:/.test(workflow), "no cron schedule while production-gated");
+  assert(
+    workflow.includes('trigger:\n  schedule: "0 2,8,14,22 * * *"'),
+    "unified workflow must own the production schedule",
+  );
+  assert(
+    /trigger:\n\s+schedule: "0 2,8,14,22 \* \* \*"\n\s+inputs:\n\s+dryRun: false/m.test(workflow),
+    "scheduled runs must be live",
+  );
 });
 
 Deno.test("report requirement targets the unified media summary", () => {
@@ -93,6 +99,18 @@ Deno.test("inspect-and-plan covers both catalogs from a single Torlink snapshot"
     reconcileMovies.includes("snapshot-current") && reconcileEpisodes.includes("snapshot-current"),
     "both catalogs must reconcile from one Torlink snapshot",
   );
+  for (const name of [
+    "reconcile-active-torrents",
+    "reconcile-active-episodes",
+    "reconcile-selected-movies",
+    "reconcile-selected-episodes",
+    "reconcile-seeding-movies",
+    "reconcile-seeding-episodes",
+    "reconcile-seed-stopped-movies",
+    "reconcile-seed-stopped-episodes",
+  ]) {
+    assert(step(name).includes('"name": torrent.name'), `${name} must persist the payload name`);
+  }
   assert(
     reconcileEpisodes.includes("- step: sync-active-torlink") &&
       reconcileEpisodes.includes("type: succeeded"),

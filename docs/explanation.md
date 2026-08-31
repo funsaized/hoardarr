@@ -13,8 +13,8 @@ The production path has five layers:
 ```text
 systemd user service
   -> swamp serve
-    -> movies workflow (production schedule)
-    -> media workflow (no trigger until Gate E cutover)
+    -> media workflow (production schedule)
+    -> movies workflow (manual legacy recovery)
       -> typed model methods
         -> versioned data and reports
 ```
@@ -24,9 +24,8 @@ workflow dependencies, guards, and CEL expressions. Model methods interact with
 NordVPN, Tailscale, Torlink, the local filesystem, and the Mac. Swamp persists
 their typed outputs and runs the summary reports.
 
-The `movies` workflow owns the current production schedule. The `media`
-workflow is the future unified path; it currently runs only as a manual dry
-run until Gate E approves a schedule cutover.
+The `media` workflow owns the production schedule. The legacy `movies`
+workflow remains available as a manual movie-only recovery path.
 
 No LLM or agent decides what to download, controls the network, or handles
 files. Agents are useful during development and troubleshooting, but they are
@@ -73,9 +72,8 @@ episode per run.
 
 ## Why Hoardarr uses a workflow
 
-The `movies` workflow coordinates the current production path. The `media`
-workflow coordinates the unified movies + TV path once Gate E authorises
-scheduling. Both follow the same shape:
+The `media` workflow coordinates the production movies + TV path. The legacy
+`movies` workflow follows the same movie-only shape for manual recovery:
 
 1. `inspect-and-plan` refreshes live state and computes pending work.
 2. `download` establishes the VPN invariant, downloads, seeds, and stops Torlink.

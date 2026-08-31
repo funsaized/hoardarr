@@ -1,7 +1,7 @@
 /** Hoardarr local movie catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4";
 
-const MODEL_VERSION = "2026.08.30.1";
+const MODEL_VERSION = "2026.08.30.2";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -9,10 +9,8 @@ const MAX_RETRY_ATTEMPTS = 3;
 const MIN_SEEDERS = 5;
 const MAX_BYTES = 15 * 1024 ** 3;
 const TITLE_YEAR_REGEX = /(^|[^0-9])(\d{4})([^0-9]|$)/;
-const REJECT_RESOLUTION_REGEX =
-  /\b(cam|hdcam|ts|telesync|hdts|tc|telecine|hdtc)\b/i;
-const REJECT_EXTENSION_REGEX =
-  /\.(exe|bat|cmd|sh|zip|rar|7z|tar|gz|bz2|xz|iso|img)$/i;
+const REJECT_RESOLUTION_REGEX = /\b(cam|hdcam|ts|telesync|hdts|tc|telecine|hdtc)\b/i;
+const REJECT_EXTENSION_REGEX = /\.(exe|bat|cmd|sh|zip|rar|7z|tar|gz|bz2|xz|iso|img)$/i;
 
 const MovieStatusSchema = z.enum([
   "wanted",
@@ -87,6 +85,7 @@ const TransitionArgsSchema = z.object({
 
 const TorrentSnapshotSchema = z.object({
   infoHash: z.string().min(1).max(200),
+  name: z.string().min(1).max(500).optional(),
   kind: z.enum(["download", "seed"]),
   status: z.string().min(1).max(100),
   progress: z.number().min(0).max(100).nullable().optional(),
@@ -145,11 +144,7 @@ type DataRecord = {
 
 type DataRepository = {
   findAllForModel(type: string, modelId: string): Promise<DataRecord[]>;
-  getContent(
-    type: string,
-    modelId: string,
-    name: string,
-  ): Promise<Uint8Array | null>;
+  getContent(type: string, modelId: string, name: string): Promise<Uint8Array | null>;
 };
 
 type Context = {
@@ -169,9 +164,7 @@ type Context = {
   };
 };
 
-const ALLOWED_TRANSITIONS: Readonly<
-  Record<MovieStatus, ReadonlyArray<MovieStatus>>
-> = {
+const ALLOWED_TRANSITIONS: Readonly<Record<MovieStatus, ReadonlyArray<MovieStatus>>> = {
   wanted: ["selected", "ignored", "failed"],
   selected: ["downloading", "wanted", "ignored", "failed"],
   downloading: ["seeding", "failed"],
@@ -184,11 +177,7 @@ const ALLOWED_TRANSITIONS: Readonly<
   ignored: [],
 };
 
-const TERMINAL_STATUSES = new Set<MovieStatus>([
-  "transferred",
-  "cleanup-pending",
-  "ignored",
-]);
+const TERMINAL_STATUSES = new Set<MovieStatus>(["transferred", "cleanup-pending", "ignored"]);
 
 function movieInstanceName(tmdbId: number): string {
   return `catalog-movie-${tmdbId}`;
@@ -206,7 +195,7 @@ function yearMatches(releaseName: string, year: number | null): boolean {
 
 function is1080pWebDl(lower: string): boolean {
   if (!/\b1080p\b/i.test(lower)) return false;
-  return /\bweb[\s.\-]?(dl|rip)\b/i.test(lower);
+  return /\bweb[\s.-]?(dl|rip)\b/i.test(lower);
 }
 
 function rejectReasons(release: Release, year: number | null): string[] {
@@ -229,9 +218,7 @@ function evaluateRelease(
   const reasons: string[] = [];
   const releaseNormalized = normalize(release.name);
   const movieNormalized = normalize(movie.title);
-  if (
-    movieNormalized.length > 0 && !releaseNormalized.includes(movieNormalized)
-  ) {
+  if (movieNormalized.length > 0 && !releaseNormalized.includes(movieNormalized)) {
     reasons.push("title-mismatch");
   }
   reasons.push(...rejectReasons(release, movie.year));
@@ -337,9 +324,7 @@ function validateTransitionBatch(transitions: Transition[]): string | null {
     seen.add(t.tmdbId);
   }
   if (dupes.size > 0) {
-    return `duplicate tmdbId entries in batch: ${
-      [...dupes].sort((a, b) => a - b).join(",")
-    }`;
+    return `duplicate tmdbId entries in batch: ${[...dupes].sort((a, b) => a - b).join(",")}`;
   }
   return null;
 }
@@ -424,11 +409,7 @@ function applyPatch(movie: Movie, transition: Transition): Movie {
   return next;
 }
 
-function finalizeTransition(
-  from: Movie,
-  merged: Movie,
-  transition: Transition,
-): Movie {
+function finalizeTransition(from: Movie, merged: Movie, transition: Transition): Movie {
   const next: Movie = { ...merged, status: transition.to };
   if (transition.to === "downloading") {
     next.attempts = from.attempts + 1;
@@ -448,9 +429,7 @@ function applyTransition(movie: Movie, transition: Transition): Movie {
     return merged;
   }
   if (!isAllowedTransition(movie.status, transition.to)) {
-    throw new Error(
-      `transition not allowed: ${movie.tmdbId} ${movie.status} -> ${transition.to}`,
-    );
+    throw new Error(`transition not allowed: ${movie.tmdbId} ${movie.status} -> ${transition.to}`);
   }
   return finalizeTransition(movie, merged, transition);
 }
@@ -462,10 +441,15 @@ function advanceFromSnapshot(
 ): Movie | null {
   if (TERMINAL_STATUSES.has(movie.status)) return null;
   if (!movie.infoHash) return null;
+  const current =
+    snapshot?.name !== undefined && snapshot.name !== movie.releaseName
+      ? { ...movie, releaseName: snapshot.name }
+      : movie;
   // seed-stopped and transfer-ready are durable workflow checkpoints. Torrent
-  // metadata may be absent while removal or transfer resumes in a later run.
+  // metadata may be absent while removal or transfer resumes in a later run,
+  // but a present snapshot can still repair the durable payload name.
   if (movie.status === "seed-stopped" || movie.status === "transfer-ready") {
-    return null;
+    return current === movie ? null : current;
   }
   if (!snapshot) {
     if (movie.status === "downloading" || movie.status === "seeding") {
@@ -476,25 +460,25 @@ function advanceFromSnapshot(
   if (snapshot.kind === "download") {
     if (snapshot.status === "completed") {
       if (movie.status === "selected" || movie.status === "downloading") {
-        return { ...movie, status: "seeding" };
+        return { ...current, status: "seeding" };
       }
     }
     if (movie.status === "selected" && snapshot.status === "downloading") {
-      return { ...movie, status: "downloading" };
+      return { ...current, status: "downloading" };
     }
     if (snapshot.status === "failed") {
       if (movie.status === "downloading") {
-        return { ...movie, status: "failed", error: "download-failed" };
+        return { ...current, status: "failed", error: "download-failed" };
       }
     }
-    return null;
+    return current === movie ? null : current;
   }
   if (snapshot.kind === "seed") {
     if (
       (movie.status === "selected" || movie.status === "downloading") &&
       snapshot.status === "seeding"
     ) {
-      return { ...movie, status: "seeding" };
+      return { ...current, status: "seeding" };
     }
     if (
       (movie.status === "selected" ||
@@ -505,17 +489,17 @@ function advanceFromSnapshot(
         snapshot.status === "seed-stopped")
     ) {
       return {
-        ...movie,
+        ...current,
         status: "seed-stopped",
         completedAt: movie.completedAt ?? now,
       };
     }
     if (snapshot.status === "missing" || snapshot.status === "failed") {
       if (movie.status === "seeding") {
-        return { ...movie, status: "failed", error: `seed-${snapshot.status}` };
+        return { ...current, status: "failed", error: `seed-${snapshot.status}` };
       }
     }
-    return null;
+    return current === movie ? null : current;
   }
   return null;
 }
@@ -531,9 +515,7 @@ function computePlan(movies: ReadonlyArray<Movie>): Plan {
   for (const movie of movies) {
     if (movie.status === "wanted" || movie.status === "selected") {
       wanted.push(movie.tmdbId);
-    } else if (
-      movie.status === "failed" && movie.attempts < MAX_RETRY_ATTEMPTS
-    ) {
+    } else if (movie.status === "failed" && movie.attempts < MAX_RETRY_ATTEMPTS) {
       retryable.push(movie.tmdbId);
     } else if (movie.status === "downloading") {
       downloading.push(movie.tmdbId);
@@ -560,31 +542,18 @@ function computePlan(movies: ReadonlyArray<Movie>): Plan {
   };
 }
 
-async function loadMovie(
-  context: Context,
-  tmdbId: number,
-): Promise<Movie | null> {
+async function loadMovie(context: Context, tmdbId: number): Promise<Movie | null> {
   const raw = await context.readResource(movieInstanceName(tmdbId));
   if (!raw) return null;
   return MovieSchema.parse(raw);
 }
 
-async function writeMovie(
-  context: Context,
-  movie: Movie,
-): Promise<{ name: string }> {
-  return await context.writeResource(
-    SPEC_MOVIE,
-    movieInstanceName(movie.tmdbId),
-    movie,
-  );
+async function writeMovie(context: Context, movie: Movie): Promise<{ name: string }> {
+  return await context.writeResource(SPEC_MOVIE, movieInstanceName(movie.tmdbId), movie);
 }
 
 async function loadAllMovies(context: Context): Promise<Movie[]> {
-  const records = await context.dataRepository.findAllForModel(
-    context.modelType,
-    context.modelId,
-  );
+  const records = await context.dataRepository.findAllForModel(context.modelType, context.modelId);
   const movies: Movie[] = [];
   const malformed: string[] = [];
   for (const record of records) {
@@ -596,7 +565,7 @@ async function loadAllMovies(context: Context): Promise<Movie[]> {
     }
     try {
       movies.push(MovieSchema.parse(raw));
-    } catch (_error) {
+    } catch {
       malformed.push(record.name);
     }
   }
@@ -692,9 +661,7 @@ async function executeTransition(
   for (const transition of args.transitions) {
     const existing = await loadMovie(context, transition.tmdbId);
     if (!existing) {
-      throw new Error(
-        `transition target not found in catalog: ${transition.tmdbId}`,
-      );
+      throw new Error(`transition target not found in catalog: ${transition.tmdbId}`);
     }
     const next = applyTransition(existing, transition);
     updates.push({ from: existing, next });
@@ -762,8 +729,7 @@ export const model = {
   globalArguments: z.object({}),
   resources: {
     [SPEC_MOVIE]: {
-      description:
-        "One catalog movie record keyed by TMDB id, identity is always the TMDB id.",
+      description: "One catalog movie record keyed by TMDB id, identity is always the TMDB id.",
       schema: MovieSchema,
       lifetime: "infinite" as const,
       garbageCollection: 200,
@@ -787,8 +753,7 @@ export const model = {
       description:
         "Apply the deterministic release selection policy to each movie in a single fan-out call; only wanted or retryable-failed records are eligible.",
       arguments: SelectArgsSchema,
-      execute: (args: { items: SelectItem[] }, context: Context) =>
-        executeSelect(args, context),
+      execute: (args: { items: SelectItem[] }, context: Context) => executeSelect(args, context),
     },
     transition: {
       description:
@@ -808,8 +773,7 @@ export const model = {
       description:
         "Compute the catalog plan listing wanted, retryable, downloading, seeding, seed-stopped, transfer-ready, and cleanup-pending TMDB ids.",
       arguments: PlanArgsSchema,
-      execute: (_args: Record<string, never>, context: Context) =>
-        executePlan(_args, context),
+      execute: (_args: Record<string, never>, context: Context) => executePlan(_args, context),
     },
   },
 };

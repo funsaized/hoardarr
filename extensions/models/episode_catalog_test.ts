@@ -176,7 +176,7 @@ Deno.test("identity: tmdbEpisodeId must be a positive integer and instance name 
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/episode-catalog", "model type");
-  assertEquals(model.version, "2026.08.30.1", "model version");
+  assertEquals(model.version, "2026.08.30.2", "model version");
   assert("episode" in model.resources, "episode spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
@@ -568,7 +568,7 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
     {
       snapshots: [
         { infoHash: "h1", kind: "download", status: "completed" },
-        { infoHash: "h2", kind: "seed", status: "paused" },
+        { infoHash: "h2", name: "Canonical Episode Payload", kind: "seed", status: "paused" },
         { infoHash: "h3", kind: "seed", status: "missing" },
       ],
     },
@@ -583,6 +583,11 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
     (store.resources.get("catalog-episode-2") as Episode).status,
     "seed-stopped",
     "seeding advanced to seed-stopped",
+  );
+  assertEquals(
+    (store.resources.get("catalog-episode-2") as Episode).releaseName,
+    "Canonical Episode Payload",
+    "episode payload name updated from snapshot",
   );
   assertEquals(
     (store.resources.get("catalog-episode-3") as Episode).status,

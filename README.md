@@ -9,8 +9,8 @@ media to a Mac running iCloud Drive.
 The unified `media` workflow batches movies and TV inside a single NordVPN
 download window, transfers movies and their local cleanup before one episode,
 and uses an `e-<tmdbEpisodeId>` local identity and `Media/TV` Mac destination
-for episodes. The `media` workflow has no trigger; the existing `movies`
-workflow remains the production path until the Gate E cutover.
+for episodes. The `media` workflow owns the production schedule; the legacy
+`movies` workflow remains available for manual movie-only recovery.
 
 This guide takes you from a clone to a safe dry run. Live downloads, network
 changes, file transfers, cleanup, and scheduling are separate opt-in steps.
@@ -45,7 +45,7 @@ If your host differs, adapt the deployment before running the bootstrap:
 | Linux user, home, binaries, and repository paths | `extensions/models/host_bootstrap.ts`, `extensions/models/media_files.ts`, `assets/systemd/*.service`, `models/@funsaized/torlink/torlink.yaml`, `models/@swamp/ssh/mac.yaml`, `models/@whyvez/disk-usage/staging-disk.yaml`, `vaults/local_encryption/*.yaml`, `workflows/workflow-movies.yaml`, `workflows/workflow-media.yaml` |
 | Mac user, host, SSH key, and iCloud path | `models/@swamp/ssh/mac.yaml`, `extensions/models/network_session.ts`, `workflows/workflow-hoardarr-bootstrap.yaml`, `workflows/workflow-movies.yaml`, `workflows/workflow-media.yaml` |
 | NordVPN country and city | `extensions/models/network_session.ts` |
-| Reconciliation schedule | `workflows/workflow-movies.yaml` (production); `workflows/workflow-media.yaml` is untriggered until Gate E |
+| Reconciliation schedule | `workflows/workflow-media.yaml` (production); `workflows/workflow-movies.yaml` is manual only |
 | TV master list (TMDB show ids) | `models/hoardarr/episode-catalog/episode-catalog.yaml` |
 
 Preserve existing model and workflow IDs. Run the tests and workflow validation
@@ -193,7 +193,7 @@ swamp report get @swamp/workflow-summary --workflow hoardarr-bootstrap --json
 A dry run inspects the host and plans existing catalog work. It does not perform
 discovery, network transitions, downloads, transfers, or cleanup.
 
-Movies (production path with schedule):
+Movies (manual legacy path):
 
 ```bash
 swamp workflow validate movies --json
@@ -202,7 +202,7 @@ swamp report get hoardarr/movie-run-summary --workflow movies --markdown
 swamp data get movie-catalog plan-current --json
 ```
 
-Unified movies + TV (no trigger; dry-run only until Gate E cutover):
+Unified movies + TV (production path with schedule):
 
 ```bash
 swamp workflow validate media --json
@@ -270,20 +270,18 @@ swamp report get @swamp/method-summary --model network-session --json
 
 ## 9. Run the live workflow
 
-Review `workflows/workflow-movies.yaml` before the first live run. It can change
+Review `workflows/workflow-media.yaml` before the first live run. It can change
 network state, download torrents, write to the Mac, and delete a verified local
-payload after transfer. The unified `media` workflow is currently dry-run only
-and intentionally has no schedule; do not run it with `dryRun=false` until Gate
-E authorises the cutover.
+payload after transfer.
 
 ```bash
 swamp run history --active --json
-swamp workflow validate movies --json
-swamp workflow run movies --input dryRun=false
-swamp report get hoardarr/movie-run-summary --workflow movies --markdown
+swamp workflow validate media --json
+swamp workflow run media --input dryRun=false
+swamp report get hoardarr/media-run-summary --workflow media --markdown
 ```
 
-Do not start a manual run while another movies run is active. Start with content
+Do not start a manual run while another media run is active. Start with content
 you are authorized to download. Watch the first run from a local or LAN session,
 not through Tailscale alone.
 
@@ -291,7 +289,7 @@ not through Tailscale alone.
 
 The checked-in schedule runs at `02:00`, `08:00`, `14:00`, and `22:00` according
 to the Swamp server's cron interpretation. Change and revalidate the workflow if
-you want another schedule. The `media` workflow stays untriggered until Gate E.
+you want another schedule.
 
 Enable scheduling only after a live run and recovery have succeeded. Starting
 the Swamp service activates the checked-in `dryRun: false` trigger, so scheduled
@@ -305,7 +303,7 @@ swamp model method run hoardarr-swamp-unit startUser
 swamp model method run hoardarr-swamp-unit syncUser
 ```
 
-Do not enable `torlink.service`. The movies workflow starts and stops Torlink
+Do not enable `torlink.service`. The media workflow starts and stops Torlink
 inside the verified VPN window.
 
 ## Operate Hoardarr

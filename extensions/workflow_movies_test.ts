@@ -8,6 +8,11 @@ const workflow = await Deno.readTextFile(
   new URL("../workflows/workflow-movies.yaml", import.meta.url),
 );
 
+Deno.test("legacy movie workflow has no production trigger", () => {
+  assert(!workflow.includes("\ntrigger:"), "legacy workflow must not race the unified schedule");
+  assert(!/schedule:/.test(workflow), "legacy workflow must remain manual");
+});
+
 Deno.test("weekly discovery queues at most ten movies", () => {
   const discovery = step("discover-digital-releases");
   assert(discovery.includes("limit: 10"), "weekly discovery limit must be ten");
@@ -90,10 +95,7 @@ Deno.test("in-flight-only runs may continue after guarded discovery", () => {
 
 Deno.test("completed selected torrents are reconciled before add", () => {
   const sync = step("sync-selected-torrents");
-  assert(
-    sync.includes("methodName: sync"),
-    "dedupe must refresh live Torlink state",
-  );
+  assert(sync.includes("methodName: sync"), "dedupe must refresh live Torlink state");
   const reconcile = step("reconcile-selected-torrents");
   assert(
     reconcile.includes("- step: sync-selected-torrents") &&
@@ -157,4 +159,24 @@ Deno.test("cleanup requires current-run transfer or cleanup-pending work", () =>
       cleanup.includes("attributes.cleanupPending"),
     "cleanup-local must use run-scoped transfer authorization",
   );
+});
+
+Deno.test("movie staging survives removed torrent metadata", () => {
+  const stage = step("stage-payload");
+  assert(
+    stage.includes("catalog-movie-") && stage.includes("attributes.releaseName"),
+    "staging must use the durable catalog release name",
+  );
+  assert(!stage.includes("snapshot-current"), "staging must not require removed torrent metadata");
+});
+
+Deno.test("reconciliation persists Torlink's canonical payload name", () => {
+  for (const name of [
+    "reconcile-active-torrents",
+    "reconcile-selected-torrents",
+    "reconcile-seeding",
+    "reconcile-seed-stopped",
+  ]) {
+    assert(step(name).includes('"name": torrent.name'), `${name} must persist the payload name`);
+  }
 });

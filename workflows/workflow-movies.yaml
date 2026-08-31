@@ -13,10 +13,6 @@ inputs:
       type: boolean
       default: true
       description: Inspect and plan without discovery, network transitions, downloads, transfer, or cleanup.
-trigger:
-  schedule: "0 2,8,14,22 * * *"
-  inputs:
-    dryRun: false
 reports:
   require:
     - hoardarr/movie-run-summary
@@ -128,6 +124,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -305,6 +302,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -448,6 +446,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -525,6 +524,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -752,9 +752,8 @@ jobs:
             tmdbId: >-
               ${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}
             sourceName: >-
-              ${{ data.latest("torlink", "snapshot-current").attributes.torrents
-                .filter(torrent, torrent.infoHash == data.latest("movie-catalog", "catalog-movie-" +
-                  string(data.latest("movie-catalog", "plan-current").attributes.transferReady[0])).attributes.infoHash)[0].name }}
+              ${{ data.latest("movie-catalog", "catalog-movie-" +
+                string(data.latest("movie-catalog", "plan-current").attributes.transferReady[0])).attributes.releaseName }}
         dependsOn:
           - step: assert-mac-check
             condition:

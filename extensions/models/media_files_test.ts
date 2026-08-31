@@ -665,6 +665,56 @@ Deno.test("cleanup persists denied record and rethrows when authorization fails"
   }
 });
 
+Deno.test("cleanup persists unexpected post-authorization failures", async () => {
+  const root = await Deno.makeTempDir({ prefix: "hoardarr-cleanup-" });
+  try {
+    const tmdbId = 7012;
+    await writePayload(root, tmdbId, { "movie.mkv": "PAYLOAD" });
+    const fileSha = await sha256OfFile(`${root}/${tmdbId}/movie.mkv`);
+    const aggregate = await sha256OfText(`${fileSha}  movie.mkv\n`);
+    const { context, store, written } = makeContext({
+      stagingRoot: root,
+      catalogType: "hoardarr/movie-catalog",
+      catalogId: "cat-1",
+      catalogResources: [
+        {
+          name: `catalog-movie-${tmdbId}`,
+          value: { status: "transferred", remotePath: "/remote/x", sha256: aggregate },
+        },
+      ],
+    });
+    store.resources.set(`manifest-${tmdbId}`, {
+      specName: "manifest",
+      value: {
+        tmdbId,
+        generatedAt: "2026-08-30T00:00:00.000Z",
+        stagingDir: `${root}/${tmdbId}`,
+        entries: [{ relativePath: "movie.mkv", bytes: 7, sha256: fileSha }],
+        totalBytes: 7,
+        aggregateSha256: aggregate,
+      },
+    });
+    context.globalArgs.sha256Binary = `${root}/missing-sha256sum`;
+
+    let threw: unknown = null;
+    try {
+      await model.methods.cleanup.execute({ tmdbId }, context);
+    } catch (error) {
+      threw = error;
+    }
+
+    assert(threw !== null, "unexpected hash failure must propagate");
+    const cleanup = written.find((entry) => entry.name === `cleanup-${tmdbId}`);
+    assert(cleanup?.value.outcome === "failed", "failed cleanup record must be persisted");
+    assert(
+      String(cleanup.value.reason).includes("cleanup failed unexpectedly"),
+      "failure reason must identify the unexpected cleanup error",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("cleanup rejects cross-model lookups whose type is not hoardarr/movie-catalog", async () => {
   const root = await Deno.makeTempDir({ prefix: "hoardarr-cleanup-" });
   try {

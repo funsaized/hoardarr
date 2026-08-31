@@ -13,6 +13,10 @@ inputs:
       type: boolean
       default: true
       description: Inspect and plan without discovery, network transitions, downloads, transfer, or cleanup.
+trigger:
+  schedule: "0 2,8,14,22 * * *"
+  inputs:
+    dryRun: false
 reports:
   require:
     - hoardarr/media-run-summary
@@ -183,6 +187,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -204,6 +209,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -474,6 +480,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -495,6 +502,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -747,6 +755,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -768,6 +777,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -891,6 +901,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
@@ -921,6 +932,7 @@ jobs:
               ${{ data.latest("torlink", "snapshot-current").attributes.torrents
                 .map(torrent, {
                   "infoHash": torrent.infoHash,
+                  "name": torrent.name,
                   "kind": torrent.kind,
                   "status": torrent.status,
                   "progress": torrent.progress
