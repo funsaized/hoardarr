@@ -93,6 +93,18 @@ Deno.test("in-flight-only runs may continue after guarded discovery", () => {
   );
 });
 
+Deno.test("Torlink readiness follows systemd start before version health", () => {
+  const readiness = step("wait-for-torlink-health");
+  assert(
+    readiness.includes("methodName: waitHealthy") && readiness.includes("- step: start-torlink"),
+    "readiness must follow systemd activation",
+  );
+  assert(
+    step("assert-torlink-health").includes("- step: wait-for-torlink-health"),
+    "version health must follow HTTP readiness",
+  );
+});
+
 Deno.test("completed selected torrents are reconciled before add", () => {
   const sync = step("sync-selected-torrents");
   assert(sync.includes("methodName: sync"), "dedupe must refresh live Torlink state");

@@ -199,6 +199,18 @@ jobs:
               type: succeeded
         weight: 0
         allowFailure: false
+      - name: wait-for-torlink-health
+        description: Wait for the loopback API to accept requests after systemd activation.
+        task:
+          type: model_method
+          modelIdOrName: torlink
+          methodName: waitHealthy
+        dependsOn:
+          - step: start-torlink
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
       - name: assert-torlink-health
         description: Require matching CLI and loopback API versions.
         task:
@@ -206,7 +218,7 @@ jobs:
           modelIdOrName: torlink
           methodName: health
         dependsOn:
-          - step: start-torlink
+          - step: wait-for-torlink-health
             condition:
               type: succeeded
         weight: 0

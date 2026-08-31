@@ -217,6 +217,15 @@ Deno.test("download reconciles, plans, adds, and waits for both catalogs in one 
   const stop = step("stop-torlink");
   assert(stop.includes("inputs.dryRun"), "stop-torlink must skip in dry-run");
   assert(stop.includes("stopUser"), "stop-torlink must call torlink-unit.stopUser");
+  const readiness = step("wait-for-torlink-health");
+  assert(
+    readiness.includes("methodName: waitHealthy") && readiness.includes("- step: start-torlink"),
+    "Torlink readiness must follow systemd activation",
+  );
+  assert(
+    step("assert-torlink-health").includes("- step: wait-for-torlink-health"),
+    "Torlink version health must follow HTTP readiness",
+  );
   assert(
     step("wait-for-episode-seeding").includes("- step: wait-for-movie-seeding") &&
       step("wait-for-episode-seed-stop").includes("- step: wait-for-movie-seed-stop"),
