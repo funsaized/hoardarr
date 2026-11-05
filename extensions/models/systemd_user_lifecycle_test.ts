@@ -337,8 +337,7 @@ Deno.test("startUser throws when post-probe reports inactive", async () => {
     ...probeSeq({ active: { code: 0, stdout: "inactive" } }),
   });
   await assertRejects(
-    () =>
-      callMethod("startUser", makeContext(baseGlobalArgs, writes), fake.runner),
+    () => callMethod("startUser", makeContext(baseGlobalArgs, writes), fake.runner),
     "startUser postcondition missed",
   );
   assert(
@@ -407,8 +406,7 @@ Deno.test("stopUser throws when post-probe still shows active", async () => {
     ...probeSeq({}),
   });
   await assertRejects(
-    () =>
-      callMethod("stopUser", makeContext(baseGlobalArgs, writes), fake.runner),
+    () => callMethod("stopUser", makeContext(baseGlobalArgs, writes), fake.runner),
     "stopUser postcondition missed",
   );
   assert(writes.length === 0, "no write when postcondition misses");
@@ -510,8 +508,7 @@ Deno.test("startUser requires exact activeRaw === 'active' after probe", async (
     ...probeSeq({ active: { code: 0, stdout: "activating" } }),
   });
   await assertRejects(
-    () =>
-      callMethod("startUser", makeContext(baseGlobalArgs, writes), fake.runner),
+    () => callMethod("startUser", makeContext(baseGlobalArgs, writes), fake.runner),
     "activeRaw='activating'",
   );
 });
@@ -527,8 +524,7 @@ Deno.test("stopUser rejects a transient deactivating state", async () => {
     ...probeSeq({ active: { code: 0, stdout: "deactivating" } }),
   });
   await assertRejects(
-    () =>
-      callMethod("stopUser", makeContext(baseGlobalArgs, writes), fake.runner),
+    () => callMethod("stopUser", makeContext(baseGlobalArgs, writes), fake.runner),
     "activeRaw='deactivating'",
   );
 });
@@ -712,8 +708,7 @@ Deno.test("method execute propagates systemctl failure with bounded stderr", asy
         code: 1,
         stdout: "",
         stdoutTruncated: false,
-        stderr:
-          "Failed to start torlink.service: Unit torlink.service not loaded." +
+        stderr: "Failed to start torlink.service: Unit torlink.service not loaded." +
           " ".repeat(2000),
         stderrTruncated: true,
       });
@@ -753,8 +748,10 @@ Deno.test("timer refresh reads journalctl with --user + -n 40", async () => {
     "2026-08-28T10:00:02+00:00 host Completed workflow host-health succeeded in 3s",
   ].join("\n");
   const fake = makeRunner({
-    "/usr/bin/systemctl\u0001--user\u0001is-enabled\u0001hoardarr-swamp.timer":
-      { code: 0, stdout: "enabled" },
+    "/usr/bin/systemctl\u0001--user\u0001is-enabled\u0001hoardarr-swamp.timer": {
+      code: 0,
+      stdout: "enabled",
+    },
     "/usr/bin/systemctl\u0001--user\u0001is-active\u0001hoardarr-swamp.timer": {
       code: 0,
       stdout: "active",

@@ -1,0 +1,19 @@
+id: f49ed4ee-d68a-4225-967b-ae2df64ee272
+name: hoardarr-discovery
+tags: {}
+jobs:
+  - name: main
+    description: Main job (edit or replace)
+    steps:
+      - name: example
+        description: Example step (edit or replace)
+        task:
+          type: model_method
+          modelIdOrName: example-behavior
+          methodName: run
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+version: 1

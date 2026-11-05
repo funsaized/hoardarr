@@ -16,9 +16,7 @@ function assertEquals<T>(actual: T, expected: T, message: string) {
   }
   if (!sameDeep) {
     throw new Error(
-      `${message}: expected ${JSON.stringify(expected)}, got ${
-        JSON.stringify(actual)
-      }`,
+      `${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
     );
   }
 }
@@ -175,9 +173,7 @@ Deno.test("extension declares exactly two specs and the digitalReleases method",
   );
   const method = extension.methods
     .flatMap((entry) => Object.values(entry))
-    .find((m) =>
-      m.description.startsWith("Fetch new popular digital releases")
-    );
+    .find((m) => m.description.startsWith("Fetch new popular digital releases"));
   assert(method, "digitalReleases method missing");
 });
 
@@ -242,9 +238,7 @@ Deno.test("nowPlaying fetches, writes one movie per id, and prefixes the instanc
     env.fetchCalls[0]!.includes("language=en-US"),
     "language passed through",
   );
-  const movieWrites = env.writes.filter((w) =>
-    w.spec === "digitalReleaseMovie"
-  );
+  const movieWrites = env.writes.filter((w) => w.spec === "digitalReleaseMovie");
   assertEquals(movieWrites.length, 3, "one movie record per id");
   for (const write of movieWrites) {
     assert(
@@ -301,12 +295,8 @@ Deno.test("nowPlaying runs the marker last and reports honest page totals", asyn
     0,
     "no skips when all entries valid",
   );
-  const movieWriteIndex = env.writes.findIndex((w) =>
-    w.spec === "digitalReleaseMovie"
-  );
-  const markerIndex = env.writes.findIndex((w) =>
-    w.spec === "digitalReleaseRun"
-  );
+  const movieWriteIndex = env.writes.findIndex((w) => w.spec === "digitalReleaseMovie");
+  const markerIndex = env.writes.findIndex((w) => w.spec === "digitalReleaseRun");
   assert(
     markerIndex > movieWriteIndex,
     "marker must be written after every movie record",
@@ -603,9 +593,7 @@ Deno.test("nowPlaying retry counts same-week resources toward the limit", async 
     ["digital-release-movie-303"],
     "retry only writes the remaining weekly slot",
   );
-  const marker = env.writes.find((write) =>
-    write.spec === "digitalReleaseRun"
-  )!;
+  const marker = env.writes.find((write) => write.spec === "digitalReleaseRun")!;
   assertEquals(
     marker.data.movieCount,
     3,
@@ -642,9 +630,7 @@ Deno.test("nowPlaying stops after ten pages when every movie is known", async ()
     env.context,
     { fetchImpl: env.fetchImpl },
   );
-  const marker = env.writes.find((write) =>
-    write.spec === "digitalReleaseRun"
-  )!;
+  const marker = env.writes.find((write) => write.spec === "digitalReleaseRun")!;
   assertEquals(fetchCount, 10, "TMDB requests are bounded");
   assertEquals(marker.data.movieCount, 0, "known movies are not rewritten");
   assertEquals(marker.data.truncated, true, "remaining pages are reported");
@@ -659,8 +645,7 @@ Deno.test("nowPlaying honours the limit and marks truncated when cap applies", a
       fetchImpl: env.fetchImpl,
     },
   );
-  const movieCount =
-    env.writes.filter((w) => w.spec === "digitalReleaseMovie").length;
+  const movieCount = env.writes.filter((w) => w.spec === "digitalReleaseMovie").length;
   assertEquals(movieCount, 2, "limit caps movie writes");
   const marker = env.writes.find((w) => w.spec === "digitalReleaseRun")!.data;
   assertEquals(marker.truncated, true, "truncated when response count > limit");

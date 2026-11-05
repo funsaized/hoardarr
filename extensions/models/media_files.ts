@@ -386,10 +386,10 @@ export async function enumerateApproved(
     }
   }
   approved.sort((a, b) =>
-    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0,
+    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0
   );
   denied.sort((a, b) =>
-    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0,
+    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0
   );
   return { approved, denied };
 }
@@ -478,7 +478,7 @@ export function buildManifestEntries(
   hashes: ReadonlyMap<string, string>,
 ): ManifestEntry[] {
   const sorted = [...approved].sort((a, b) =>
-    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0,
+    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0
   );
   const entries: ManifestEntry[] = [];
   for (const file of sorted) {
@@ -527,7 +527,8 @@ export function authorizeCatalog(
   if (catalog.sha256 !== manifestAggregateSha256) {
     return {
       ok: false,
-      reason: `catalog sha256 ${catalog.sha256} does not match manifest aggregate ${manifestAggregateSha256}`,
+      reason:
+        `catalog sha256 ${catalog.sha256} does not match manifest aggregate ${manifestAggregateSha256}`,
     };
   }
   return { ok: true };
@@ -655,9 +656,11 @@ export async function performCleanup(params: CleanupParams): Promise<{
   );
 
   if (enumeration.denied.length > 0) {
-    const reason = `staging tree contains denied entries: ${enumeration.denied
-      .map((d) => `${d.relativePath} (${d.reason})`)
-      .join("; ")}`;
+    const reason = `staging tree contains denied entries: ${
+      enumeration.denied
+        .map((d) => `${d.relativePath} (${d.reason})`)
+        .join("; ")
+    }`;
     const record = makeCleanupRecord(
       params,
       "denied",
@@ -681,9 +684,11 @@ export async function performCleanup(params: CleanupParams): Promise<{
 
   const diff = diffManifests(params.priorManifest, enumeration, currentHashes);
   if (diff.missing.length > 0) {
-    const reason = `prior manifest entries missing: ${diff.missing
-      .map((e) => e.relativePath)
-      .join(", ")}`;
+    const reason = `prior manifest entries missing: ${
+      diff.missing
+        .map((e) => e.relativePath)
+        .join(", ")
+    }`;
     const record = makeCleanupRecord(
       params,
       "denied",
@@ -697,9 +702,11 @@ export async function performCleanup(params: CleanupParams): Promise<{
     throw new Error(`cleanup denied: ${reason}`);
   }
   if (diff.extras.length > 0) {
-    const reason = `extras found outside prior manifest: ${diff.extras
-      .map((e) => e.relativePath)
-      .join(", ")}`;
+    const reason = `extras found outside prior manifest: ${
+      diff.extras
+        .map((e) => e.relativePath)
+        .join(", ")
+    }`;
     const record = makeCleanupRecord(
       params,
       "denied",
@@ -713,9 +720,11 @@ export async function performCleanup(params: CleanupParams): Promise<{
     throw new Error(`cleanup denied: ${reason}`);
   }
   if (diff.drift.length > 0) {
-    const reason = `drift detected: ${diff.drift
-      .map((d) => `${d.relativePath} expected=${d.expected} actual=${d.actual}`)
-      .join("; ")}`;
+    const reason = `drift detected: ${
+      diff.drift
+        .map((d) => `${d.relativePath} expected=${d.expected} actual=${d.actual}`)
+        .join("; ")
+    }`;
     const record = makeCleanupRecord(
       params,
       "denied",
@@ -793,7 +802,7 @@ function buildRehashedEntries(
   const priorByPath = new Map<string, ManifestEntry>();
   for (const entry of prior.entries) priorByPath.set(entry.relativePath, entry);
   const sorted = [...enumeration.approved].sort((a, b) =>
-    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0,
+    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0
   );
   return sorted.map((file) => {
     const sha256 = hashes.get(file.relativePath);
@@ -805,8 +814,8 @@ function buildRehashedEntries(
       relativePath: file.relativePath,
       bytes: file.bytes,
       sha256,
-      matched:
-        priorEntry !== undefined && priorEntry.sha256 === sha256 && priorEntry.bytes === file.bytes,
+      matched: priorEntry !== undefined && priorEntry.sha256 === sha256 &&
+        priorEntry.bytes === file.bytes,
     };
   });
 }
@@ -832,10 +841,9 @@ function makeCleanupRecord(
     reHashedEntries,
     catalogStatus: catalog?.status ?? null,
     catalogRemotePath: catalog?.remotePath ?? null,
-    catalogSha256:
-      typeof catalog?.sha256 === "string" && /^[0-9a-f]{64}$/.test(catalog.sha256)
-        ? catalog.sha256
-        : null,
+    catalogSha256: typeof catalog?.sha256 === "string" && /^[0-9a-f]{64}$/.test(catalog.sha256)
+      ? catalog.sha256
+      : null,
     errors,
   };
 }
@@ -845,12 +853,12 @@ async function readCatalogSubset(
   tmdbId: number,
   mediaKind: MediaKind = "movie",
 ): Promise<{ status: string; remotePath: string | null; sha256: string | null } | null> {
-  const catalogModelName =
-    mediaKind === "episode"
-      ? (context.globalArgs.episodeCatalogModelName ?? CONFIG.episodeCatalogModelName)
-      : context.globalArgs.catalogModelName;
-  const expectedType =
-    mediaKind === "episode" ? CONFIG.episodeCatalogModelType : CONFIG.catalogModelType;
+  const catalogModelName = mediaKind === "episode"
+    ? (context.globalArgs.episodeCatalogModelName ?? CONFIG.episodeCatalogModelName)
+    : context.globalArgs.catalogModelName;
+  const expectedType = mediaKind === "episode"
+    ? CONFIG.episodeCatalogModelType
+    : CONFIG.catalogModelType;
   const found = await context.definitionRepository.findByNameGlobal(catalogModelName);
   if (!found) {
     return null;
@@ -953,10 +961,10 @@ async function executeInspect(
   const reason = payloadMissing
     ? "payload directory does not exist"
     : denied.length > 0
-      ? `${denied.length} denied entries`
-      : approved.length === 0
-        ? "no approved media files"
-        : null;
+    ? `${denied.length} denied entries`
+    : approved.length === 0
+    ? "no approved media files"
+    : null;
   const record: Inspection = {
     tmdbId,
     inspectedAt: new Date().toISOString(),
@@ -1003,28 +1011,26 @@ async function executeStage(
 
   if (source !== stagingDir && (await Deno.stat(source).catch(() => null))) {
     const files = sourceInfo.isFile
-      ? isAllowedExtension(args.sourceName)
-        ? [args.sourceName]
-        : []
+      ? isAllowedExtension(args.sourceName) ? [args.sourceName] : []
       : (
-          await enumerateApproved(
-            source,
-            await Deno.realPath(source),
-            await canonicalizeRoot(root),
-            context.signal,
-          )
-        ).approved.map((file) => file.relativePath);
+        await enumerateApproved(
+          source,
+          await Deno.realPath(source),
+          await canonicalizeRoot(root),
+          context.signal,
+        )
+      ).approved.map((file) => file.relativePath);
     if (files.length === 0) {
       const existing = await Deno.stat(stagingDir).catch(() => null);
       const stagedFiles = existing?.isDirectory
         ? (
-            await enumerateApproved(
-              stagingDir,
-              await Deno.realPath(stagingDir),
-              await canonicalizeRoot(root),
-              context.signal,
-            )
-          ).approved
+          await enumerateApproved(
+            stagingDir,
+            await Deno.realPath(stagingDir),
+            await canonicalizeRoot(root),
+            context.signal,
+          )
+        ).approved
         : [];
       if (stagedFiles.length === 0) throw new Error("torrent source has no approved media files");
     }
@@ -1234,10 +1240,9 @@ async function executeCleanup(
       reHashedEntries: outcome.reHashedEntries,
       catalogStatus: catalog?.status ?? null,
       catalogRemotePath: catalog?.remotePath ?? null,
-      catalogSha256:
-        typeof catalog?.sha256 === "string" && /^[0-9a-f]{64}$/.test(catalog.sha256)
-          ? catalog.sha256
-          : null,
+      catalogSha256: typeof catalog?.sha256 === "string" && /^[0-9a-f]{64}$/.test(catalog.sha256)
+        ? catalog.sha256
+        : null,
       errors: outcome.errors,
     };
     const validRecord = CleanupSchema.parse(record);
@@ -1245,8 +1250,7 @@ async function executeCleanup(
     return { dataHandles: [handle] };
   } catch (error) {
     const failure = bounded(String(error), 500);
-    const record =
-      captures.value ??
+    const record = captures.value ??
       CleanupSchema.parse({
         tmdbId,
         performedAt: new Date().toISOString(),
@@ -1258,10 +1262,9 @@ async function executeCleanup(
         reHashedEntries: [],
         catalogStatus: catalog?.status ?? null,
         catalogRemotePath: catalog?.remotePath ?? null,
-        catalogSha256:
-          typeof catalog?.sha256 === "string" && /^[0-9a-f]{64}$/.test(catalog.sha256)
-            ? catalog.sha256
-            : null,
+        catalogSha256: typeof catalog?.sha256 === "string" && /^[0-9a-f]{64}$/.test(catalog.sha256)
+          ? catalog.sha256
+          : null,
         errors: [failure],
       });
     try {
@@ -1294,10 +1297,9 @@ async function persistAbsent(
     reHashedEntries: [],
     catalogStatus: catalog?.status ?? null,
     catalogRemotePath: catalog?.remotePath ?? null,
-    catalogSha256:
-      typeof catalog?.sha256 === "string" && /^[0-9a-f]{64}$/.test(catalog.sha256)
-        ? catalog.sha256
-        : null,
+    catalogSha256: typeof catalog?.sha256 === "string" && /^[0-9a-f]{64}$/.test(catalog.sha256)
+      ? catalog.sha256
+      : null,
     errors: [],
   };
   const validRecord = CleanupSchema.parse(record);
@@ -1309,10 +1311,9 @@ export const model = {
   type: "hoardarr/media-files",
   version: VERSION,
   globalArguments: z.object({
-    stagingRoot: z.literal(CONFIG.stagingRoot).default(CONFIG.stagingRoot),
-    catalogModelName: z.literal(CONFIG.catalogModelName).default(CONFIG.catalogModelName),
-    episodeCatalogModelName: z
-      .literal(CONFIG.episodeCatalogModelName)
+    stagingRoot: z.string().min(1).max(4096).default(CONFIG.stagingRoot),
+    catalogModelName: z.string().min(1).max(4096).default(CONFIG.catalogModelName),
+    episodeCatalogModelName: z.string().min(1).max(4096)
       .default(CONFIG.episodeCatalogModelName),
     sha256Binary: z.literal(CONFIG.sha256Binary).default(CONFIG.sha256Binary),
   }),

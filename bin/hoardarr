@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+hoardarr_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+hoardarr_deno="${HOARDARR_DENO:-${HOME}/.swamp/deno/deno}"
+if [[ ! -x "$hoardarr_deno" ]]; then hoardarr_deno=deno; fi
+exec "$hoardarr_deno" run --allow-all "$hoardarr_root/cli/main.ts" "$@"

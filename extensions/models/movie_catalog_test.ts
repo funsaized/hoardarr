@@ -70,8 +70,8 @@ function makeContext(initial: Record<string, Record<string, unknown>> = {}): {
           const inferredSpec = name.startsWith("plan-")
             ? "plan"
             : name.startsWith("catalog-movie-")
-              ? "movie"
-              : undefined;
+            ? "movie"
+            : undefined;
           records.push({ name, tags: { specName: inferredSpec } });
         }
         return Promise.resolve(records);
@@ -239,16 +239,18 @@ Deno.test("isSelectable admits wanted and retryable failed only", () => {
     testing.isSelectable(baseMovie({ status: "failed", attempts: 2 })),
     "failed with attempts < cap is selectable",
   );
-  for (const status of [
-    "selected",
-    "downloading",
-    "seeding",
-    "seed-stopped",
-    "transfer-ready",
-    "transferred",
-    "cleanup-pending",
-    "ignored",
-  ] as const) {
+  for (
+    const status of [
+      "selected",
+      "downloading",
+      "seeding",
+      "seed-stopped",
+      "transfer-ready",
+      "transferred",
+      "cleanup-pending",
+      "ignored",
+    ] as const
+  ) {
     assert(!testing.isSelectable(baseMovie({ status })), `${status} is not selectable`);
   }
   assert(
@@ -1336,7 +1338,7 @@ Deno.test("malformed catalog records are logged not swallowed", async () => {
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.08.30.2", "model version");
+  assertEquals(model.version, "2026.11.05.1", "model version");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
@@ -1385,13 +1387,15 @@ Deno.test("each catalog method logs entry and completion", async () => {
   );
   await testing.executeReconcile({ snapshots: [] }, context);
   await testing.executePlan({}, context);
-  for (const start of [
-    "ingest starting",
-    "select starting",
-    "transition starting",
-    "reconcile starting",
-    "plan starting",
-  ]) {
+  for (
+    const start of [
+      "ingest starting",
+      "select starting",
+      "transition starting",
+      "reconcile starting",
+      "plan starting",
+    ]
+  ) {
     assert(
       store.logs.some((c) => c.level === "info" && c.msg === start),
       `${start} logged`,

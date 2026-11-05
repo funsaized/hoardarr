@@ -1,0 +1,10 @@
+{
+  "tasks": {
+    "test": "deno test --allow-all extensions tests",
+    "check": "deno check cli/main.ts extensions/models/*.ts extensions/reports/*.ts",
+    "fmt": "deno fmt",
+    "hoardarr": "deno run --allow-all cli/main.ts"
+  },
+  "fmt": { "lineWidth": 100 },
+  "exclude": [".swamp", "dist", "node_modules", ".hoardarr", "hoardarr.yaml"]
+}

@@ -1,13 +1,17 @@
 /** Hoardarr local episode catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4";
+import {
+  AddResultsSchema,
+  compareRelease,
+  episodePolicy,
+  type Policy,
+  PolicySchema,
+} from "./_lib/policy.ts";
 
-const MODEL_VERSION = "2026.08.30.2";
+const MODEL_VERSION = "2026.11.05.1";
 const SPEC_EPISODE = "episode";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
-const MAX_RETRY_ATTEMPTS = 3;
-const MIN_SEEDERS = 5;
-const MAX_BYTES = 8 * 1024 ** 3;
 const REJECT_RESOLUTION_REGEX = /\b(cam|hdcam|ts|telesync|hdts|tc|telecine|hdtc)\b/i;
 const REJECT_EXTENSION_REGEX = /\.(exe|bat|cmd|sh|zip|rar|7z|tar|gz|bz2|xz|iso|img)$/i;
 const PACK_REGEXES = [
@@ -37,7 +41,8 @@ const ShowConfigSchema = z.object({
   category: CategorySchema.default("tv"),
 });
 const GlobalArgumentsSchema = z.object({
-  shows: z.array(ShowConfigSchema).min(1).max(100),
+  shows: z.array(ShowConfigSchema).max(100),
+  policy: PolicySchema.default(episodePolicy),
 });
 const ShowListSchema = z.object({
   shows: z.array(ShowConfigSchema),
@@ -64,6 +69,7 @@ const ReleaseSchema = z.object({
   sizeBytes: z.number().int().nonnegative(),
   seeders: z.number().int().nonnegative(),
   source: z.string().max(100).optional(),
+  magnet: z.string().max(32000).optional(),
 });
 
 const SelectItemSchema = z.object({
@@ -125,6 +131,9 @@ const EpisodeSchema = z.object({
     .nullable(),
   category: CategorySchema,
   infoHash: z.string().nullable(),
+  acquisitionLocator: z.string().max(32000).nullable().optional(),
+  downloadProvider: z.string().optional(),
+  policyVersion: z.number().int().optional(),
   releaseName: z.string().nullable(),
   localPath: z.string().nullable(),
   remotePath: z.string().nullable(),
@@ -175,7 +184,7 @@ type Context = {
   signal: AbortSignal;
   modelType: string;
   modelId: string;
-  globalArgs: z.infer<typeof GlobalArgumentsSchema>;
+  globalArgs: Omit<z.infer<typeof GlobalArgumentsSchema>, "policy"> & { policy?: Policy };
   readResource(instanceName: string): Promise<Record<string, unknown> | null>;
   writeResource(
     specName: string,
@@ -246,8 +255,8 @@ function episodeTokenMatches(
   return new RegExp(`\\b${escaped}\\b`, "i").test(releaseName);
 }
 
-function is1080pWebDl(lower: string): boolean {
-  if (!/\b1080p\b/i.test(lower)) return false;
+function is1080pWebDl(lower: string, policy: Policy = episodePolicy): boolean {
+  if (!new RegExp(`\\b${policy.resolution}\\b`, "i").test(lower)) return false;
   return /\bweb[\s.-]?(dl|rip)\b/i.test(lower);
 }
 
@@ -261,25 +270,33 @@ type EpisodeIdentity = {
   category: Category;
 };
 
-function rejectReasons(episode: EpisodeIdentity, release: Release): string[] {
+function rejectReasons(
+  episode: EpisodeIdentity,
+  release: Release,
+  policy: Policy = episodePolicy,
+): string[] {
   const reasons: string[] = [];
   if (!episodeTokenMatches(episode, release.name)) {
     reasons.push("episode-token-mismatch");
   }
-  if (!is1080pWebDl(release.name.toLowerCase())) reasons.push("not-1080p-web");
+  if (!is1080pWebDl(release.name.toLowerCase(), policy)) reasons.push("not-1080p-web");
   if (REJECT_RESOLUTION_REGEX.test(release.name)) reasons.push("cam-ts-tc");
   if (REJECT_EXTENSION_REGEX.test(release.name)) {
     reasons.push("executable-archive");
   }
   if (isPackRelease(release.name)) reasons.push("pack");
-  if (release.seeders < MIN_SEEDERS) reasons.push("low-seeders");
-  if (release.sizeBytes > MAX_BYTES) reasons.push("too-large");
+  if (release.seeders < policy.minSeeders) reasons.push("low-seeders");
+  if (release.sizeBytes > policy.maxSizeBytes) reasons.push("too-large");
+  if (policy.sources.length && !policy.sources.includes(release.source ?? "")) {
+    reasons.push("source-not-allowed");
+  }
   return reasons;
 }
 
 function evaluateRelease(
   episode: { showName: string; seasonNumber: number; episodeNumber: number; category: Category },
   release: Release,
+  policy: Policy = episodePolicy,
 ): { ok: boolean; reasons: string[] } {
   const reasons: string[] = [];
   const releaseNormalized = normalize(release.name);
@@ -295,6 +312,7 @@ function evaluateRelease(
         category: episode.category,
       },
       release,
+      policy,
     ),
   );
   return { ok: reasons.length === 0, reasons };
@@ -303,28 +321,21 @@ function evaluateRelease(
 function pickBest(
   episode: { showName: string; seasonNumber: number; episodeNumber: number; category: Category },
   releases: ReadonlyArray<Release>,
+  policy: Policy = episodePolicy,
 ): { release: Release | null; reasons: string[] } {
   if (releases.length === 0) return { release: null, reasons: ["no-releases"] };
   const acceptable = releases
-    .map((release) => ({ release, eval: evaluateRelease(episode, release) }))
+    .map((release) => ({ release, eval: evaluateRelease(episode, release, policy) }))
     .filter((entry) => entry.eval.ok);
   if (acceptable.length === 0) {
     const first = releases[0];
     if (!first) return { release: null, reasons: ["no-releases"] };
-    const evalResult = evaluateRelease(episode, first);
+    const evalResult = evaluateRelease(episode, first, policy);
     return { release: null, reasons: evalResult.reasons };
   }
   // ponytail: stable tie-break on name then infoHash so identical inputs
   // always pick the same release across runs (reproducible workflow log).
-  acceptable.sort((a, b) => {
-    if (a.release.seeders !== b.release.seeders) {
-      return b.release.seeders - a.release.seeders;
-    }
-    if (a.release.name !== b.release.name) {
-      return a.release.name < b.release.name ? -1 : 1;
-    }
-    return a.release.infoHash < b.release.infoHash ? -1 : 1;
-  });
+  acceptable.sort((a, b) => compareRelease(a.release, b.release, policy));
   const first = acceptable[0];
   return first
     ? { release: first.release, reasons: [] }
@@ -334,11 +345,12 @@ function pickBest(
 function summarizeNoMatch(
   episode: { showName: string; seasonNumber: number; episodeNumber: number; category: Category },
   releases: ReadonlyArray<Release>,
+  policy: Policy = episodePolicy,
 ): string {
   if (releases.length === 0) return "no-releases";
   const allReasons = new Map<string, number>();
   for (const release of releases) {
-    const result = evaluateRelease(episode, release);
+    const result = evaluateRelease(episode, release, policy);
     for (const reason of result.reasons) {
       allReasons.set(reason, (allReasons.get(reason) ?? 0) + 1);
     }
@@ -349,9 +361,9 @@ function summarizeNoMatch(
     : `no-acceptable-release: ${ordered.map(([k]) => k).join(",")}`;
 }
 
-function isSelectable(episode: Episode): boolean {
+function isSelectable(episode: Episode, policy: Policy = episodePolicy): boolean {
   if (episode.status === "wanted") return true;
-  if (episode.status === "failed" && episode.attempts < MAX_RETRY_ATTEMPTS) {
+  if (episode.status === "failed" && episode.attempts < policy.maxAttempts) {
     return true;
   }
   return false;
@@ -409,9 +421,11 @@ function validateTransitionBatch(transitions: Transition[]): string | null {
     seen.add(t.tmdbEpisodeId);
   }
   if (dupes.size > 0) {
-    return `duplicate tmdbEpisodeId entries in batch: ${[...dupes]
-      .sort((a, b) => a - b)
-      .join(",")}`;
+    return `duplicate tmdbEpisodeId entries in batch: ${
+      [...dupes]
+        .sort((a, b) => a - b)
+        .join(",")
+    }`;
   }
   return null;
 }
@@ -530,10 +544,9 @@ function advanceFromSnapshot(
 ): Episode | null {
   if (TERMINAL_STATUSES.has(episode.status)) return null;
   if (!episode.infoHash) return null;
-  const current =
-    snapshot?.name !== undefined && snapshot.name !== episode.releaseName
-      ? { ...episode, releaseName: snapshot.name }
-      : episode;
+  const current = snapshot?.name !== undefined && snapshot.name !== episode.releaseName
+    ? { ...episode, releaseName: snapshot.name }
+    : episode;
   // seed-stopped and transfer-ready are durable workflow checkpoints. Torrent
   // metadata may be absent while removal or transfer resumes in a later run,
   // but a present snapshot can still repair the durable payload name.
@@ -593,7 +606,7 @@ function advanceFromSnapshot(
   return null;
 }
 
-function computePlan(episodes: ReadonlyArray<Episode>): Plan {
+function computePlan(episodes: ReadonlyArray<Episode>, policy: Policy = episodePolicy): Plan {
   const wanted: number[] = [];
   const retryable: number[] = [];
   const downloading: number[] = [];
@@ -604,7 +617,7 @@ function computePlan(episodes: ReadonlyArray<Episode>): Plan {
   for (const episode of episodes) {
     if (episode.status === "wanted" || episode.status === "selected") {
       wanted.push(episode.tmdbEpisodeId);
-    } else if (episode.status === "failed" && episode.attempts < MAX_RETRY_ATTEMPTS) {
+    } else if (episode.status === "failed" && episode.attempts < policy.maxAttempts) {
       retryable.push(episode.tmdbEpisodeId);
     } else if (episode.status === "downloading") {
       downloading.push(episode.tmdbEpisodeId);
@@ -709,17 +722,20 @@ async function executeSelect(
       missing++;
       continue;
     }
-    if (!isSelectable(existing)) {
+    if (!isSelectable(existing, context.globalArgs?.policy ?? episodePolicy)) {
       ineligible++;
       continue;
     }
-    const result = pickBest(existing, item.releases);
+    const result = pickBest(existing, item.releases, context.globalArgs?.policy ?? episodePolicy);
     let next: Episode;
     if (result.release) {
       next = {
         ...existing,
         status: "selected",
-        infoHash: result.release.infoHash,
+        infoHash: result.release.infoHash.toLowerCase(),
+        acquisitionLocator: result.release.magnet ?? result.release.infoHash,
+        downloadProvider: "torlink",
+        policyVersion: (context.globalArgs?.policy ?? episodePolicy).version,
         releaseName: result.release.name,
         bytes: result.release.sizeBytes,
         noMatchReason: null,
@@ -728,7 +744,11 @@ async function executeSelect(
     } else {
       next = {
         ...existing,
-        noMatchReason: summarizeNoMatch(existing, item.releases),
+        noMatchReason: summarizeNoMatch(
+          existing,
+          item.releases,
+          context.globalArgs?.policy ?? episodePolicy,
+        ),
       };
     }
     handles.push(await writeEpisode(context, next));
@@ -801,7 +821,7 @@ async function executePlan(
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
   context.logger.info("plan starting");
   const episodes = await loadAllEpisodes(context);
-  const plan = computePlan(episodes);
+  const plan = computePlan(episodes, context.globalArgs?.policy ?? episodePolicy);
   const handle = await context.writeResource(SPEC_PLAN, PLAN_INSTANCE, plan);
   context.logger.info("plan computed", {
     wanted: plan.wanted.length,
@@ -813,6 +833,32 @@ async function executePlan(
     cleanupPending: plan.cleanupPending.length,
   });
   return { dataHandles: [handle] };
+}
+
+async function executeRecordAdd(args: z.infer<typeof AddResultsSchema>, context: Context) {
+  const handles: Array<{ name: string }> = [];
+  const seen = new Set<number>();
+  for (const result of args.results) {
+    const match = /^e-(\d+)$/.exec(result.key);
+    if (!match) continue;
+    const id = Number(match[1]);
+    if (seen.has(id)) throw new Error("Duplicate add result key");
+    seen.add(id);
+    const row = await loadEpisode(context, id);
+    if (!row || row.status !== "selected") continue;
+    if (result.ok && result.id) {
+      if (row.infoHash?.toLowerCase() !== result.id.toLowerCase()) {
+        throw new Error("Downloader returned an unexpected identity");
+      }
+      const updated = applyTransition(row, {
+        tmdbEpisodeId: id,
+        to: "downloading",
+        infoHash: result.id.toLowerCase(),
+      });
+      handles.push(await writeEpisode(context, updated));
+    }
+  }
+  return { dataHandles: handles };
 }
 
 /** Hoardarr episode catalog model. */
@@ -842,6 +888,12 @@ export const model = {
     },
   },
   methods: {
+    recordAdd: {
+      description:
+        "Apply successful per-item add evidence; leave ambiguous results for reconciliation.",
+      arguments: AddResultsSchema,
+      execute: executeRecordAdd,
+    },
     configured: {
       description: "Write the configured master show list for workflow consumption.",
       arguments: z.object({}),

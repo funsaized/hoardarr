@@ -270,7 +270,8 @@ jobs:
                     "name": release.name,
                     "sizeBytes": release.sizeBytes,
                     "seeders": release.seeders,
-                    "source": release.source
+                    "source": release.source,
+                    "magnet": release.magnet
                   })
                 }) }}
         dependsOn:
@@ -370,30 +371,22 @@ jobs:
             condition:
               type: succeeded
         weight: 0
-        allowFailure: false
+        allowFailure: true
       - name: mark-downloading
-        description: Batch selected catalog records into downloading state after add succeeds.
+        description: Persist successful per-item additions, including duplicates and partially failed batches.
         guard: >-
-          ${{ inputs.dryRun || size((data.latest("movie-catalog", "plan-current").attributes.wanted +
-            data.latest("movie-catalog", "plan-current").attributes.retryable)
-            .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "selected")) == 0 }}
+          ${{ inputs.dryRun || size(data.query("modelName == 'torlink' && name == 'operation-add' && workflowRunId == '" + run.id + "' && stepName == 'add-selected-torrents'")) == 0 }}
         task:
           type: model_method
           modelIdOrName: movie-catalog
-          methodName: transition
+          methodName: recordAdd
           inputs:
-            transitions: >-
-              ${{ (data.latest("movie-catalog", "plan-current").attributes.wanted +
-                  data.latest("movie-catalog", "plan-current").attributes.retryable)
-                .filter(id, data.latest("movie-catalog", "catalog-movie-" + string(id)).attributes.status == "selected")
-                .map(id, {
-                  "tmdbId": id,
-                  "to": "downloading"
-                }) }}
+            results: >-
+              ${{ data.query("modelName == 'torlink' && name == 'operation-add' && workflowRunId == '" + run.id + "' && stepName == 'add-selected-torrents'")[0].attributes.results }}
         dependsOn:
           - step: add-selected-torrents
             condition:
-              type: succeeded
+              type: completed
         weight: 0
         allowFailure: false
       - name: wait-for-seeding

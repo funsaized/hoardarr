@@ -76,8 +76,8 @@ function makeContext(initial: Record<string, Record<string, unknown>> = {}): {
           const inferredSpec = name.startsWith("plan-")
             ? "plan"
             : name.startsWith("catalog-episode-")
-              ? "episode"
-              : undefined;
+            ? "episode"
+            : undefined;
           records.push({ name, tags: { specName: inferredSpec } });
         }
         return Promise.resolve(records);
@@ -176,7 +176,7 @@ Deno.test("identity: tmdbEpisodeId must be a positive integer and instance name 
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/episode-catalog", "model type");
-  assertEquals(model.version, "2026.08.30.2", "model version");
+  assertEquals(model.version, "2026.11.05.1", "model version");
   assert("episode" in model.resources, "episode spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
@@ -535,10 +535,12 @@ Deno.test("transition validates the state machine and rejects duplicate tmdbEpis
     }),
   });
   await testing.executeTransition({ transitions: [{ tmdbEpisodeId: 1, to: "seeding" }] }, ctx2);
-  const updated = ctx2.readResource("catalog-episode-1") as unknown as Promise<Record<
-    string,
-    unknown
-  > | null>;
+  const updated = ctx2.readResource("catalog-episode-1") as unknown as Promise<
+    Record<
+      string,
+      unknown
+    > | null
+  >;
   const after = (await updated) as Episode | null;
   assertEquals(after!.status, "seeding", "merged infoHash satisfies transition");
   assertEquals(after!.attempts, 1, "seeding does not increment attempts");

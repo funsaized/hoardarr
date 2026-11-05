@@ -259,10 +259,9 @@ const episodeLabel = (r: {
   episodeTitle?: string | null;
 }): string => {
   const show = r.showName ?? "?";
-  const tok =
-    r.seasonNumber !== undefined && r.episodeNumber !== undefined
-      ? `S${pad2(r.seasonNumber)}E${pad2(r.episodeNumber)}`
-      : "";
+  const tok = r.seasonNumber !== undefined && r.episodeNumber !== undefined
+    ? `S${pad2(r.seasonNumber)}E${pad2(r.episodeNumber)}`
+    : "";
   return (r.episodeTitle ? `${show} ${tok} ${r.episodeTitle}` : `${show} ${tok}`).trim();
 };
 const specOf = (h: Handle): string | null => h.metadata?.tags?.specName ?? h.specName ?? null;
@@ -333,7 +332,7 @@ function applyPlan(
   for (const bucket of PLAN_BUCKETS) {
     const ids = plan[bucket];
     counts.push(ids.length);
-    for (const id of ids)
+    for (const id of ids) {
       adoptCatalogRow(catalogs, {
         kind,
         id,
@@ -344,6 +343,7 @@ function applyPlan(
         step: stepName,
         provenance: "plan",
       });
+    }
   }
   planCounts[kind] = counts;
 }
@@ -449,23 +449,26 @@ export function renderMarkdown(
     "| Metric | Count |",
     "| --- | --- |",
   );
-  for (const [label, value] of [
-    ["Discovered", counts.discovered],
-    ["Wanted", counts.wanted],
-    ["Selected", counts.selected],
-    ["No acceptable release", counts.noAcceptableRelease],
-    ["Downloading", counts.downloading],
-    ["Seeded", counts.seeding],
-    ["Transfer ready", counts.transferReady],
-    ["Transferred", counts.transferred],
-    ["Cleanup pending", counts.cleanupPending],
-    ["Retryable failures", counts.retryableFailures],
-    ["Network assertions", counts.networkAssertions],
-    ["Movies in catalog", counts.movies],
-    ["Episodes in catalog", counts.episodes],
-    ["Warnings", collected.warnings],
-  ] as Array<[string, number]>)
+  for (
+    const [label, value] of [
+      ["Discovered", counts.discovered],
+      ["Wanted", counts.wanted],
+      ["Selected", counts.selected],
+      ["No acceptable release", counts.noAcceptableRelease],
+      ["Downloading", counts.downloading],
+      ["Seeded", counts.seeding],
+      ["Transfer ready", counts.transferReady],
+      ["Transferred", counts.transferred],
+      ["Cleanup pending", counts.cleanupPending],
+      ["Retryable failures", counts.retryableFailures],
+      ["Network assertions", counts.networkAssertions],
+      ["Movies in catalog", counts.movies],
+      ["Episodes in catalog", counts.episodes],
+      ["Warnings", collected.warnings],
+    ] as Array<[string, number]>
+  ) {
     lines.push(`| ${label} | ${value} |`);
+  }
   lines.push("", `- Bytes transferred: **${bytesFormat(bytes)}**`, "", "## Catalog Detail", "");
   const detail = (label: string, list: CatalogRow[]): void => {
     lines.push(`### ${label} (${list.length})`, "");
@@ -477,23 +480,29 @@ export function renderMarkdown(
       "| kind | id | label | status | bytes | reason | provenance |",
       "| --- | --- | --- | --- | --- | --- | --- |",
     );
-    for (const row of list)
+    for (const row of list) {
       lines.push(
-        `| ${row.kind} | ${row.id} | ${mdEscape(row.label)} | ${mdEscape(row.status)} | ${bytesFormat(row.bytes)} | ${mdEscape(row.reason ?? "")} | ${row.provenance} |`,
+        `| ${row.kind} | ${row.id} | ${mdEscape(row.label)} | ${mdEscape(row.status)} | ${
+          bytesFormat(row.bytes)
+        } | ${mdEscape(row.reason ?? "")} | ${row.provenance} |`,
       );
+    }
     lines.push("");
   };
-  for (const [label, list] of [
-    ["Wanted", buckets.wanted],
-    ["Selected", buckets.selected],
-    ["Downloading", buckets.downloading],
-    ["Seeded", buckets.seeding],
-    ["Transfer ready", buckets.transferReady],
-    ["Transferred", buckets.transferred],
-    ["Cleanup pending", buckets.cleanupPending],
-    ["Retryable failures", buckets.retryableFailures],
-  ] as Array<[string, CatalogRow[]]>)
+  for (
+    const [label, list] of [
+      ["Wanted", buckets.wanted],
+      ["Selected", buckets.selected],
+      ["Downloading", buckets.downloading],
+      ["Seeded", buckets.seeding],
+      ["Transfer ready", buckets.transferReady],
+      ["Transferred", buckets.transferred],
+      ["Cleanup pending", buckets.cleanupPending],
+      ["Retryable failures", buckets.retryableFailures],
+    ] as Array<[string, CatalogRow[]]>
+  ) {
     detail(label, list);
+  }
   if (collected.discoveries.length > 0) {
     lines.push(
       "## Discoveries",
@@ -501,10 +510,13 @@ export function renderMarkdown(
       "| kind | id | label | airDate | isoWeek | step |",
       "| --- | --- | --- | --- | --- | --- |",
     );
-    for (const row of collected.discoveries)
+    for (const row of collected.discoveries) {
       lines.push(
-        `| ${row.kind} | ${row.id} | ${mdEscape(row.label)} | ${mdEscape(row.airDate ?? "")} | ${mdEscape(row.isoWeek ?? "")} | ${mdEscape(row.step)} |`,
+        `| ${row.kind} | ${row.id} | ${mdEscape(row.label)} | ${mdEscape(row.airDate ?? "")} | ${
+          mdEscape(row.isoWeek ?? "")
+        } | ${mdEscape(row.step)} |`,
       );
+    }
     lines.push("");
   }
   if (collected.network.length > 0) {
@@ -514,10 +526,15 @@ export function renderMarkdown(
       "| step | kind | vpn | tailscale | country | city | publicIp | reason |",
       "| --- | --- | --- | --- | --- | --- | --- | --- |",
     );
-    for (const row of collected.network)
+    for (const row of collected.network) {
       lines.push(
-        `| ${mdEscape(row.step)} | ${row.kind} | ${row.nordvpnConnected ?? ""} | ${row.tailscaleOnline ?? ""} | ${mdEscape(row.country ?? "")} | ${mdEscape(row.city ?? "")} | ${mdEscape(row.publicIp ?? "")} | ${mdEscape(row.reason ?? "")} |`,
+        `| ${mdEscape(row.step)} | ${row.kind} | ${row.nordvpnConnected ?? ""} | ${
+          row.tailscaleOnline ?? ""
+        } | ${mdEscape(row.country ?? "")} | ${mdEscape(row.city ?? "")} | ${
+          mdEscape(row.publicIp ?? "")
+        } | ${mdEscape(row.reason ?? "")} |`,
       );
+    }
     lines.push("");
   }
   if (collected.errors.length > 0) {
@@ -572,7 +589,7 @@ async function collectFromTmdb(
       handle.name,
       collected,
     );
-    if (p)
+    if (p) {
       collected.discoveries.push({
         kind: "movie",
         id: p.tmdbId,
@@ -581,6 +598,7 @@ async function collectFromTmdb(
         isoWeek: p.isoWeek ?? null,
         step: step.stepName ?? "",
       });
+    }
     return;
   }
   if (spec === "airedEpisode") {
@@ -591,7 +609,7 @@ async function collectFromTmdb(
       handle.name,
       collected,
     );
-    if (p)
+    if (p) {
       collected.discoveries.push({
         kind: "episode",
         id: p.tmdbEpisodeId,
@@ -600,6 +618,7 @@ async function collectFromTmdb(
         isoWeek: null,
         step: step.stepName ?? "",
       });
+    }
     return;
   }
 }
@@ -778,8 +797,9 @@ export async function collect(context: ReportContext): Promise<Collected> {
       if (spec === null) continue;
       try {
         if (modelType === TMDB) {
-          if (spec === "digitalReleaseMovie" || spec === "airedEpisode")
+          if (spec === "digitalReleaseMovie" || spec === "airedEpisode") {
             await collectFromTmdb(context, step, handle, collected);
+          }
         } else if (modelType === MOVIE_CAT) {
           if (spec === "movie") await collectMovieRow(context, step, handle, collected);
           else if (spec === "plan") await collectMoviePlan(context, step, handle, collected);

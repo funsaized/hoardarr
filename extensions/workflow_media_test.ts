@@ -36,9 +36,10 @@ Deno.test("workflow preserves scaffold UUID and owns the live production schedul
   );
   assert(workflow.includes("concurrency: 1"), "workflow concurrency must be 1");
   assert(
-    /inputs:\n\s+type: object\n\s+properties:\n\s+dryRun:\n\s+type: boolean\n\s+default: true/m.test(
-      workflow,
-    ),
+    /inputs:\n\s+type: object\n\s+properties:\n\s+dryRun:\n\s+type: boolean\n\s+default: true/m
+      .test(
+        workflow,
+      ),
     "dryRun input must default to true",
   );
   assert(
@@ -99,16 +100,18 @@ Deno.test("inspect-and-plan covers both catalogs from a single Torlink snapshot"
     reconcileMovies.includes("snapshot-current") && reconcileEpisodes.includes("snapshot-current"),
     "both catalogs must reconcile from one Torlink snapshot",
   );
-  for (const name of [
-    "reconcile-active-torrents",
-    "reconcile-active-episodes",
-    "reconcile-selected-movies",
-    "reconcile-selected-episodes",
-    "reconcile-seeding-movies",
-    "reconcile-seeding-episodes",
-    "reconcile-seed-stopped-movies",
-    "reconcile-seed-stopped-episodes",
-  ]) {
+  for (
+    const name of [
+      "reconcile-active-torrents",
+      "reconcile-active-episodes",
+      "reconcile-selected-movies",
+      "reconcile-selected-episodes",
+      "reconcile-seeding-movies",
+      "reconcile-seeding-episodes",
+      "reconcile-seed-stopped-movies",
+      "reconcile-seed-stopped-episodes",
+    ]
+  ) {
     assert(step(name).includes('"name": torrent.name'), `${name} must persist the payload name`);
   }
   assert(
@@ -397,7 +400,7 @@ Deno.test("recovery-download marks interrupted downloads failed in BOTH catalogs
   const restore = step("recovery-download-restore-network");
   assert(
     workflow.indexOf("- name: recovery-download-stop-torlink") <
-      workflow.indexOf("- name: recovery-download-restore-network") &&
+        workflow.indexOf("- name: recovery-download-restore-network") &&
       workflow.indexOf("- name: recovery-download-restore-network") <
         workflow.indexOf("- name: recovery-download-mark-movies-retryable") &&
       workflow.indexOf("- name: recovery-download-restore-network") <
@@ -430,7 +433,7 @@ Deno.test("recovery-transfer closes SSH, stops Torlink, then restores network", 
   const restore = step("recovery-transfer-restore-network");
   assert(
     workflow.indexOf("- name: recovery-transfer-close-mac") <
-      workflow.indexOf("- name: recovery-transfer-stop-torlink") &&
+        workflow.indexOf("- name: recovery-transfer-stop-torlink") &&
       workflow.indexOf("- name: recovery-transfer-stop-torlink") <
         workflow.indexOf("- name: recovery-transfer-restore-network"),
     "recovery-transfer ordering must be close-mac → stop-torlink → restore-network",

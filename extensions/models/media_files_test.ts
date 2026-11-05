@@ -196,36 +196,40 @@ Deno.test("validateTmdbId rejects bad input and accepts positive integers", () =
 });
 
 Deno.test("extension allowlist and banlist match the published contract", () => {
-  for (const name of [
-    "movie.mkv",
-    "movie.mp4",
-    "movie.m4v",
-    "movie.avi",
-    "movie.mov",
-    "movie.webm",
-    "movie.ts",
-    "movie.m2ts",
-    "movie.mpg",
-    "movie.mpeg",
-    "subs.srt",
-    "subs.sub",
-    "subs.vtt",
-    "subs.ass",
-    "subs.ssa",
-  ]) {
+  for (
+    const name of [
+      "movie.mkv",
+      "movie.mp4",
+      "movie.m4v",
+      "movie.avi",
+      "movie.mov",
+      "movie.webm",
+      "movie.ts",
+      "movie.m2ts",
+      "movie.mpg",
+      "movie.mpeg",
+      "subs.srt",
+      "subs.sub",
+      "subs.vtt",
+      "subs.ass",
+      "subs.ssa",
+    ]
+  ) {
     assert(testing.isAllowedExtension(name), `allow ${name}`);
   }
-  for (const name of [
-    "evil.exe",
-    "evil.bat",
-    "evil.sh",
-    "evil.zip",
-    "evil.rar",
-    "evil.7z",
-    "evil.tar",
-    "evil.gz",
-    "evil.iso",
-  ]) {
+  for (
+    const name of [
+      "evil.exe",
+      "evil.bat",
+      "evil.sh",
+      "evil.zip",
+      "evil.rar",
+      "evil.7z",
+      "evil.tar",
+      "evil.gz",
+      "evil.iso",
+    ]
+  ) {
     assert(testing.isBannedExtension(name), `ban ${name}`);
   }
 });
@@ -377,17 +381,19 @@ Deno.test("authorizeCatalog accepts transferred cleanup retries with matching ev
     ).ok,
     "cleanup-pending with matching sha256",
   );
-  for (const bad of [
-    null,
-    { status: "seeding", remotePath: "/remote/x", sha256: aggregate },
-    { status: "transferred", remotePath: null, sha256: aggregate },
-    { status: "transferred", remotePath: "/remote/x", sha256: null },
-    {
-      status: "transferred",
-      remotePath: "/remote/x",
-      sha256: "b".repeat(64),
-    },
-  ]) {
+  for (
+    const bad of [
+      null,
+      { status: "seeding", remotePath: "/remote/x", sha256: aggregate },
+      { status: "transferred", remotePath: null, sha256: aggregate },
+      { status: "transferred", remotePath: "/remote/x", sha256: null },
+      {
+        status: "transferred",
+        remotePath: "/remote/x",
+        sha256: "b".repeat(64),
+      },
+    ]
+  ) {
     const result = testing.authorizeCatalog(bad as never, aggregate);
     assert(!result.ok, `denied ${JSON.stringify(bad)}`);
   }
@@ -422,7 +428,7 @@ Deno.test("inspect writes evidence and throws when denied entries exist", async 
     assert(writtenInspection!.value.ok === false, "ok=false on denied entries");
     assert(
       (writtenInspection!.value.denied as Array<{ reason: string }>).some((d) =>
-        d.reason.includes("banned"),
+        d.reason.includes("banned")
       ),
       "exe denial reason recorded",
     );

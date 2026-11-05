@@ -557,9 +557,11 @@ export function renderMarkdown(
     lines.push("| --- | --- | --- | --- | --- | --- |");
     for (const row of list) {
       lines.push(
-        `| ${row.tmdbId ?? "?"} | ${mdEscape(row.title ?? "")} | ${mdEscape(
-          row.status,
-        )} | ${bytesFormat(row.bytes)} | ${mdEscape(row.reason ?? "")} | ${row.provenance} |`,
+        `| ${row.tmdbId ?? "?"} | ${mdEscape(row.title ?? "")} | ${
+          mdEscape(
+            row.status,
+          )
+        } | ${bytesFormat(row.bytes)} | ${mdEscape(row.reason ?? "")} | ${row.provenance} |`,
       );
     }
     lines.push("");
@@ -581,11 +583,17 @@ export function renderMarkdown(
     lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const row of collected.network) {
       lines.push(
-        `| ${mdEscape(row.step)} | ${row.kind} | ${row.nordvpnConnected ?? ""} | ${row.tailscaleOnline ?? ""} | ${mdEscape(
-          row.country ?? "",
-        )} | ${mdEscape(row.city ?? "")} | ${mdEscape(row.publicIp ?? "")} | ${mdEscape(
-          row.reason ?? "",
-        )} |`,
+        `| ${mdEscape(row.step)} | ${row.kind} | ${row.nordvpnConnected ?? ""} | ${
+          row.tailscaleOnline ?? ""
+        } | ${
+          mdEscape(
+            row.country ?? "",
+          )
+        } | ${mdEscape(row.city ?? "")} | ${mdEscape(row.publicIp ?? "")} | ${
+          mdEscape(
+            row.reason ?? "",
+          )
+        } |`,
       );
     }
     lines.push("");
@@ -600,9 +608,11 @@ export function renderMarkdown(
     lines.push("| --- | --- | --- | --- | --- | --- |");
     for (const row of collected.ssh) {
       lines.push(
-        `| ${mdEscape(row.step)} | ${row.spec} | ${mdEscape(
-          row.host ?? "",
-        )} | ${mdEscape(row.method ?? "")} | ${row.ok} | ${mdEscape(row.detail ?? "")} |`,
+        `| ${mdEscape(row.step)} | ${row.spec} | ${
+          mdEscape(
+            row.host ?? "",
+          )
+        } | ${mdEscape(row.method ?? "")} | ${row.ok} | ${mdEscape(row.detail ?? "")} |`,
       );
     }
     lines.push("");
@@ -929,12 +939,10 @@ async function collectFromSsh(
       return;
     }
     const ok = parsed.data.exitCode === 0 && parsed.data.error === undefined;
-    const detail = ok
-      ? `exit=${parsed.data.exitCode}`
-      : (parsed.data.error ??
-        (parsed.data.exitCode === null
-          ? `killed by ${parsed.data.signal ?? "signal"}`
-          : `exit=${parsed.data.exitCode}`));
+    const detail = ok ? `exit=${parsed.data.exitCode}` : (parsed.data.error ??
+      (parsed.data.exitCode === null
+        ? `killed by ${parsed.data.signal ?? "signal"}`
+        : `exit=${parsed.data.exitCode}`));
     collected.ssh.push({
       spec: "runResult",
       host: parsed.data.host,

@@ -6,3 +6,12 @@
 # Local extension sources (developer-specific, not shared)
 .swamp-sources.yaml
 # END swamp managed section
+
+# Installation configuration, generated instances, and release outputs
+hoardarr.yaml
+.hoardarr/
+.env
+.env.*
+!.env.example
+dist/
+node_modules/

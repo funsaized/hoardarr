@@ -1,0 +1,5 @@
+[[roles]]
+name = "hoardarr"
+routes = ["GET /v1/vpn/status", "GET /v1/publicip/ip"]
+auth = "apikey"
+apikey = "REPLACE_WITH_A_RANDOM_KEY_AND_STORE_THE_SAME_KEY_IN_THE_HOARDARR_VAULT"

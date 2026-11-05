@@ -317,12 +317,8 @@ async function probeStatus(
     lastRunAt: runStatus.lastRunAt,
     lastRunStatus: runStatus.lastRunStatus,
     lastRunDetail: runStatus.lastRunDetail,
-    lastRunRecognized: "lastRunRecognized" in runStatus
-      ? runStatus.lastRunRecognized
-      : true,
-    rawJournalTail: "rawJournalTail" in runStatus
-      ? runStatus.rawJournalTail
-      : null,
+    lastRunRecognized: "lastRunRecognized" in runStatus ? runStatus.lastRunRecognized : true,
+    rawJournalTail: "rawJournalTail" in runStatus ? runStatus.rawJournalTail : null,
     checkedAt: new Date().toISOString(),
   };
 }

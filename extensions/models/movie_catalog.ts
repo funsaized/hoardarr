@@ -1,13 +1,17 @@
 /** Hoardarr local movie catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4";
+import {
+  AddResultsSchema,
+  compareRelease,
+  moviePolicy,
+  type Policy,
+  PolicySchema,
+} from "./_lib/policy.ts";
 
-const MODEL_VERSION = "2026.08.30.2";
+const MODEL_VERSION = "2026.11.05.1";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
-const MAX_RETRY_ATTEMPTS = 3;
-const MIN_SEEDERS = 5;
-const MAX_BYTES = 15 * 1024 ** 3;
 const TITLE_YEAR_REGEX = /(^|[^0-9])(\d{4})([^0-9]|$)/;
 const REJECT_RESOLUTION_REGEX = /\b(cam|hdcam|ts|telesync|hdts|tc|telecine|hdtc)\b/i;
 const REJECT_EXTENSION_REGEX = /\.(exe|bat|cmd|sh|zip|rar|7z|tar|gz|bz2|xz|iso|img)$/i;
@@ -49,6 +53,7 @@ const ReleaseSchema = z.object({
   sizeBytes: z.number().int().nonnegative(),
   seeders: z.number().int().nonnegative(),
   source: z.string().max(100).optional(),
+  magnet: z.string().max(32000).optional(),
 });
 
 const SelectItemSchema = z.object({
@@ -102,6 +107,9 @@ const MovieSchema = z.object({
   title: z.string().min(1).max(500),
   year: z.number().int().min(1800).max(2200).nullable(),
   infoHash: z.string().nullable(),
+  acquisitionLocator: z.string().max(32000).nullable().optional(),
+  downloadProvider: z.string().optional(),
+  policyVersion: z.number().int().optional(),
   releaseName: z.string().nullable(),
   localPath: z.string().nullable(),
   remotePath: z.string().nullable(),
@@ -151,6 +159,7 @@ type Context = {
   signal: AbortSignal;
   modelType: string;
   modelId: string;
+  globalArgs?: { policy?: Policy };
   readResource(instanceName: string): Promise<Record<string, unknown> | null>;
   writeResource(
     specName: string,
@@ -193,27 +202,35 @@ function yearMatches(releaseName: string, year: number | null): boolean {
   return match !== null && Number(match[2]) === year;
 }
 
-function is1080pWebDl(lower: string): boolean {
-  if (!/\b1080p\b/i.test(lower)) return false;
+function is1080pWebDl(lower: string, policy: Policy = moviePolicy): boolean {
+  if (!new RegExp(`\\b${policy.resolution}\\b`, "i").test(lower)) return false;
   return /\bweb[\s.-]?(dl|rip)\b/i.test(lower);
 }
 
-function rejectReasons(release: Release, year: number | null): string[] {
+function rejectReasons(
+  release: Release,
+  year: number | null,
+  policy: Policy = moviePolicy,
+): string[] {
   const reasons: string[] = [];
   if (!yearMatches(release.name, year)) reasons.push("year-mismatch");
-  if (!is1080pWebDl(release.name.toLowerCase())) reasons.push("not-1080p-web");
+  if (!is1080pWebDl(release.name.toLowerCase(), policy)) reasons.push("not-1080p-web");
   if (REJECT_RESOLUTION_REGEX.test(release.name)) reasons.push("cam-ts-tc");
   if (REJECT_EXTENSION_REGEX.test(release.name)) {
     reasons.push("executable-archive");
   }
-  if (release.seeders < MIN_SEEDERS) reasons.push("low-seeders");
-  if (release.sizeBytes > MAX_BYTES) reasons.push("too-large");
+  if (release.seeders < policy.minSeeders) reasons.push("low-seeders");
+  if (release.sizeBytes > policy.maxSizeBytes) reasons.push("too-large");
+  if (policy.sources.length && !policy.sources.includes(release.source ?? "")) {
+    reasons.push("source-not-allowed");
+  }
   return reasons;
 }
 
 function evaluateRelease(
   movie: { title: string; year: number | null },
   release: Release,
+  policy: Policy = moviePolicy,
 ): { ok: boolean; reasons: string[] } {
   const reasons: string[] = [];
   const releaseNormalized = normalize(release.name);
@@ -221,35 +238,28 @@ function evaluateRelease(
   if (movieNormalized.length > 0 && !releaseNormalized.includes(movieNormalized)) {
     reasons.push("title-mismatch");
   }
-  reasons.push(...rejectReasons(release, movie.year));
+  reasons.push(...rejectReasons(release, movie.year, policy));
   return { ok: reasons.length === 0, reasons };
 }
 
 function pickBest(
   movie: { title: string; year: number | null },
   releases: ReadonlyArray<Release>,
+  policy: Policy = moviePolicy,
 ): { release: Release | null; reasons: string[] } {
   if (releases.length === 0) return { release: null, reasons: ["no-releases"] };
   const acceptable = releases
-    .map((release) => ({ release, eval: evaluateRelease(movie, release) }))
+    .map((release) => ({ release, eval: evaluateRelease(movie, release, policy) }))
     .filter((entry) => entry.eval.ok);
   if (acceptable.length === 0) {
     const first = releases[0];
     if (!first) return { release: null, reasons: ["no-releases"] };
-    const evalResult = evaluateRelease(movie, first);
+    const evalResult = evaluateRelease(movie, first, policy);
     return { release: null, reasons: evalResult.reasons };
   }
   // ponytail: stable tie-break on name then infoHash so identical inputs
   // always pick the same release across runs (reproducible workflow log).
-  acceptable.sort((a, b) => {
-    if (a.release.seeders !== b.release.seeders) {
-      return b.release.seeders - a.release.seeders;
-    }
-    if (a.release.name !== b.release.name) {
-      return a.release.name < b.release.name ? -1 : 1;
-    }
-    return a.release.infoHash < b.release.infoHash ? -1 : 1;
-  });
+  acceptable.sort((a, b) => compareRelease(a.release, b.release, policy));
   const first = acceptable[0];
   return first
     ? { release: first.release, reasons: [] }
@@ -259,11 +269,12 @@ function pickBest(
 function summarizeNoMatch(
   movie: { title: string; year: number | null },
   releases: ReadonlyArray<Release>,
+  policy: Policy = moviePolicy,
 ): string {
   if (releases.length === 0) return "no-releases";
   const allReasons = new Map<string, number>();
   for (const release of releases) {
-    const result = evaluateRelease(movie, release);
+    const result = evaluateRelease(movie, release, policy);
     for (const reason of result.reasons) {
       allReasons.set(reason, (allReasons.get(reason) ?? 0) + 1);
     }
@@ -274,9 +285,9 @@ function summarizeNoMatch(
     : `no-acceptable-release: ${ordered.map(([k]) => k).join(",")}`;
 }
 
-function isSelectable(movie: Movie): boolean {
+function isSelectable(movie: Movie, policy: Policy = moviePolicy): boolean {
   if (movie.status === "wanted") return true;
-  if (movie.status === "failed" && movie.attempts < MAX_RETRY_ATTEMPTS) {
+  if (movie.status === "failed" && movie.attempts < policy.maxAttempts) {
     return true;
   }
   return false;
@@ -441,10 +452,9 @@ function advanceFromSnapshot(
 ): Movie | null {
   if (TERMINAL_STATUSES.has(movie.status)) return null;
   if (!movie.infoHash) return null;
-  const current =
-    snapshot?.name !== undefined && snapshot.name !== movie.releaseName
-      ? { ...movie, releaseName: snapshot.name }
-      : movie;
+  const current = snapshot?.name !== undefined && snapshot.name !== movie.releaseName
+    ? { ...movie, releaseName: snapshot.name }
+    : movie;
   // seed-stopped and transfer-ready are durable workflow checkpoints. Torrent
   // metadata may be absent while removal or transfer resumes in a later run,
   // but a present snapshot can still repair the durable payload name.
@@ -504,7 +514,7 @@ function advanceFromSnapshot(
   return null;
 }
 
-function computePlan(movies: ReadonlyArray<Movie>): Plan {
+function computePlan(movies: ReadonlyArray<Movie>, policy: Policy = moviePolicy): Plan {
   const wanted: number[] = [];
   const retryable: number[] = [];
   const downloading: number[] = [];
@@ -515,7 +525,7 @@ function computePlan(movies: ReadonlyArray<Movie>): Plan {
   for (const movie of movies) {
     if (movie.status === "wanted" || movie.status === "selected") {
       wanted.push(movie.tmdbId);
-    } else if (movie.status === "failed" && movie.attempts < MAX_RETRY_ATTEMPTS) {
+    } else if (movie.status === "failed" && movie.attempts < policy.maxAttempts) {
       retryable.push(movie.tmdbId);
     } else if (movie.status === "downloading") {
       downloading.push(movie.tmdbId);
@@ -616,17 +626,20 @@ async function executeSelect(
       missing++;
       continue;
     }
-    if (!isSelectable(existing)) {
+    if (!isSelectable(existing, context.globalArgs?.policy ?? moviePolicy)) {
       ineligible++;
       continue;
     }
-    const result = pickBest(existing, item.releases);
+    const result = pickBest(existing, item.releases, context.globalArgs?.policy ?? moviePolicy);
     let next: Movie;
     if (result.release) {
       next = {
         ...existing,
         status: "selected",
-        infoHash: result.release.infoHash,
+        infoHash: result.release.infoHash.toLowerCase(),
+        acquisitionLocator: result.release.magnet ?? result.release.infoHash,
+        downloadProvider: "torlink",
+        policyVersion: (context.globalArgs?.policy ?? moviePolicy).version,
         releaseName: result.release.name,
         bytes: result.release.sizeBytes,
         noMatchReason: null,
@@ -635,7 +648,11 @@ async function executeSelect(
     } else {
       next = {
         ...existing,
-        noMatchReason: summarizeNoMatch(existing, item.releases),
+        noMatchReason: summarizeNoMatch(
+          existing,
+          item.releases,
+          context.globalArgs?.policy ?? moviePolicy,
+        ),
       };
     }
     handles.push(await writeMovie(context, next));
@@ -708,7 +725,7 @@ async function executePlan(
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
   context.logger.info("plan starting");
   const movies = await loadAllMovies(context);
-  const plan = computePlan(movies);
+  const plan = computePlan(movies, context.globalArgs?.policy ?? moviePolicy);
   const handle = await context.writeResource(SPEC_PLAN, PLAN_INSTANCE, plan);
   context.logger.info("plan computed", {
     wanted: plan.wanted.length,
@@ -722,11 +739,37 @@ async function executePlan(
   return { dataHandles: [handle] };
 }
 
+async function executeRecordAdd(args: z.infer<typeof AddResultsSchema>, context: Context) {
+  const handles: Array<{ name: string }> = [];
+  const seen = new Set<number>();
+  for (const result of args.results) {
+    const match = /^m-(\d+)$/.exec(result.key);
+    if (!match) continue;
+    const id = Number(match[1]);
+    if (seen.has(id)) throw new Error("Duplicate add result key");
+    seen.add(id);
+    const row = await loadMovie(context, id);
+    if (!row || row.status !== "selected") continue;
+    if (result.ok && result.id) {
+      if (row.infoHash?.toLowerCase() !== result.id.toLowerCase()) {
+        throw new Error("Downloader returned an unexpected identity");
+      }
+      const updated = applyTransition(row, {
+        tmdbId: id,
+        to: "downloading",
+        infoHash: result.id.toLowerCase(),
+      });
+      handles.push(await writeMovie(context, updated));
+    }
+  }
+  return { dataHandles: handles };
+}
+
 /** Hoardarr movie catalog model. */
 export const model = {
   type: "hoardarr/movie-catalog",
   version: MODEL_VERSION,
-  globalArguments: z.object({}),
+  globalArguments: z.object({ policy: PolicySchema.default(moviePolicy) }),
   resources: {
     [SPEC_MOVIE]: {
       description: "One catalog movie record keyed by TMDB id, identity is always the TMDB id.",
@@ -742,6 +785,12 @@ export const model = {
     },
   },
   methods: {
+    recordAdd: {
+      description:
+        "Apply successful per-item add evidence; leave ambiguous results for reconciliation.",
+      arguments: AddResultsSchema,
+      execute: executeRecordAdd,
+    },
     ingest: {
       description:
         "Ingest discovery records into the catalog without resetting existing state, especially transferred or ignored movies.",

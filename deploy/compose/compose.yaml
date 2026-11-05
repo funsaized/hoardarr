@@ -1,0 +1,56 @@
+name: hoardarr
+services:
+  gluetun:
+    image: qmcgaw/gluetun:v3.41.3
+    cap_add: [NET_ADMIN]
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: "1"
+    devices: [/dev/net/tun:/dev/net/tun]
+    environment:
+      VPN_SERVICE_PROVIDER: custom
+      VPN_TYPE: wireguard
+      FIREWALL: "on"
+      HTTP_CONTROL_SERVER_AUTH_CONFIG_FILEPATH: /gluetun/auth/config.toml
+    volumes:
+      - ./secrets/wg0.conf:/gluetun/wireguard/wg0.conf:ro
+      - ./secrets/gluetun-auth.toml:/gluetun/auth/config.toml:ro
+    restart: unless-stopped
+  torlink:
+    image: ${HOARDARR_IMAGE:-ghcr.io/funsaized/hoardarr:0.1.0}
+    network_mode: service:gluetun
+    depends_on:
+      gluetun: {condition: service_healthy}
+    entrypoint: [node, /opt/torlink/dist/cli.cjs]
+    command: [serve, --host, 127.0.0.1, --port, "9161", --to, /downloads, --seed-time, 5m]
+    environment:
+      TORLINK_STATE_DIR: /state/torlink
+    user: ${HOARDARR_UID:-1000}:${HOARDARR_GID:-1000}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./payload/downloads:/downloads
+      - ./payload/state:/state
+    restart: unless-stopped
+  hoardarr:
+    image: ${HOARDARR_IMAGE:-ghcr.io/funsaized/hoardarr:0.1.0}
+    network_mode: service:gluetun
+    depends_on:
+      gluetun: {condition: service_healthy}
+      torlink: {condition: service_started}
+    command: [serve]
+    user: ${HOARDARR_UID:-1000}:${HOARDARR_GID:-1000}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      SWAMP_API_KEY_FILE: /run/secrets/swamp-api-key
+      SWAMP_SIGNIN_TOKEN_FILE: /run/secrets/swamp-signin-token
+      HOARDARR_DENO: /usr/local/bin/deno
+    volumes:
+      - ./instance:/instance
+      - ./hoardarr.yaml:/config/hoardarr.yaml:ro
+      - ./payload/downloads:/downloads
+      - ./payload/library:/library
+      - ./payload/state:/state
+      - ./runtime-home:/home/node
+      - ./secrets:/run/secrets:ro
+    restart: unless-stopped

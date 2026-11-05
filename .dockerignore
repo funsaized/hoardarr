@@ -1,0 +1,11 @@
+.git
+.swamp
+.swamp-sources.yaml
+.hoardarr
+hoardarr.yaml
+dist
+node_modules
+**/upstream_extensions.json
+.env*
+secrets
+payload
