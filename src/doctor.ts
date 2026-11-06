@@ -122,6 +122,12 @@ export async function doctor(config: Config, repo: string, live = false) {
     }
     return "Available";
   });
+  if (config.profile === "systemd-nordvpn-ssh") {
+    await check("Systemd and VPN prerequisites", async () => {
+      await command(["model", "method", "run", "host-bootstrap", "inspect", "--json"], repo);
+      return "Service assets, NordVPN authentication and Tailscale prerequisites verified";
+    });
+  }
   if (live) {
     const downloader = descriptors.downloader.id === "torlink"
       ? "torlink"
