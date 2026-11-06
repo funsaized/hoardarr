@@ -15,3 +15,13 @@ hoardarr.yaml
 !.env.example
 dist/
 node_modules/
+
+# Generated installation definitions are not application source
+/models/
+/workflows/
+/vaults/
+/assets/systemd/
+/secrets/
+/payload/
+/instance/
+/runtime-home/

@@ -1,6 +1,7 @@
 /** Normalize the existing Gluetun integration's live status for Hoardarr. */
 import { z } from "npm:zod@4";
 import { invoke, type Runtime } from "./_lib/runtime.ts";
+/** Swamp behavior implementing gluetun environment operations. */
 export const model = {
   type: "@funsaized/hoardarr/gluetun-environment",
   version: "2026.11.05.1",

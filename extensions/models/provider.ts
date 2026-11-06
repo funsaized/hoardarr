@@ -9,6 +9,7 @@ const Args = z.object({
   inputs: z.record(z.string(), z.unknown()).default({}),
   tolerateFailure: z.boolean().default(false),
 });
+/** Swamp behavior implementing provider operations. */
 export const model = {
   type: "@funsaized/hoardarr/provider",
   version: "2026.11.05.1",

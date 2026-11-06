@@ -5,7 +5,7 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const workflow = await Deno.readTextFile(
-  new URL("../workflows/workflow-movies.yaml", import.meta.url),
+  new URL("../tests/fixtures/legacy/workflows/workflow-movies.yaml", import.meta.url),
 );
 
 Deno.test("legacy movie workflow has no production trigger", () => {

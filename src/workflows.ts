@@ -106,7 +106,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       name: "capacity-ready",
       task: {
         type: "assert",
-        expr: expr(`steps.capacity.outputs.availableBytes >= ${config.download.minFreeBytes}`),
+        expr: `steps.capacity.outputs.availableBytes >= ${config.download.minFreeBytes}`,
         message: "Insufficient staging capacity",
         severity: "high",
       },
@@ -130,7 +130,16 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   }
   const started = String(acquisition.at(-1)!.name);
   acquisition.push(call("health", "download-provider", "health", {}, started));
-  acquisition.push(call("snapshot-before", "download-provider", "sync", {}, "health"));
+  acquisition.push(
+    method(
+      "capabilities",
+      "pipeline",
+      "health",
+      { ...owned, records: records("health") },
+      "health",
+    ),
+  );
+  acquisition.push(call("snapshot-before", "download-provider", "sync", {}, "capabilities"));
   acquisition.push(
     method("reconcile-before", "pipeline", "reconcile", {
       ...owned,

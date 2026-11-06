@@ -8,6 +8,7 @@ const Globals = z.object({
   files: z.string().default("media-files"),
   seedTime: z.string().default("5m"),
   movieEnabled: z.boolean().default(true),
+  downloadProvider: z.string().default("torlink"),
   batchLimit: z.number().int().min(1).max(100).default(100),
 });
 type Context = Runtime & { globalArgs: z.infer<typeof Globals> };
@@ -29,6 +30,7 @@ const WorkItem = z.object({
 });
 type Item = z.infer<typeof WorkItem>;
 const WorkSchema = z.object({
+  truncated: z.boolean(),
   items: z.array(WorkItem),
   queries: z.array(z.object({ key: z.string(), query: z.string(), category: z.string() })),
   additions: z.array(z.object({ key: z.string(), input: z.string(), seedTime: z.string() })),
@@ -70,7 +72,7 @@ function workItem(row: Row, kind: "movie" | "episode"): Item {
     input: row.acquisitionLocator ?? row.infoHash,
   });
 }
-async function transition(ctx: Context, item: Item, patch: Row) {
+function transition(ctx: Context, item: Item, patch: Row) {
   return invoke(ctx, catalog(ctx, item.mediaKind), "transition", {
     transitions: [{ [idField(item.mediaKind)]: item.id, ...patch }],
   });
@@ -80,6 +82,7 @@ const getRecord = (records: RecordData[], name: string): Row | undefined =>
 async function write(ctx: Context, spec: string, data: Row) {
   return { dataHandles: [await ctx.writeResource(spec, `${spec}-current`, data)] };
 }
+/** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
   version: "2026.11.05.1",
@@ -93,6 +96,18 @@ export const model = {
     transfer: resource(TransferSchema, "Validated source manifest for delivery"),
   },
   methods: {
+    health: {
+      description: "Require runtime capabilities before submitting configured downloads.",
+      arguments: Records,
+      execute: async (args: z.infer<typeof Records>, ctx: Context) => {
+        await assertLease(ctx.repoDir, args.owner);
+        const instance = getRecord(args.records, "instance-current");
+        if (
+          !instance?.ok || !(instance.capabilities as string[] | undefined)?.includes("seed-time")
+        ) throw new Error("Downloader must be healthy and support per-item seed time");
+        return write(ctx, "summary", { ok: true });
+      },
+    },
     plan: {
       description: "Build bounded work from durable catalog records and retry policies.",
       arguments: Owned,
@@ -100,6 +115,17 @@ export const model = {
         await assertLease(ctx.repoDir, args.owner);
         const all: Item[] = [], eligible = new Set<string>();
         const movieRows = await rows(ctx, "movie"), episodeRows = await rows(ctx, "episode");
+        for (const row of [...movieRows, ...episodeRows]) {
+          if (
+            ["downloading", "seeding", "seed-stopped"].includes(String(row.status)) &&
+            (row.downloadProvider ?? "torlink") !== ctx.globalArgs.downloadProvider
+          ) {
+            throw new Error(
+              "An in-flight item belongs to a different downloader; finish or migrate it before changing providers",
+            );
+          }
+        }
+
         for (const kind of ["movie", "episode"] as const) {
           const results = await invoke(ctx, catalog(ctx, kind), "plan");
           const plan = getRecord(results, "plan-current");
@@ -136,6 +162,16 @@ export const model = {
         );
         return write(ctx, "work", {
           items: all,
+          truncated: all.filter((r) =>
+                eligible.has(r.key) && r.status !== "selected" &&
+                (r.mediaKind !== "movie" || ctx.globalArgs.movieEnabled)
+              ).length > searchable.length ||
+            all.filter((r) => r.status === "selected" && r.input).length > selected.length ||
+            new Set(active.map((r) => r.infoHash)).size > 100 ||
+            new Set(stopped.map((r) => r.infoHash)).size > 100 || delivery.filter((r) =>
+                r.mediaKind === "movie"
+              ).length > 1 ||
+            delivery.filter((r) => r.mediaKind === "episode").length > 1,
           queries: searchable.map((r) => ({ key: r.key, query: r.query, category: r.category })),
           additions: selected.map((r) => ({
             key: r.key,
@@ -231,13 +267,15 @@ export const model = {
           ...(r.name ? { name: r.name } : {}),
           progress: r.progress ?? null,
         }));
-        for (const kind of ["movie", "episode"]) {
-          await invoke(
-            ctx,
-            catalog(ctx, kind),
-            "reconcile",
-            { snapshots },
-          );
+        const present = new Set(snapshots.map((torrent) => torrent.infoHash));
+        for (const kind of ["movie", "episode"] as const) {
+          await invoke(ctx, catalog(ctx, kind), "reconcile", { snapshots });
+          // Reconcile a remove that succeeded before its acknowledgement was persisted.
+          for (const row of await rows(ctx, kind)) {
+            if (row.status === "seed-stopped" && row.infoHash && !present.has(row.infoHash)) {
+              await transition(ctx, workItem(row, kind), { to: "transfer-ready" });
+            }
+          }
         }
         return write(ctx, "summary", { ok: true });
       },
@@ -330,4 +368,5 @@ export const model = {
     },
   },
 };
+/** Pure helpers exposed for contract tests. */
 export const testing = { workItem };

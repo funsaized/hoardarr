@@ -7,9 +7,10 @@ import { resolveProviders } from "./providers.ts";
 import { DescriptorSchema } from "../extensions/models/_lib/contracts.ts";
 import { workflowDefinitions } from "./workflows.ts";
 import { command, jsonCommand, swamp } from "./swamp.ts";
+import { applyTransaction, RollbackError } from "./transaction.ts";
 import { leaseOperation, readLease } from "../extensions/models/_lib/runtime.ts";
 export const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const pins = {
+export const pins = {
   "@funsaized/torlink": "2026.11.05.1",
   "@swamp/ssh": "2026.07.28.1",
   "@keeb/mms": "2026.07.18.1",
@@ -48,7 +49,7 @@ export async function ensureIdle(repo: string): Promise<void> {
 export async function install(
   config: Config,
   repo: string,
-  options: { pull?: boolean } = {},
+  options: { pull?: boolean; beforeApply?: () => Promise<unknown> } = {},
 ): Promise<void> {
   await ensureIdle(repo);
   const owner = crypto.randomUUID();
@@ -62,12 +63,21 @@ export async function install(
       { mode: 0o600 },
     );
   });
+  let release = true;
   try {
-    await installUnlocked(config, repo, options);
-  } finally {
-    await leaseOperation(repo, async (path) => {
-      if ((await readLease(path))?.owner === owner) await Deno.remove(path);
+    await applyTransaction(repo, async () => {
+      await options.beforeApply?.();
+      await installUnlocked(config, repo, options);
     });
+  } catch (error) {
+    release = !(error instanceof RollbackError);
+    throw error;
+  } finally {
+    if (release) {
+      await leaseOperation(repo, async (path) => {
+        if ((await readLease(path))?.owner === owner) await Deno.remove(path);
+      });
+    }
   }
 }
 async function installUnlocked(
@@ -83,12 +93,35 @@ async function installUnlocked(
     await command(["repo", "init", repo, "--no-vault", "--tool", "none", "--json"]);
   }
   if (repo !== sourceRoot) {
-    await copyTree(join(sourceRoot, "extensions"), join(repo, "extensions"));
-    await Deno.copyFile(join(sourceRoot, "manifest.yaml"), join(repo, "manifest.yaml"));
+    for (const directory of ["extensions", "src", "cli", "bin", "deploy", "docs", "examples"]) {
+      await copyTree(join(sourceRoot, directory), join(repo, directory));
+    }
+    for (const filename of ["manifest.yaml", "deno.json", "deno.lock", "README.md", "LICENSE"]) {
+      await Deno.copyFile(join(sourceRoot, filename), join(repo, filename));
+    }
   }
   if (pull && config.profile !== "demo") {
     for (const [name, version] of Object.entries(pins)) {
       await command(["extension", "pull", `${name}@${version}`, "--yes", "--json"], repo);
+    }
+  }
+  for (const descriptor of Object.values(selected)) {
+    const loaded = await jsonCommand<{ version: string; methods: { name: string }[] }>([
+      "model",
+      "type",
+      "describe",
+      descriptor.type,
+      "--compact",
+    ], repo);
+    if (loaded.version !== descriptor.version) {
+      throw new Error(
+        `Provider ${descriptor.id} requires ${descriptor.type}@${descriptor.version}, loaded ${loaded.version}. Check local extension sources for an override.`,
+      );
+    }
+    for (const method of Object.values(descriptor.methods)) {
+      if (!loaded.methods.some((m) => m.name === method)) {
+        throw new Error(`Provider ${descriptor.id} is missing method ${method}`);
+      }
     }
   }
   const definitions = await jsonCommand<{ results: { name: string; id: string; type: string }[] }>([
@@ -136,10 +169,14 @@ async function installUnlocked(
       }),
     );
   };
-  await define("movie-catalog", "hoardarr/movie-catalog", { policy: config.policies.movie });
+  await define("movie-catalog", "hoardarr/movie-catalog", {
+    policy: config.policies.movie,
+    downloadProvider: config.providers.downloader,
+  });
   await define("episode-catalog", "hoardarr/episode-catalog", {
     shows: config.interests.shows,
     policy: config.policies.episode,
+    downloadProvider: config.providers.downloader,
   });
   await define("media-files", "hoardarr/media-files", {
     stagingRoot: config.paths.staging,
@@ -151,6 +188,7 @@ async function installUnlocked(
   await define("pipeline", "@funsaized/hoardarr/pipeline", {
     seedTime: config.download.seedTime,
     movieEnabled: config.interests.movies,
+    downloadProvider: config.providers.downloader,
   });
   const actual: Record<string, string> = {};
   const defined = new Set<string>();

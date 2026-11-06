@@ -40,6 +40,6 @@ export const AddResultsSchema = z.object({
       ok: z.boolean(),
       outcome: z.string(),
       error: z.string().nullable().optional(),
-    }).passthrough(),
+    }),
   ).max(100),
 });

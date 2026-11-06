@@ -3,6 +3,8 @@ import { dirname, join, resolve } from "node:path";
 import { parse } from "npm:yaml@2.8.1";
 import { type Config, ConfigSchema } from "./config.ts";
 import { ensureIdle, exists } from "./install.ts";
+import { pins } from "./install.ts";
+import { command, jsonCommand } from "./swamp.ts";
 
 async function definitions(root: string): Promise<Record<string, Record<string, unknown>>> {
   const output: Record<string, Record<string, unknown>> = {};
@@ -110,4 +112,27 @@ export async function backup(repo: string, destination: string): Promise<string>
   if (!result.success) throw new Error(new TextDecoder().decode(result.stderr));
   await Deno.chmod(path, 0o600);
   return path;
+}
+
+/** Replace legacy development overrides only for the pinned application dependencies. */
+export async function removePinnedSourceOverrides(repo: string): Promise<string[]> {
+  const result = await jsonCommand<{ sources: { path: string; expandedPaths: string[] }[] }>([
+    "extension",
+    "source",
+    "list",
+  ], repo);
+  const removed: string[] = [];
+  for (const source of result.sources) {
+    const roots = source.expandedPaths;
+    if (!roots.length) continue;
+    const manifests = await Promise.all(roots.map(async (root) => {
+      const path = join(root, "manifest.yaml");
+      return await exists(path) ? parse(await Deno.readTextFile(path)) : null;
+    }));
+    if (manifests.every((manifest) => manifest && Object.hasOwn(pins, manifest.name))) {
+      await command(["extension", "source", "rm", source.path, "--json"], repo);
+      removed.push(source.path);
+    }
+  }
+  return removed;
 }

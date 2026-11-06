@@ -5,6 +5,15 @@
     "fmt": "deno fmt",
     "hoardarr": "deno run --allow-all cli/main.ts"
   },
-  "fmt": { "lineWidth": 100 },
-  "exclude": [".swamp", "dist", "node_modules", ".hoardarr", "hoardarr.yaml"]
+  "fmt": {
+    "lineWidth": 100
+  },
+  "exclude": [
+    ".swamp",
+    "dist",
+    "node_modules",
+    ".hoardarr",
+    "hoardarr.yaml",
+    "tests/fixtures/legacy"
+  ]
 }

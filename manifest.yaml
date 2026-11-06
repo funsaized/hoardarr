@@ -18,7 +18,7 @@ include:
   - _lib/contracts.ts
   - _lib/runtime.ts
   - _lib/policy.ts
-  - media_files.ts
+  - _lib/media_paths.ts
 additionalFiles:
   - README.md
   - LICENSE

@@ -1406,3 +1406,59 @@ Deno.test("each catalog method logs entry and completion", async () => {
     "plan completion logged",
   );
 });
+
+Deno.test("movie add outcomes preserve partial success, ambiguous retries, and invalid-input limits", async () => {
+  const initial = Object.fromEntries(
+    [1, 2, 3].map(
+      (id) => [
+        `catalog-movie-${id}`,
+        baseMovie({
+          tmdbId: id,
+          status: "selected",
+          infoHash: `hash-${id}`,
+          releaseName: "Fixture.mkv",
+        }),
+      ],
+    ),
+  );
+  const { context, store } = makeContext(initial);
+  await model.methods.recordAdd.execute({
+    results: [
+      { key: "m-1", id: "hash-1", ok: true, outcome: "duplicate" },
+      { key: "m-2", id: null, ok: false, outcome: "error" },
+      { key: "m-3", id: null, ok: false, outcome: "invalid" },
+    ],
+  }, context);
+  assertEquals(
+    store.resources.get("catalog-movie-1")?.status,
+    "downloading",
+    "successful duplicate advances",
+  );
+  assertEquals(
+    store.resources.get("catalog-movie-2")?.status,
+    "selected",
+    "ambiguous addition remains reconcilable",
+  );
+  assertEquals(
+    store.resources.get("catalog-movie-3")?.status,
+    "failed",
+    "invalid locator is retry-limited",
+  );
+  assertEquals(
+    store.resources.get("catalog-movie-3")?.attempts,
+    1,
+    "invalid input counts toward retry limit",
+  );
+  await assertRejects(
+    () =>
+      model.methods.recordAdd.execute({
+        results: [{ key: "m-2", id: "wrong", ok: true, outcome: "added" }],
+      }, context),
+    "unexpected identity",
+  );
+  assertEquals(
+    store.resources.get("catalog-movie-2")?.status,
+    "selected",
+    "mismatched response cannot advance another item",
+  );
+});

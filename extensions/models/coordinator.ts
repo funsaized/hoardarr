@@ -10,6 +10,7 @@ type Context = {
     data: Record<string, unknown>,
   ): Promise<{ name: string }>;
 };
+/** Swamp behavior implementing coordinator operations. */
 export const model = {
   type: "@funsaized/hoardarr/coordinator",
   version: "2026.11.05.1",
@@ -17,7 +18,11 @@ export const model = {
   resources: {
     lease: {
       description: "Exclusive reconciliation ownership",
-      schema: z.object({ owner: z.string(), acquiredAt: z.string(), held: z.boolean() }),
+      schema: z.object({
+        owner: z.string(),
+        acquiredAt: z.iso.datetime().nullable(),
+        held: z.boolean(),
+      }),
       lifetime: "infinite",
       garbageCollection: 100,
     },
@@ -72,7 +77,7 @@ export const model = {
             dataHandles: [
               await context.writeResource("lease", "lease-current", {
                 owner,
-                acquiredAt: prior?.acquiredAt ?? "",
+                acquiredAt: prior?.acquiredAt ?? null,
                 held: false,
               }),
             ],

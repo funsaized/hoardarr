@@ -69,10 +69,10 @@ Deno.test("installUnits is idempotent and rolls back a failed reload", async () 
 
 Deno.test("unit assets preserve the bootstrap safety baseline", async () => {
   const swamp = await Deno.readTextFile(
-    new URL("../../assets/systemd/hoardarr-swamp.service", import.meta.url),
+    new URL("../../tests/fixtures/legacy/assets/systemd/hoardarr-swamp.service", import.meta.url),
   );
   const torlink = await Deno.readTextFile(
-    new URL("../../assets/systemd/torlink.service", import.meta.url),
+    new URL("../../tests/fixtures/legacy/assets/systemd/torlink.service", import.meta.url),
   );
   assert(swamp.includes("--host 127.0.0.1"), "Swamp is not loopback-only");
   assert(!swamp.includes("--no-schedule"), "Swamp scheduling is disabled");

@@ -41,6 +41,7 @@ const ShowConfigSchema = z.object({
   category: CategorySchema.default("tv"),
 });
 const GlobalArgumentsSchema = z.object({
+  downloadProvider: z.string().optional(),
   shows: z.array(ShowConfigSchema).max(100),
   policy: PolicySchema.default(episodePolicy),
 });
@@ -734,7 +735,7 @@ async function executeSelect(
         status: "selected",
         infoHash: result.release.infoHash.toLowerCase(),
         acquisitionLocator: result.release.magnet ?? result.release.infoHash,
-        downloadProvider: "torlink",
+        downloadProvider: context.globalArgs.downloadProvider ?? "torlink",
         policyVersion: (context.globalArgs?.policy ?? episodePolicy).version,
         releaseName: result.release.name,
         bytes: result.release.sizeBytes,
@@ -854,7 +855,16 @@ async function executeRecordAdd(args: z.infer<typeof AddResultsSchema>, context:
         tmdbEpisodeId: id,
         to: "downloading",
         infoHash: result.id.toLowerCase(),
+        error: null,
       });
+      handles.push(await writeEpisode(context, updated));
+    } else if (result.outcome === "invalid") {
+      const updated = applyTransition(row, {
+        tmdbEpisodeId: id,
+        to: "failed",
+        error: "Downloader rejected the selected locator",
+      });
+      updated.attempts = row.attempts + 1;
       handles.push(await writeEpisode(context, updated));
     }
   }

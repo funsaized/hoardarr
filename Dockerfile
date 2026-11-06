@@ -7,7 +7,7 @@ RUN npm ci && npm run build && npm prune --omit=dev
 RUN curl -fsSL https://github.com/swamp-club/swamp/releases/download/v20261105.030003.0-sha.363a1dad/swamp-linux-x86_64 -o /usr/local/bin/swamp && echo '76dee1c4138de46aea5c530f0b84c45980b5e3b6da934a40b5e8fd32ff146ad3  /usr/local/bin/swamp' | sha256sum -c - && chmod +x /usr/local/bin/swamp
 
 FROM node:22.21.1-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates rsync openssh-client iproute2 curl git tar && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates rsync openssh-client iproute2 curl git tar perl && rm -rf /var/lib/apt/lists/*
 COPY --from=deno /usr/bin/deno /usr/local/bin/deno
 COPY --from=build /usr/local/bin/swamp /usr/local/bin/swamp
 COPY --from=build /opt/torlink /opt/torlink

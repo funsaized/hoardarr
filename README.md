@@ -5,7 +5,8 @@ Hoardarr discovers releases, applies configurable selection rules, downloads thr
 Torlink, and delivers checksum-verified files to a local library or an SSH host.
 Use it with content you are authorized to download.
 
-Configuration lives in `hoardarr.yaml`. Catalogs, credentials, and runtime state belong
+Configuration lives in `hoardarr.yaml`. Historical deployment definitions are kept under `tests/fixtures/legacy` for regression tests.
+Catalogs, credentials, and runtime state belong
 to your installation directory. Upgrading application code does not replace them.
 
 ## Try the demo

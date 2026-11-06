@@ -9,3 +9,9 @@ node_modules
 .env*
 secrets
 payload
+
+!**/.env.example
+/models
+/workflows
+/vaults
+/assets

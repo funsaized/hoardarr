@@ -25,7 +25,7 @@ export const builtins: Descriptor[] = [
     id: "tmdb",
     roles: ["discovery"],
     type: "@keeb/tmdb-lookup",
-    version: "2026.07.18.1",
+    version: "2026.07.03.1",
     capabilities: ["movies", "episodes"],
     methods: { movies: "digitalReleases", episodes: "airedEpisodes" },
   },

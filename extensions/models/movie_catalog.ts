@@ -159,7 +159,7 @@ type Context = {
   signal: AbortSignal;
   modelType: string;
   modelId: string;
-  globalArgs?: { policy?: Policy };
+  globalArgs?: { policy?: Policy; downloadProvider?: string };
   readResource(instanceName: string): Promise<Record<string, unknown> | null>;
   writeResource(
     specName: string,
@@ -638,7 +638,7 @@ async function executeSelect(
         status: "selected",
         infoHash: result.release.infoHash.toLowerCase(),
         acquisitionLocator: result.release.magnet ?? result.release.infoHash,
-        downloadProvider: "torlink",
+        downloadProvider: context.globalArgs?.downloadProvider ?? "torlink",
         policyVersion: (context.globalArgs?.policy ?? moviePolicy).version,
         releaseName: result.release.name,
         bytes: result.release.sizeBytes,
@@ -758,7 +758,16 @@ async function executeRecordAdd(args: z.infer<typeof AddResultsSchema>, context:
         tmdbId: id,
         to: "downloading",
         infoHash: result.id.toLowerCase(),
+        error: null,
       });
+      handles.push(await writeMovie(context, updated));
+    } else if (result.outcome === "invalid") {
+      const updated = applyTransition(row, {
+        tmdbId: id,
+        to: "failed",
+        error: "Downloader rejected the selected locator",
+      });
+      updated.attempts = row.attempts + 1;
       handles.push(await writeMovie(context, updated));
     }
   }
@@ -769,7 +778,10 @@ async function executeRecordAdd(args: z.infer<typeof AddResultsSchema>, context:
 export const model = {
   type: "hoardarr/movie-catalog",
   version: MODEL_VERSION,
-  globalArguments: z.object({ policy: PolicySchema.default(moviePolicy) }),
+  globalArguments: z.object({
+    policy: PolicySchema.default(moviePolicy),
+    downloadProvider: z.string().default("torlink"),
+  }),
   resources: {
     [SPEC_MOVIE]: {
       description: "One catalog movie record keyed by TMDB id, identity is always the TMDB id.",

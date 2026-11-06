@@ -1,3 +1,5 @@
+import { extensionOf, isAllowedExtension } from "./_lib/media_paths.ts";
+export { extensionOf, isAllowedExtension } from "./_lib/media_paths.ts";
 /** Safe local payload filesystem model for Hoardarr. @module */
 import { z } from "npm:zod@4";
 
@@ -11,24 +13,6 @@ const CONFIG = {
   episodeCatalogModelType: "hoardarr/episode-catalog",
   sha256Binary: "/usr/bin/sha256sum",
 } as const;
-
-const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
-  "mkv",
-  "mp4",
-  "m4v",
-  "avi",
-  "mov",
-  "webm",
-  "ts",
-  "m2ts",
-  "mpg",
-  "mpeg",
-  "srt",
-  "sub",
-  "vtt",
-  "ass",
-  "ssa",
-]);
 
 const BANNED_EXTENSIONS: ReadonlySet<string> = new Set([
   "exe",
@@ -57,8 +41,8 @@ const BANNED_EXTENSIONS: ReadonlySet<string> = new Set([
   "img",
 ]);
 
-// deno-lint-ignore no-control-regex
 // oxlint-disable-next-line no-control-regex
+// deno-lint-ignore no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
 const TEXT_DECODER = new TextDecoder();
@@ -234,18 +218,6 @@ type MediaKind = "movie" | "episode";
 
 function payloadKey(tmdbId: number, mediaKind: MediaKind = "movie"): string {
   return mediaKind === "episode" ? `e-${tmdbId}` : String(tmdbId);
-}
-
-export function extensionOf(name: string): string | null {
-  const base = name.slice(name.lastIndexOf("/") + 1);
-  const dot = base.lastIndexOf(".");
-  if (dot <= 0 || dot === base.length - 1) return null;
-  return base.slice(dot + 1).toLowerCase();
-}
-
-export function isAllowedExtension(name: string): boolean {
-  const ext = extensionOf(name);
-  return ext !== null && ALLOWED_EXTENSIONS.has(ext);
 }
 
 export function isBannedExtension(name: string): boolean {

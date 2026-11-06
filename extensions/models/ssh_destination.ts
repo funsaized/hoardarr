@@ -11,7 +11,9 @@ const Globals = z.object({
   movies: z.string(),
   episodes: z.string(),
 });
+/** Escape a value for a POSIX shell literal. */
 export const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+/** Build the remote checksum and publish script for a verified payload. */
 export function remoteVerification(root: string, key: string, expected: string): string {
   return `set -eu
 root=${quote(root)}
@@ -46,6 +48,7 @@ fi
 test "$(manifest_hash "$final")" = "$expected"
 `;
 }
+/** Swamp behavior implementing ssh destination operations. */
 export const model = {
   type: "@funsaized/hoardarr/ssh-destination",
   version: "2026.11.05.1",
@@ -71,6 +74,8 @@ export const model = {
         await verifyTree(source, args, ctx.signal);
         const root = args.mediaKind === "movie" ? ctx.globalArgs.movies : ctx.globalArgs.episodes;
         if (
+          // Reject shell control characters before handing the path to the SSH provider.
+          // deno-lint-ignore no-control-regex
           !root.startsWith("/") || root.split("/").includes("..") || /[\x00-\x1f\x7f]/.test(root)
         ) throw new Error("Unsafe destination root");
         // The inherited rsync implementation interprets remote paths; reject shell metacharacters.

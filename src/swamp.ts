@@ -5,7 +5,9 @@ export async function swamp(
   input?: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const child = new Deno.Command(Deno.env.get("HOARDARR_SWAMP") ?? "swamp", {
-    args: [...args, ...(repo ? ["--repo-dir", repo] : [])],
+    args,
+    cwd: repo,
+    env: repo ? { SWAMP_REPO_DIR: repo } : undefined,
     stdin: input === undefined ? "null" : "piped",
     stdout: "piped",
     stderr: "piped",

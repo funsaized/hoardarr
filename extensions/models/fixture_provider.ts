@@ -21,6 +21,7 @@ async function torrents(ctx: Context): Promise<Torrent[]> {
 }
 const save = (ctx: Context, items: Torrent[]) =>
   ctx.writeResource("evidence", "fixture-state", { torrents: items });
+/** Swamp behavior implementing fixture provider operations. */
 export const model = {
   type: "@funsaized/hoardarr/fixture",
   version: "2026.11.05.1",
@@ -37,7 +38,7 @@ export const model = {
     movies: {
       description: "Discover a synthetic demonstration movie.",
       arguments: generic,
-      execute: async (_args: Record<string, unknown>, ctx: Context) =>
+      execute: (_args: Record<string, unknown>, ctx: Context) =>
         emit(ctx, "digital-release-movie-1", {
           tmdbId: 1,
           title: "Hoardarr Demo",
@@ -48,22 +49,33 @@ export const model = {
         }),
     },
     episodes: {
-      description: "Return no episodes for the demonstration.",
+      description: "Discover one synthetic demonstration episode.",
       arguments: generic,
-      execute: async () => ({ dataHandles: [] }),
+      execute: (_args: Record<string, unknown>, ctx: Context) =>
+        emit(ctx, "aired-episode-2", {
+          tmdbEpisodeId: 2,
+          showTmdbId: 1,
+          showName: "Hoardarr Fixture Series",
+          seasonNumber: 1,
+          episodeNumber: 1,
+          episodeTitle: "Fixture",
+          airDate: "2026-01-01",
+          discoveredAt: new Date().toISOString(),
+          category: "tv",
+        }),
     },
     inspect: {
       kind: "read",
       description: "Report the offline demo environment.",
       arguments: z.object({}),
-      execute: async (_args: Record<string, never>, ctx: Context) =>
+      execute: (_args: Record<string, never>, ctx: Context) =>
         emit(ctx, "network-current", { ready: true }),
     },
     health: {
       kind: "read",
       description: "Report fixture capabilities.",
       arguments: generic,
-      execute: async (_args: Record<string, unknown>, ctx: Context) =>
+      execute: (_args: Record<string, unknown>, ctx: Context) =>
         emit(ctx, "instance-current", {
           ok: true,
           capabilities: ["torrent", "seed-time", "local-payload"],
@@ -75,7 +87,7 @@ export const model = {
       arguments: z.object({
         queries: z.array(z.object({ key: z.string(), query: z.string(), category: z.string() })),
       }),
-      execute: async (
+      execute: (
         args: { queries: { key: string; query: string; category: string }[] },
         ctx: Context,
       ) =>

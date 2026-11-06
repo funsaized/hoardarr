@@ -28,6 +28,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - run: docker run --rm hoardarr:ci help
-      - run: docker run --rm --entrypoint deno hoardarr:ci test --allow-all tests/portable_test.ts
+      - run: docker run --rm hoardarr:ci init --profile compose-vpn-local --dir /tmp/installer-check
+      - run: docker run --rm --entrypoint deno hoardarr:ci test --allow-all tests/portable_test.ts extensions/models/local_destination_test.ts extensions/models/coordinator_test.ts extensions/models/provider_test.ts extensions/models/gluetun_environment_test.ts extensions/models/pipeline_test.ts extensions/models/fixture_provider_test.ts extensions/reports/portable_run_summary_test.ts
       - run: docker compose -f deploy/compose/compose.yaml config --quiet
       - run: tests/network_isolation.sh

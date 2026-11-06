@@ -3,9 +3,10 @@
 import { join, resolve } from "node:path";
 import { ConfigSchema, defaultConfig, encodeConfig, readConfig } from "../src/config.ts";
 import { ensureIdle, exists, install } from "../src/install.ts";
-import { backup, importDeployment } from "../src/migrate.ts";
+import { backup, importDeployment, removePinnedSourceOverrides } from "../src/migrate.ts";
 import { command, jsonCommand, swamp } from "../src/swamp.ts";
 import { prepareCompose } from "../src/compose.ts";
+import { doctor } from "../src/doctor.ts";
 import { readLease } from "../extensions/models/_lib/runtime.ts";
 
 const HELP = `Hoardarr 0.1.0
@@ -72,7 +73,10 @@ export async function main(argv: string[]): Promise<void> {
       return;
     }
     const archive = await backup(repo, option("--backup-dir", `${repo}-backups`)!);
-    await install(config, repo, { pull: !argv.includes("--no-pull") });
+    await install(config, repo, {
+      pull: !argv.includes("--no-pull"),
+      beforeApply: () => removePinnedSourceOverrides(repo),
+    });
     output({ migrated: repo, backup: archive, scheduleEnabled: false });
     return;
   }
@@ -101,23 +105,9 @@ export async function main(argv: string[]): Promise<void> {
     return;
   }
   if (action === "doctor") {
-    const version = await command(["--version"]);
-    const extensions = await jsonCommand(["doctor", "extensions"], repo);
-    const paths = [];
-    for (const [name, path] of Object.entries(config.paths)) {
-      const info = await Deno.stat(path);
-      paths.push({ name, path, directory: info.isDirectory });
-    }
-    output({
-      version: version.trim(),
-      profile: config.profile,
-      extensions: extensions.overallStatus,
-      paths,
-      schedule: config.schedule,
-    });
-    if (extensions.overallStatus !== "pass" || paths.some((p) => !p.directory)) {
-      throw new Error("Preflight failed");
-    }
+    const report = await doctor(config, repo, argv.includes("--live"));
+    output(report);
+    if (!report.ok) throw new Error("Preflight failed; resolve the failed checks before running");
     return;
   }
   if (action === "status") {

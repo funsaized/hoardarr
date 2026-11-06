@@ -5,7 +5,7 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const workflow = await Deno.readTextFile(
-  new URL("../workflows/workflow-media.yaml", import.meta.url),
+  new URL("../tests/fixtures/legacy/workflows/workflow-media.yaml", import.meta.url),
 );
 
 function step(name: string, fromIndex = 0): string {

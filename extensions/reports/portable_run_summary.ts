@@ -10,11 +10,12 @@ type Context = {
     dataHandles: { name: string; attributes?: Record<string, unknown> }[];
   }[];
 };
+/** Summarize catalog state without locators or credentials. */
 export const report = {
   name: "@funsaized/hoardarr/run-summary",
   scope: "workflow",
   description: "Catalog progress and phase failures across configurable providers",
-  execute: async (context: Context) => {
+  execute: (context: Context) => {
     const work = context.stepExecutions.flatMap((s) => s.dataHandles ?? []).filter((h) =>
       h.name === "work-current"
     ).at(-1)?.attributes;

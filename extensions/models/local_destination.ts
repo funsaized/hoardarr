@@ -3,8 +3,9 @@ import { z } from "npm:zod@4";
 import { createHash } from "node:crypto";
 import { dirname, join, relative, resolve } from "node:path";
 import { type Receipt, ReceiptSchema, type Transfer, TransferSchema } from "./_lib/contracts.ts";
-import { isAllowedExtension } from "./media_files.ts";
+import { isAllowedExtension } from "./_lib/media_paths.ts";
 
+/** Validate containment and reject symlink ancestors. */
 export async function checkedPath(root: string, path: string): Promise<string> {
   const base = resolve(root), target = resolve(path);
   const rel = relative(base, target);
@@ -24,6 +25,7 @@ export async function checkedPath(root: string, path: string): Promise<string> {
   return target;
 }
 
+/** Hash a regular file with cancellation support. */
 export async function fileHash(path: string, signal?: AbortSignal): Promise<string> {
   const hash = createHash("sha256"), file = await Deno.open(path, { read: true });
   try {
@@ -40,6 +42,7 @@ export async function fileHash(path: string, signal?: AbortSignal): Promise<stri
   return hash.digest("hex");
 }
 
+/** Verify exact contents, sizes, and aggregate manifest identity. */
 export async function verifyTree(
   root: string,
   transfer: Transfer,
@@ -80,6 +83,7 @@ export async function verifyTree(
   ) throw new Error("Manifest is incomplete or inconsistent");
 }
 
+/** Copy, verify, and publish without authorizing source removal. */
 export async function deliverLocal(
   transfer: Transfer,
   roots: { stagingRoot: string; libraryRoot: string },
@@ -148,11 +152,14 @@ export async function deliverLocal(
     try {
       await Deno.remove(temporary, { recursive: true });
     } catch (error) {
+      // Cleanup failure must prevent a receipt from authorizing source deletion.
+      // deno-lint-ignore no-unsafe-finally
       if (!(error instanceof Deno.errors.NotFound)) throw error;
     }
   }
 }
 
+/** Swamp behavior implementing local destination operations. */
 export const model = {
   type: "@funsaized/hoardarr/local-destination",
   version: "2026.11.05.1",
