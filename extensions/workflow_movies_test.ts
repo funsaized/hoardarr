@@ -5,7 +5,7 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const workflow = await Deno.readTextFile(
-  new URL("../workflows/workflow-movies.yaml", import.meta.url),
+  new URL("../tests/fixtures/legacy/workflows/workflow-movies.yaml", import.meta.url),
 );
 
 Deno.test("legacy movie workflow has no production trigger", () => {
@@ -128,22 +128,25 @@ Deno.test("completed selected torrents are reconciled before add", () => {
 });
 
 Deno.test("dry runs guard every resumable download mutation", () => {
-  for (const name of [
-    "mark-downloading",
-    "wait-for-seed-stop",
-    "sync-seed-stopped",
-    "reconcile-seed-stopped",
-    "remove-torrent-metadata",
-    "mark-transfer-ready",
-  ]) {
+  for (
+    const name of [
+      "mark-downloading",
+      "wait-for-seed-stop",
+      "sync-seed-stopped",
+      "reconcile-seed-stopped",
+      "remove-torrent-metadata",
+      "mark-transfer-ready",
+    ]
+  ) {
     assert(step(name).includes("inputs.dryRun"), `${name} must skip in dry-run mode`);
   }
   const markDownloading = step("mark-downloading");
   assert(
     markDownloading.includes("- step: add-selected-torrents") &&
-      markDownloading.includes("type: succeeded") &&
+      markDownloading.includes("type: completed") &&
+      markDownloading.includes("methodName: recordAdd") &&
       !markDownloading.includes("type: skipped"),
-    "mark-downloading requires a successful add",
+    "mark-downloading must consume per-item evidence after add completes",
   );
   const markTransferReady = step("mark-transfer-ready");
   assert(
@@ -183,12 +186,14 @@ Deno.test("movie staging survives removed torrent metadata", () => {
 });
 
 Deno.test("reconciliation persists Torlink's canonical payload name", () => {
-  for (const name of [
-    "reconcile-active-torrents",
-    "reconcile-selected-torrents",
-    "reconcile-seeding",
-    "reconcile-seed-stopped",
-  ]) {
+  for (
+    const name of [
+      "reconcile-active-torrents",
+      "reconcile-selected-torrents",
+      "reconcile-seeding",
+      "reconcile-seed-stopped",
+    ]
+  ) {
     assert(step(name).includes('"name": torrent.name'), `${name} must persist the payload name`);
   }
 });

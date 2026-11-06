@@ -406,13 +406,15 @@ Deno.test("Markdown contains every required PLAN field heading", async () => {
   const collected = await testing.collect(makeContext(steps));
   const markdown = testing.renderMarkdown(collected, "2026-08-28T19:00:00.000Z", "hoardarr-movies");
   assert(markdown.startsWith("# Hoardarr Movie Run Summary"), "markdown starts with the H1 title");
-  for (const heading of [
-    "## Counts",
-    "## Catalog Detail",
-    "## Network Assertions",
-    "## Mac Destination Status",
-    "## iCloud Observation Status",
-  ]) {
+  for (
+    const heading of [
+      "## Counts",
+      "## Catalog Detail",
+      "## Network Assertions",
+      "## Mac Destination Status",
+      "## iCloud Observation Status",
+    ]
+  ) {
     assert(markdown.includes(heading), `missing heading ${heading}`);
   }
   assert(markdown.includes("Movie One"), "catalog title surfaces in markdown");

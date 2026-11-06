@@ -1,0 +1,46 @@
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+permissions:
+  contents: write
+  packages: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: hoardarr:release
+          labels: org.opencontainers.image.source=https://github.com/funsaized/hoardarr
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: docker run --rm --entrypoint deno hoardarr:release task check
+      - run: docker run --rm --entrypoint deno hoardarr:release task test
+      - run: docker run --rm hoardarr:release init --profile compose-vpn-local --dir /tmp/install-check
+      - run: tests/network_isolation.sh
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish tested image and source archive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          image="ghcr.io/${GITHUB_REPOSITORY}:$version"
+          docker tag hoardarr:release "$image"
+          docker push "$image"
+          mkdir release
+          git archive --format=tar.gz --prefix="hoardarr-$version/" HEAD -o "release/hoardarr-$version.tar.gz"
+          cd release
+          sha256sum "hoardarr-$version.tar.gz" > SHA256SUMS
+          printf 'Portable Hoardarr: configurable providers, verified local/SSH delivery, VPN container profile, and migration tooling.\n\nContainer: `%s`\n\nSee the README and migration guide before upgrading. Scheduling starts disabled.\n' "$image" > notes.md
+          gh release create "$GITHUB_REF_NAME" "hoardarr-$version.tar.gz" SHA256SUMS --title "Hoardarr $version" --notes-file notes.md

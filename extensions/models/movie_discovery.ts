@@ -510,8 +510,9 @@ async function executeNowPlaying(
         break;
       }
     }
-    const hasMorePages =
-      totalPages !== null ? page < totalPages : response.results.length >= TMDB_DEFAULT_PAGE_SIZE;
+    const hasMorePages = totalPages !== null
+      ? page < totalPages
+      : response.results.length >= TMDB_DEFAULT_PAGE_SIZE;
     if (existingThisWeek.size + movies.length === limit) {
       truncated = remainingOnPage || hasMorePages;
       break;

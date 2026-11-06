@@ -61,15 +61,15 @@ const CONFIG = {
 } as const;
 
 const GlobalArgumentsSchema = z.object({
-  nordvpnPath: z.literal(CONFIG.nordvpn).default(CONFIG.nordvpn),
-  tailscalePath: z.literal(CONFIG.tailscale).default(CONFIG.tailscale),
-  systemctlPath: z.literal(CONFIG.systemctl).default(CONFIG.systemctl),
-  ipPath: z.literal(CONFIG.ip).default(CONFIG.ip),
-  vpnCountry: z.literal(CONFIG.vpnCountry).default(CONFIG.vpnCountry),
-  vpnCity: z.literal(CONFIG.vpnCity).default(CONFIG.vpnCity),
-  torlinkUnit: z.literal(CONFIG.torlinkUnit).default(CONFIG.torlinkUnit),
-  macHost: z.literal(CONFIG.macHost).default(CONFIG.macHost),
-  publicIpUrl: z.literal(CONFIG.publicIpUrl).default(CONFIG.publicIpUrl),
+  nordvpnPath: z.string().min(1).max(4096).default(CONFIG.nordvpn),
+  tailscalePath: z.string().min(1).max(4096).default(CONFIG.tailscale),
+  systemctlPath: z.string().min(1).max(4096).default(CONFIG.systemctl),
+  ipPath: z.string().min(1).max(4096).default(CONFIG.ip),
+  vpnCountry: z.string().min(1).max(4096).default(CONFIG.vpnCountry),
+  vpnCity: z.string().min(1).max(4096).default(CONFIG.vpnCity),
+  torlinkUnit: z.string().min(1).max(4096).default(CONFIG.torlinkUnit),
+  macHost: z.string().min(1).max(4096).default(CONFIG.macHost),
+  publicIpUrl: z.string().min(1).max(4096).default(CONFIG.publicIpUrl),
 });
 
 type GlobalArguments = z.infer<typeof GlobalArgumentsSchema>;
@@ -246,9 +246,7 @@ export function parseTailscaleStatus(value: unknown): TailscaleStatus {
     return { backendState: "unknown", online: false, tailscaleIps: [] };
   }
   const obj = value as Record<string, unknown>;
-  const backendState = typeof obj.BackendState === "string"
-    ? obj.BackendState
-    : "unknown";
+  const backendState = typeof obj.BackendState === "string" ? obj.BackendState : "unknown";
   let online = false;
   let tailscaleIps: string[] = [];
   const self = obj.Self;
@@ -273,9 +271,7 @@ export function parseTailscalePrefs(
   }
   const obj = value as Record<string, unknown>;
   return {
-    operatorUser: typeof obj.OperatorUser === "string"
-      ? obj.OperatorUser
-      : null,
+    operatorUser: typeof obj.OperatorUser === "string" ? obj.OperatorUser : null,
   };
 }
 
@@ -559,9 +555,7 @@ async function probe(
     publicIpError = rawIp.error ?? "fetch failed";
     noteError(`public ip: ${publicIpError}`);
   } else if (fetchedIp === null || !isStrictIPv4(fetchedIp)) {
-    publicIpError = fetchedIp === null
-      ? "no body"
-      : `not a strict IPv4: "${fetchedIp}"`;
+    publicIpError = fetchedIp === null ? "no body" : `not a strict IPv4: "${fetchedIp}"`;
     noteError(`public ip: ${publicIpError}`);
   } else {
     publicIpValue = fetchedIp;
@@ -570,9 +564,7 @@ async function probe(
 
   let killswitch: "enabled" | "disabled" | "unknown" = "unknown";
   const nordvpnStdout = nordvpnStatus.stdout.trim();
-  const nordvpnStatusParsed = nordvpnStdout
-    ? parseNordvpnStatus(nordvpnStdout)
-    : null;
+  const nordvpnStatusParsed = nordvpnStdout ? parseNordvpnStatus(nordvpnStdout) : null;
   if (nordvpnStatus.code !== 0 && !nordvpnStdout) {
     noteError(`nordvpn status: exit ${nordvpnStatus.code}`);
   }
@@ -741,16 +733,12 @@ function assertDownloadState(
   }
   if (post.nordvpn.country !== context.args.vpnCountry) {
     reasons.push(
-      `NordVPN country is ${
-        post.nordvpn.country ?? "missing"
-      }, want ${context.args.vpnCountry}`,
+      `NordVPN country is ${post.nordvpn.country ?? "missing"}, want ${context.args.vpnCountry}`,
     );
   }
   if (post.nordvpn.city !== context.args.vpnCity) {
     reasons.push(
-      `NordVPN city is ${
-        post.nordvpn.city ?? "missing"
-      }, want ${context.args.vpnCity}`,
+      `NordVPN city is ${post.nordvpn.city ?? "missing"}, want ${context.args.vpnCity}`,
     );
   }
   if (post.nordvpn.ip === null || !isStrictIPv4(post.nordvpn.ip)) {
@@ -1065,9 +1053,7 @@ async function enterDownloadImpl(
           failWhen: (r) =>
             r.code === 0
               ? null
-              : `tailscale down failed: exit ${r.code}: ${
-                r.stderr.slice(0, 200)
-              }`,
+              : `tailscale down failed: exit ${r.code}: ${r.stderr.slice(0, 200)}`,
         },
         context.signal,
         runner,
@@ -1077,8 +1063,7 @@ async function enterDownloadImpl(
         {
           binary: context.globalArgs.nordvpnPath,
           args: ["set", "killswitch", "on"],
-          failWhen: (r) =>
-            r.code === 0 ? null : `nordvpn set killswitch on: exit ${r.code}`,
+          failWhen: (r) => r.code === 0 ? null : `nordvpn set killswitch on: exit ${r.code}`,
         },
         context.signal,
         runner,
@@ -1093,9 +1078,7 @@ async function enterDownloadImpl(
             context.globalArgs.vpnCity,
           ],
           failWhen: (r) =>
-            r.code === 0
-              ? null
-              : `nordvpn connect: exit ${r.code}: ${r.stderr.slice(0, 200)}`,
+            r.code === 0 ? null : `nordvpn connect: exit ${r.code}: ${r.stderr.slice(0, 200)}`,
         },
         context.signal,
         runner,
@@ -1180,8 +1163,7 @@ async function enterTransferImpl(
           {
             binary: context.globalArgs.nordvpnPath,
             args: ["disconnect"],
-            failWhen: (r) =>
-              r.code === 0 ? null : `nordvpn disconnect: exit ${r.code}`,
+            failWhen: (r) => r.code === 0 ? null : `nordvpn disconnect: exit ${r.code}`,
           },
           context.signal,
           runner,
@@ -1192,8 +1174,7 @@ async function enterTransferImpl(
         {
           binary: context.globalArgs.nordvpnPath,
           args: ["set", "killswitch", "off"],
-          failWhen: (r) =>
-            r.code === 0 ? null : `nordvpn set killswitch off: exit ${r.code}`,
+          failWhen: (r) => r.code === 0 ? null : `nordvpn set killswitch off: exit ${r.code}`,
         },
         context.signal,
         runner,
@@ -1205,9 +1186,7 @@ async function enterTransferImpl(
           binary: context.globalArgs.tailscalePath,
           args: ["up"],
           failWhen: (r) =>
-            r.code === 0
-              ? null
-              : `tailscale up: exit ${r.code}: ${r.stderr.slice(0, 200)}`,
+            r.code === 0 ? null : `tailscale up: exit ${r.code}: ${r.stderr.slice(0, 200)}`,
         },
         context.signal,
         runner,
@@ -1218,9 +1197,7 @@ async function enterTransferImpl(
           binary: context.globalArgs.tailscalePath,
           args: ["ping", "--c=1", context.globalArgs.macHost],
           failWhen: (r) =>
-            r.code === 0
-              ? null
-              : `tailscale ping ${context.globalArgs.macHost}: exit ${r.code}`,
+            r.code === 0 ? null : `tailscale ping ${context.globalArgs.macHost}: exit ${r.code}`,
         },
         context.signal,
         runner,
@@ -1302,8 +1279,7 @@ async function restoreImpl(
           {
             binary: context.globalArgs.nordvpnPath,
             args: ["disconnect"],
-            failWhen: (r) =>
-              r.code === 0 ? null : `nordvpn disconnect: exit ${r.code}`,
+            failWhen: (r) => r.code === 0 ? null : `nordvpn disconnect: exit ${r.code}`,
           },
           context.signal,
           runner,
@@ -1322,10 +1298,7 @@ async function restoreImpl(
           {
             binary: context.globalArgs.nordvpnPath,
             args: ["set", "killswitch", "off"],
-            failWhen: (r) =>
-              r.code === 0
-                ? null
-                : `nordvpn set killswitch off: exit ${r.code}`,
+            failWhen: (r) => r.code === 0 ? null : `nordvpn set killswitch off: exit ${r.code}`,
           },
           context.signal,
           runner,
@@ -1345,9 +1318,7 @@ async function restoreImpl(
             binary: context.globalArgs.tailscalePath,
             args: ["up"],
             failWhen: (r) =>
-              r.code === 0
-                ? null
-                : `tailscale up: exit ${r.code}: ${r.stderr.slice(0, 200)}`,
+              r.code === 0 ? null : `tailscale up: exit ${r.code}: ${r.stderr.slice(0, 200)}`,
           },
           context.signal,
           runner,
@@ -1421,8 +1392,7 @@ export const model = {
       garbageCollection: 5,
     },
     run: {
-      description:
-        "Per-mutation evidence record - pre and post snapshots plus command log.",
+      description: "Per-mutation evidence record - pre and post snapshots plus command log.",
       schema: RunSchema,
       lifetime: "30d",
       garbageCollection: 20,

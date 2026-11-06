@@ -307,8 +307,9 @@ Deno.test("empty step list is a clean no-op and not degraded", async () => {
   assert(result.json.networkAssertions.length === 0, "no network assertions");
   assert(result.json.warnings === 0, "no warnings");
   assert(result.markdown.includes("# Hoardarr Media Run Summary"), "markdown still has H1");
-  for (const list of Object.values(result.json.catalog))
+  for (const list of Object.values(result.json.catalog)) {
     assert(list.length === 0, "empty catalog bucket");
+  }
 });
 
 Deno.test("guarded skipped steps remain non-degrading", async () => {

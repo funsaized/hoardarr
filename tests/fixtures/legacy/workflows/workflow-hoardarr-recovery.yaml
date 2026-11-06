@@ -1,0 +1,19 @@
+id: 39ffb24f-dfdc-4a52-b674-d932b539fe02
+name: hoardarr-recovery
+tags: {}
+jobs:
+  - name: main
+    description: Main job (edit or replace)
+    steps:
+      - name: example
+        description: Example step (edit or replace)
+        task:
+          type: model_method
+          modelIdOrName: example-behavior
+          methodName: run
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+version: 1

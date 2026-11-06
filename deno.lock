@@ -1,0 +1,16 @@
+{
+  "version": "5",
+  "specifiers": {
+    "npm:yaml@2.8.1": "2.8.1",
+    "npm:zod@4": "4.5.1"
+  },
+  "npm": {
+    "yaml@2.8.1": {
+      "integrity": "sha512-lcYcMxX2PO9XMGvAJkJ3OsNMw+/7FKes7/hgerGUYWIoWu5j/+YQqcZr5JnPZWzOsEBgMbSbiSTn/dv/69Mkpw==",
+      "bin": true
+    },
+    "zod@4.5.1": {
+      "integrity": "sha512-P3GqeAEOEDqKvafVGLezbg+39YW/ze4xrD4qdS0adOY8eoI3zfjv1PQM4UwQzgT8mZKXEbqtVt8K+ZKGqkMFKg=="
+    }
+  }
+}

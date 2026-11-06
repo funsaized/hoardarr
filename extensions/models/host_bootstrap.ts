@@ -22,25 +22,25 @@ const CONFIG = {
 } as const;
 
 const GlobalArgumentsSchema = z.object({
-  assetsDir: z.literal(CONFIG.assetsDir).default(CONFIG.assetsDir),
-  unitDir: z.literal(CONFIG.unitDir).default(CONFIG.unitDir),
-  stateDir: z.literal(CONFIG.stateDir).default(CONFIG.stateDir),
-  stagingDir: z.literal(CONFIG.stagingDir).default(CONFIG.stagingDir),
-  torlinkDir: z.literal(CONFIG.torlinkDir).default(CONFIG.torlinkDir),
-  operatorUser: z.literal(CONFIG.operatorUser).default(CONFIG.operatorUser),
-  swampBinary: z.literal(CONFIG.swampBinary).default(CONFIG.swampBinary),
-  nodeBinary: z.literal(CONFIG.nodeBinary).default(CONFIG.nodeBinary),
-  torlinkBinary: z.literal(CONFIG.torlinkBinary).default(CONFIG.torlinkBinary),
-  nordvpnBinary: z.literal(CONFIG.nordvpnBinary).default(CONFIG.nordvpnBinary),
-  tailscaleBinary: z.literal(CONFIG.tailscaleBinary).default(
+  assetsDir: z.string().min(1).max(4096).default(CONFIG.assetsDir),
+  unitDir: z.string().min(1).max(4096).default(CONFIG.unitDir),
+  stateDir: z.string().min(1).max(4096).default(CONFIG.stateDir),
+  stagingDir: z.string().min(1).max(4096).default(CONFIG.stagingDir),
+  torlinkDir: z.string().min(1).max(4096).default(CONFIG.torlinkDir),
+  operatorUser: z.string().min(1).max(4096).default(CONFIG.operatorUser),
+  swampBinary: z.string().min(1).max(4096).default(CONFIG.swampBinary),
+  nodeBinary: z.string().min(1).max(4096).default(CONFIG.nodeBinary),
+  torlinkBinary: z.string().min(1).max(4096).default(CONFIG.torlinkBinary),
+  nordvpnBinary: z.string().min(1).max(4096).default(CONFIG.nordvpnBinary),
+  tailscaleBinary: z.string().min(1).max(4096).default(
     CONFIG.tailscaleBinary,
   ),
-  sshBinary: z.literal(CONFIG.sshBinary).default(CONFIG.sshBinary),
-  rsyncBinary: z.literal(CONFIG.rsyncBinary).default(CONFIG.rsyncBinary),
-  systemctlBinary: z.literal(CONFIG.systemctlBinary).default(
+  sshBinary: z.string().min(1).max(4096).default(CONFIG.sshBinary),
+  rsyncBinary: z.string().min(1).max(4096).default(CONFIG.rsyncBinary),
+  systemctlBinary: z.string().min(1).max(4096).default(
     CONFIG.systemctlBinary,
   ),
-  systemdAnalyzeBinary: z.literal(CONFIG.systemdAnalyzeBinary).default(
+  systemdAnalyzeBinary: z.string().min(1).max(4096).default(
     CONFIG.systemdAnalyzeBinary,
   ),
 });
@@ -214,9 +214,7 @@ async function commandChecks(
     checks.map(async ([name, path, command, commandArgs]) => {
       const result = await safeRun(command, commandArgs, signal);
       const output = commandDetail(name, result);
-      const nodeVersion = name === "node"
-        ? Number(output.text.match(/^v(\d+)/)?.[1] ?? 0)
-        : null;
+      const nodeVersion = name === "node" ? Number(output.text.match(/^v(\d+)/)?.[1] ?? 0) : null;
       return {
         name,
         path,
@@ -425,9 +423,7 @@ async function installUnits(
     for (const plan of applied.reverse()) {
       if (plan.previous === null) {
         await Deno.remove(plan.destination).catch(() => undefined);
-      } else {await writeAtomic(plan.destination, plan.previous).catch(() =>
-          undefined
-        );}
+      } else await writeAtomic(plan.destination, plan.previous).catch(() => undefined);
     }
     await reload().catch(() => undefined);
     throw error;
@@ -495,9 +491,7 @@ export const model = {
           );
           if (verification.code !== 0) {
             throw new Error(
-              `unit verification failed: ${
-                commandDetail("verify", verification).text
-              }`,
+              `unit verification failed: ${commandDetail("verify", verification).text}`,
             );
           }
           await Promise.all([
@@ -518,9 +512,7 @@ export const model = {
               );
               if (reload.code !== 0) {
                 throw new Error(
-                  `systemd daemon-reload failed: ${
-                    commandDetail("reload", reload).text
-                  }`,
+                  `systemd daemon-reload failed: ${commandDetail("reload", reload).text}`,
                 );
               }
             },

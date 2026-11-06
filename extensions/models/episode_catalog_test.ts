@@ -76,8 +76,8 @@ function makeContext(initial: Record<string, Record<string, unknown>> = {}): {
           const inferredSpec = name.startsWith("plan-")
             ? "plan"
             : name.startsWith("catalog-episode-")
-              ? "episode"
-              : undefined;
+            ? "episode"
+            : undefined;
           records.push({ name, tags: { specName: inferredSpec } });
         }
         return Promise.resolve(records);
@@ -176,7 +176,7 @@ Deno.test("identity: tmdbEpisodeId must be a positive integer and instance name 
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/episode-catalog", "model type");
-  assertEquals(model.version, "2026.08.30.2", "model version");
+  assertEquals(model.version, "2026.11.05.1", "model version");
   assert("episode" in model.resources, "episode spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
@@ -535,10 +535,12 @@ Deno.test("transition validates the state machine and rejects duplicate tmdbEpis
     }),
   });
   await testing.executeTransition({ transitions: [{ tmdbEpisodeId: 1, to: "seeding" }] }, ctx2);
-  const updated = ctx2.readResource("catalog-episode-1") as unknown as Promise<Record<
-    string,
-    unknown
-  > | null>;
+  const updated = ctx2.readResource("catalog-episode-1") as unknown as Promise<
+    Record<
+      string,
+      unknown
+    > | null
+  >;
   const after = (await updated) as Episode | null;
   assertEquals(after!.status, "seeding", "merged infoHash satisfies transition");
   assertEquals(after!.attempts, 1, "seeding does not increment attempts");
@@ -682,4 +684,60 @@ Deno.test("plan categorizes every actionable lifecycle state for episodes", asyn
   assertEquals(plan.seedStopped, [11], "seedStopped isolates metadata cleanup work");
   assertEquals(plan.transferReady, [5], "transferReady isolates transfer-ready");
   assertEquals(plan.cleanupPending, [6], "cleanupPending isolates cleanup-pending");
+});
+
+Deno.test("episode add outcomes preserve partial success, ambiguous retries, and invalid-input limits", async () => {
+  const initial = Object.fromEntries(
+    [1, 2, 3].map(
+      (id) => [
+        `catalog-episode-${id}`,
+        baseEpisode({
+          tmdbEpisodeId: id,
+          status: "selected",
+          infoHash: `hash-${id}`,
+          releaseName: "Fixture.mkv",
+        }),
+      ],
+    ),
+  );
+  const { context, store } = makeContext(initial);
+  await model.methods.recordAdd.execute({
+    results: [
+      { key: "e-1", id: "hash-1", ok: true, outcome: "duplicate" },
+      { key: "e-2", id: null, ok: false, outcome: "error" },
+      { key: "e-3", id: null, ok: false, outcome: "invalid" },
+    ],
+  }, context);
+  assertEquals(
+    store.resources.get("catalog-episode-1")?.status,
+    "downloading",
+    "successful duplicate advances",
+  );
+  assertEquals(
+    store.resources.get("catalog-episode-2")?.status,
+    "selected",
+    "ambiguous addition remains reconcilable",
+  );
+  assertEquals(
+    store.resources.get("catalog-episode-3")?.status,
+    "failed",
+    "invalid locator is retry-limited",
+  );
+  assertEquals(
+    store.resources.get("catalog-episode-3")?.attempts,
+    1,
+    "invalid input counts toward retry limit",
+  );
+  await assertRejects(
+    () =>
+      model.methods.recordAdd.execute({
+        results: [{ key: "e-2", id: "wrong", ok: true, outcome: "added" }],
+      }, context),
+    "unexpected identity",
+  );
+  assertEquals(
+    store.resources.get("catalog-episode-2")?.status,
+    "selected",
+    "mismatched response cannot advance another item",
+  );
 });

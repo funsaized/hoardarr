@@ -132,25 +132,24 @@ function makeContext(): { context: MethodContext; writes: WriteRecord[] } {
   };
 }
 
-const fakeFetcher =
-  (result: { ok: boolean; value?: string; error?: string }) =>
-  (
-    _url: string,
-    _signal: AbortSignal,
-  ): Promise<{ ok: boolean; value: string | null; error: string | null }> => {
-    if (result.ok) {
-      return Promise.resolve({
-        ok: true,
-        value: result.value ?? null,
-        error: null,
-      });
-    }
+const fakeFetcher = (result: { ok: boolean; value?: string; error?: string }) =>
+(
+  _url: string,
+  _signal: AbortSignal,
+): Promise<{ ok: boolean; value: string | null; error: string | null }> => {
+  if (result.ok) {
     return Promise.resolve({
-      ok: false,
-      value: null,
-      error: result.error ?? "fetch failed",
+      ok: true,
+      value: result.value ?? null,
+      error: null,
     });
-  };
+  }
+  return Promise.resolve({
+    ok: false,
+    value: null,
+    error: result.error ?? "fetch failed",
+  });
+};
 
 function fakeFetcherSequence(
   results: Array<{ ok: boolean; value?: string; error?: string }>,
@@ -173,10 +172,8 @@ function downloadFetcher(postValue = "198.51.100.10") {
   ]);
 }
 
-const ROUTE_KEY =
-  "/usr/bin/ip\u0001-j\u0001route\u0001show\u0001table\u0001all";
-const TORLINK_KEY =
-  "/usr/bin/systemctl\u0001--user\u0001is-active\u0001torlink.service";
+const ROUTE_KEY = "/usr/bin/ip\u0001-j\u0001route\u0001show\u0001table\u0001all";
+const TORLINK_KEY = "/usr/bin/systemctl\u0001--user\u0001is-active\u0001torlink.service";
 const NORD_STATUS_KEY = "/usr/bin/nordvpn\u0001status";
 const NORD_SETTINGS_KEY = "/usr/bin/nordvpn\u0001settings";
 const TAILSCALE_STATUS_KEY = "/usr/bin/tailscale\u0001status\u0001--json";
@@ -611,12 +608,8 @@ Deno.test("enter-download issues tailscale down -> killswitch on -> connect, ass
   const downIdx = commands.findIndex((c) =>
     c.endsWith("/usr/bin/tailscale down --accept-risk=lose-ssh")
   );
-  const ksIdx = commands.findIndex((c) =>
-    c.endsWith("nordvpn set killswitch on")
-  );
-  const connectIdx = commands.findIndex((c) =>
-    c.endsWith("nordvpn connect Netherlands Amsterdam")
-  );
+  const ksIdx = commands.findIndex((c) => c.endsWith("nordvpn set killswitch on"));
+  const connectIdx = commands.findIndex((c) => c.endsWith("nordvpn connect Netherlands Amsterdam"));
   assert(
     downIdx >= 0 && ksIdx > downIdx && connectIdx > ksIdx,
     "mutation order: down -> killswitch -> connect",
@@ -730,8 +723,7 @@ Deno.test("enter-download fails when city is missing", async () => {
 
 Deno.test("enter-download fails when NordVPN connects to the wrong city", async () => {
   const runners = downloadHandlers({
-    nordStatus:
-      "Status: Connected\nCountry: Netherlands\nCity: Berlin\nIP: 203.0.113.10\n",
+    nordStatus: "Status: Connected\nCountry: Netherlands\nCity: Berlin\nIP: 203.0.113.10\n",
   });
   runners["/usr/bin/tailscale\u0001down\u0001--accept-risk=lose-ssh"] = {
     code: 0,
@@ -881,9 +873,7 @@ Deno.test("enter-transfer refuses when Torlink state is unsafe", async () => {
         c.cmd === "/usr/bin/nordvpn" &&
         (c.args.includes("disconnect") || c.args.includes("killswitch"))
       ) &&
-        !fake.calls.some((c) =>
-          c.cmd === "/usr/bin/tailscale" && c.args.includes("up")
-        ),
+        !fake.calls.some((c) => c.cmd === "/usr/bin/tailscale" && c.args.includes("up")),
       `no network mutations for torlink=${state}`,
     );
   }
@@ -918,9 +908,7 @@ Deno.test("enter-transfer checks tailscale up before pinging the mac", async () 
   );
   // ping never issued because up failed first.
   assert(
-    !fake.calls.some((c) =>
-      c.cmd === "/usr/bin/tailscale" && c.args[0] === "ping"
-    ),
+    !fake.calls.some((c) => c.cmd === "/usr/bin/tailscale" && c.args[0] === "ping"),
     "no ping issued",
   );
 });
@@ -949,13 +937,10 @@ Deno.test("enter-transfer succeeds end-to-end when Mac ping returns exit 0", asy
   const result = await testing.enterTransfer(context, fake.runner, fetcher);
   assert(result.dataHandles.length === 2, "two handles on success");
   const commands = fake.calls
+    .filter((c) => c.cmd === "/usr/bin/nordvpn" || c.cmd === "/usr/bin/tailscale")
     .filter((c) =>
-      c.cmd === "/usr/bin/nordvpn" || c.cmd === "/usr/bin/tailscale"
-    )
-    .filter((c) =>
-      !["status", "settings", "debug", "--json"].some((term) =>
-        c.args.includes(term)
-      ) && !c.args.includes("is-active")
+      !["status", "settings", "debug", "--json"].some((term) => c.args.includes(term)) &&
+      !c.args.includes("is-active")
     )
     .map((c) => `${c.cmd} ${c.args.join(" ")}`);
   assert(
@@ -1008,9 +993,7 @@ Deno.test("enter-transfer skips disconnect when already disconnected (idempotent
   const result = await testing.enterTransfer(context, fake.runner, fetcher);
   assert(result.dataHandles.length === 2, "two handles on success");
   assert(
-    !fake.calls.some((c) =>
-      c.cmd === "/usr/bin/nordvpn" && c.args[0] === "disconnect"
-    ),
+    !fake.calls.some((c) => c.cmd === "/usr/bin/nordvpn" && c.args[0] === "disconnect"),
     "no nordvpn disconnect invoked",
   );
   // But the rest of the steps still run.
@@ -1019,9 +1002,7 @@ Deno.test("enter-transfer skips disconnect when already disconnected (idempotent
     "killswitch off still invoked",
   );
   assert(
-    fake.calls.some((c) =>
-      c.cmd === "/usr/bin/tailscale" && c.args[0] === "up"
-    ),
+    fake.calls.some((c) => c.cmd === "/usr/bin/tailscale" && c.args[0] === "up"),
     "tailscale up still invoked",
   );
   // The disconnect step still appears in the records as a recovery skip.
@@ -1030,9 +1011,7 @@ Deno.test("enter-transfer skips disconnect when already disconnected (idempotent
     "commands",
   ) as Array<{ phase: string; args: string[] }>;
   assert(
-    records.some((r) =>
-      r.phase === "recovery" && r.args.join(" ") === "disconnect"
-    ),
+    records.some((r) => r.phase === "recovery" && r.args.join(" ") === "disconnect"),
     "disconnect recorded as skip",
   );
 });
@@ -1104,9 +1083,7 @@ Deno.test("restore refuses before any mutation when Torlink is unsafe", async ()
     );
     // Restore never observes-and-stops: no `systemctl stop`, no `systemctl disable`.
     assert(
-      !fake.calls.some((c) =>
-        c.args.includes("stop") || c.args.includes("disable")
-      ),
+      !fake.calls.some((c) => c.args.includes("stop") || c.args.includes("disable")),
       "no stop/disable for unsafe torlink",
     );
   }
@@ -1143,21 +1120,15 @@ Deno.test("restore is idempotent and skips already-correct steps", async () => {
   const result = await testing.restore(context, fake.runner, fetcher);
   assert(result.dataHandles.length === 2, "two handles on success");
   assert(
-    !fake.calls.some((c) =>
-      c.cmd === "/usr/bin/nordvpn" && c.args[0] === "disconnect"
-    ),
+    !fake.calls.some((c) => c.cmd === "/usr/bin/nordvpn" && c.args[0] === "disconnect"),
     "no disconnect issued",
   );
   assert(
-    !fake.calls.some((c) =>
-      c.cmd === "/usr/bin/nordvpn" && c.args.includes("killswitch")
-    ),
+    !fake.calls.some((c) => c.cmd === "/usr/bin/nordvpn" && c.args.includes("killswitch")),
     "no killswitch issued",
   );
   assert(
-    !fake.calls.some((c) =>
-      c.cmd === "/usr/bin/tailscale" && c.args[0] === "up"
-    ),
+    !fake.calls.some((c) => c.cmd === "/usr/bin/tailscale" && c.args[0] === "up"),
     "no tailscale up issued",
   );
   const runs = writes.find((w) => w.specName === "run");
@@ -1241,9 +1212,7 @@ Deno.test("restore with mixed pre-state runs only the conditional branches neede
     "disconnect recorded (mutate)",
   );
   assert(
-    records.some((r) =>
-      r.phase === "recovery" && r.args.join(" ") === "set killswitch off"
-    ),
+    records.some((r) => r.phase === "recovery" && r.args.join(" ") === "set killswitch off"),
     "killswitch recorded as skip",
   );
   assert(
@@ -1281,13 +1250,10 @@ Deno.test("restore brings VPN down and tailscale up when needed", async () => {
   const { context } = makeContext();
   await testing.restore(context, fake.runner, fetcher);
   const commands = fake.calls
+    .filter((c) => c.cmd === "/usr/bin/nordvpn" || c.cmd === "/usr/bin/tailscale")
     .filter((c) =>
-      c.cmd === "/usr/bin/nordvpn" || c.cmd === "/usr/bin/tailscale"
-    )
-    .filter((c) =>
-      !["status", "settings", "debug", "--json"].some((term) =>
-        c.args.includes(term)
-      ) && !c.args.includes("is-active")
+      !["status", "settings", "debug", "--json"].some((term) => c.args.includes(term)) &&
+      !c.args.includes("is-active")
     )
     .map((c) => `${c.cmd} ${c.args.join(" ")}`);
   assert(
@@ -1334,9 +1300,8 @@ Deno.test("restore polls until Tailscale and public egress converge", async () =
   await testing.restore(context, fake.runner, fetcher);
 
   assert(
-    fake.calls.filter((call) =>
-      call.cmd === "/usr/bin/tailscale" && call.args[0] === "status"
-    ).length === 3,
+    fake.calls.filter((call) => call.cmd === "/usr/bin/tailscale" && call.args[0] === "status")
+      .length === 3,
     "pre-state plus two post-state probes",
   );
   assert(

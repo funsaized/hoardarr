@@ -1,0 +1,19 @@
+id: 8d0d4605-c877-4962-83f2-d5d7a2b2122e
+name: hoardarr-delivery
+tags: {}
+jobs:
+  - name: main
+    description: Main job (edit or replace)
+    steps:
+      - name: example
+        description: Example step (edit or replace)
+        task:
+          type: model_method
+          modelIdOrName: example-behavior
+          methodName: run
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+version: 1
