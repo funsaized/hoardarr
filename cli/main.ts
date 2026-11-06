@@ -9,7 +9,7 @@ import { prepareCompose } from "../src/compose.ts";
 import { doctor } from "../src/doctor.ts";
 import { readLease } from "../extensions/models/_lib/runtime.ts";
 
-const HELP = `Hoardarr 0.1.0
+const HELP = `Hoardarr 0.1.1
 Usage: hoardarr <command> [--dir PATH] [--config PATH] [--json]
 
 init       Prepare and install a demo or compose-vpn-local profile (--profile NAME).

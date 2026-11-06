@@ -16,7 +16,7 @@ services:
       - ./secrets/gluetun-auth.toml:/gluetun/auth/config.toml:ro
     restart: unless-stopped
   torlink:
-    image: ${HOARDARR_IMAGE:-ghcr.io/funsaized/hoardarr:0.1.0}
+    image: ${HOARDARR_IMAGE:-ghcr.io/funsaized/hoardarr:0.1.1}
     network_mode: service:gluetun
     depends_on:
       gluetun: {condition: service_healthy}
@@ -32,7 +32,7 @@ services:
       - ./payload/state:/state
     restart: unless-stopped
   hoardarr:
-    image: ${HOARDARR_IMAGE:-ghcr.io/funsaized/hoardarr:0.1.0}
+    image: ${HOARDARR_IMAGE:-ghcr.io/funsaized/hoardarr:0.1.1}
     network_mode: service:gluetun
     depends_on:
       gluetun: {condition: service_healthy}
