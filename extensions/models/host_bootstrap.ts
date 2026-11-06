@@ -1,7 +1,8 @@
 /** Idempotent local host bootstrap for Hoardarr. @module */
 import { z } from "npm:zod@4";
+import { resolve } from "node:path";
 
-const VERSION = "2026.08.28.1";
+const VERSION = "2026.11.06.1";
 const UNITS = ["hoardarr-swamp.service", "torlink.service"] as const;
 const CONFIG = {
   assetsDir: "assets/systemd",
@@ -271,7 +272,7 @@ async function inspect(
   extraErrors: string[] = [],
 ): Promise<z.infer<typeof BootstrapSchema>> {
   const args = context.globalArgs;
-  const assets = `${context.repoDir}/${args.assetsDir}`;
+  const assets = resolve(context.repoDir, args.assetsDir);
   const [
     commands,
     directories,
@@ -480,13 +481,13 @@ export const model = {
       execute: async (_args: Record<string, never>, context: Context) => {
         context.logger.info("Applying Hoardarr host bootstrap");
         const args = context.globalArgs;
-        const assets = `${context.repoDir}/${args.assetsDir}`;
+        const assets = resolve(context.repoDir, args.assetsDir);
         const sources = UNITS.map((name) => `${assets}/${name}`);
         let changed = false;
         try {
           const verification = await run(
             args.systemdAnalyzeBinary,
-            ["verify", ...sources],
+            ["--user", "verify", ...sources],
             context.signal,
           );
           if (verification.code !== 0) {

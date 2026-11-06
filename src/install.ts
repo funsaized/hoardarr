@@ -389,28 +389,37 @@ export async function systemdAssets(c: Config, repo: string): Promise<void> {
   const h = c.host!;
   const quote = (s: string) =>
     `"${s.replaceAll("%", "%%").replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  const argument = (s: string) => quote(s.replaceAll("$", () => "$$"));
+  const directoryValue = (s: string) => {
+    if (/[\\\x00-\x1f\x7f]/.test(s) || s.trim() !== s) {
+      throw new Error(
+        "Systemd paths cannot contain backslashes, control characters or surrounding whitespace",
+      );
+    }
+    return s.replaceAll("%", "%%");
+  };
   const path = join(repo, "assets/systemd");
   await Deno.mkdir(path, { recursive: true });
   await Deno.writeTextFile(
     join(path, "torlink.service"),
-    `[Unit]\nDescription=Hoardarr Torlink\nAfter=network-online.target\n[Service]\nType=simple\nEnvironment=HOME=${h.home}\nEnvironment=PATH=${
-      dirname(h.node)
-    }:/usr/local/bin:/usr/bin\nEnvironment=TORLINK_STATE_DIR=${c.paths.state}\nWorkingDirectory=${
-      quote(h.torlinkDir)
-    }\nExecStart=${quote(h.node)} ${
-      quote(c.torlink.binary)
+    `[Unit]\nDescription=Hoardarr Torlink\nAfter=network-online.target\n[Service]\nType=simple\nEnvironment=${
+      quote(`HOME=${h.home}`)
+    }\nEnvironment=${quote(`PATH=${dirname(h.node)}:/usr/local/bin:/usr/bin`)}\nEnvironment=${
+      quote(`TORLINK_STATE_DIR=${c.paths.state}`)
+    }\nWorkingDirectory=${directoryValue(h.torlinkDir)}\nExecStart=${argument(h.node)} ${
+      argument(c.torlink.binary)
     } serve --host 127.0.0.1 --port 9161 --to ${
-      quote(c.paths.staging)
+      argument(c.paths.staging)
     } --seed-time ${c.download.seedTime}\nRestart=no\n[Install]\nWantedBy=default.target\n`,
   );
   await Deno.writeTextFile(
     join(path, "hoardarr-swamp.service"),
-    `[Unit]\nDescription=Hoardarr Swamp\nAfter=network-online.target\n[Service]\nType=simple\nEnvironment=HOME=${h.home}\nEnvironment=PATH=${
-      dirname(h.swamp)
-    }:${dirname(h.node)}:/usr/local/bin:/usr/bin\nWorkingDirectory=${quote(repo)}\nExecStart=${
-      quote(h.swamp)
-    } serve --repo-dir ${
-      quote(repo)
+    `[Unit]\nDescription=Hoardarr Swamp\nAfter=network-online.target\n[Service]\nType=simple\nEnvironment=${
+      quote(`HOME=${h.home}`)
+    }\nEnvironment=${
+      quote(`PATH=${dirname(h.swamp)}:${dirname(h.node)}:/usr/local/bin:/usr/bin`)
+    }\nWorkingDirectory=${directoryValue(repo)}\nExecStart=${argument(h.swamp)} serve --repo-dir ${
+      argument(repo)
     } --host 127.0.0.1 --port 9090\nRestart=on-failure\nRestartSec=5\n[Install]\nWantedBy=default.target\n`,
   );
 }
