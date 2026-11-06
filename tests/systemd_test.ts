@@ -35,7 +35,11 @@ Deno.test({
         stderr: "piped",
       }).output();
       const diagnostics = new TextDecoder().decode(result.stderr);
-      assert(result.success && !diagnostics.trim(), diagnostics);
+      // Hosted runners can warn about unrelated, preinstalled system units.
+      const ownDiagnostics = diagnostics.split("\n").filter((line) =>
+        paths.some((path) => line.includes(path))
+      );
+      assert(result.success && ownDiagnostics.length === 0, diagnostics);
       const unit = await Deno.readTextFile(paths[0]);
       assert(
         unit.includes('instance with space %%n $$HOME"'),
