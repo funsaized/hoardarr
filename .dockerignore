@@ -15,3 +15,5 @@ payload
 /workflows
 /vaults
 /assets
+
+!tests/fixtures/legacy/**

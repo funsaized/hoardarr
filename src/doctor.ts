@@ -60,6 +60,34 @@ export async function doctor(config: Config, repo: string, live = false) {
       return path;
     });
   }
+  if (config.profile !== "demo") {
+    const binaries = {
+      torlink: config.torlink.binary,
+      ...(config.host ? { node: config.host.node, swamp: config.host.swamp } : {}),
+    };
+    for (const [name, path] of Object.entries(binaries)) {
+      await check(`${name} binary`, async () => {
+        const stat = await Deno.stat(path);
+        if (!stat.isFile || (stat.mode !== null && !(stat.mode & 0o111))) {
+          throw new Error(`Missing executable: ${path}`);
+        }
+        return path;
+      });
+    }
+    if (config.ssh) {
+      for (
+        const [name, path] of Object.entries({
+          identity: config.ssh.identityFile,
+          knownHosts: config.ssh.knownHostsFile,
+        })
+      ) {
+        await check(`SSH ${name}`, async () => {
+          if (!(await Deno.stat(path)).isFile) throw new Error(`Missing SSH file: ${path}`);
+          return path;
+        });
+      }
+    }
+  }
   const references: string[][] = [
     ...JSON.stringify(config).matchAll(/vault\.get\(\\"([\w-]+)\\", \\"([\w-]+)\\"\)/g),
   ];

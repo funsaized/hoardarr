@@ -67,7 +67,9 @@ export async function main(argv: string[]): Promise<void> {
     return;
   }
   if (action === "migrate") {
-    const config = await importDeployment(repo);
+    const config = argv.includes("--config")
+      ? await readConfig(configPath)
+      : await importDeployment(repo);
     if (!argv.includes("--apply")) {
       output(encodeConfig(config));
       return;
@@ -77,7 +79,7 @@ export async function main(argv: string[]): Promise<void> {
       pull: !argv.includes("--no-pull"),
       beforeApply: () => removePinnedSourceOverrides(repo),
     });
-    output({ migrated: repo, backup: archive, scheduleEnabled: false });
+    output({ migrated: repo, backup: archive, scheduleEnabled: config.schedule.enabled });
     return;
   }
   if (action === "backup") {

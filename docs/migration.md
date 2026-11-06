@@ -13,6 +13,8 @@ review without changing the installation:
 /path/to/new-hoardarr/bin/hoardarr migrate --dir /path/to/existing-instance
 ```
 
+Use `migrate --dir INSTANCE > /private/path/hoardarr.yaml` to save the preview;
+pass `--config /private/path/hoardarr.yaml` with `--apply` after editing it.
 Review the imported SSH user, hostname, identity/known-hosts files, remote Movies
 and TV paths, host binaries, staging path, interests, policies, and cron expression.
 Migration intentionally leaves scheduling disabled for commissioning.

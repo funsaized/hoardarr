@@ -35,7 +35,7 @@ manifest_hash() {
   (cd "$dir"; find . -type f -print | LC_ALL=C sort |
     while IFS= read -r path; do
       rel=\${path#./}
-      hash=$(shasum -a 256 "$rel" | cut -d ' ' -f 1)
+      hash=$(shasum -a 256 "./$rel" | cut -d ' ' -f 1)
       printf '%s  %s\\n' "$hash" "$rel"
     done | shasum -a 256 | cut -d ' ' -f 1)
 }

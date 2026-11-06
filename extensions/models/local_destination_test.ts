@@ -1,3 +1,4 @@
+import { TransferSchema } from "./_lib/contracts.ts";
 import { deliverLocal } from "./local_destination.ts";
 import { assert, payload, rejects, temporary } from "../../tests/helpers.ts";
 Deno.test("local delivery verifies, retries idempotently, preserves source, and refuses conflicts", () =>
@@ -33,4 +34,22 @@ Deno.test("cancelled delivery never publishes or removes source", () =>
     );
     assert((await Deno.stat(`${t.stagingDir}/movie.mkv`)).isFile);
     await rejects(() => Deno.stat(`${root}/library/Movies/1`));
+  }));
+
+Deno.test("transfer manifests reject line injection and ambiguous path components", () =>
+  temporary(async (root) => {
+    const transfer = await payload(root);
+    for (
+      const relativePath of [
+        "line\nbreak.mkv",
+        "../movie.mkv",
+        "a/./movie.mkv",
+        "/movie.mkv",
+        "a//movie.mkv",
+      ]
+    ) {
+      await rejects(() =>
+        TransferSchema.parse({ ...transfer, entries: [{ ...transfer.entries[0], relativePath }] })
+      );
+    }
   }));

@@ -13,7 +13,14 @@ export const DescriptorSchema = z.object({
 }).strict();
 export type Descriptor = z.infer<typeof DescriptorSchema>;
 export const ManifestEntry = z.object({
-  relativePath: z.string().min(1),
+  relativePath: z.string().min(1).max(500).refine(
+    (path) =>
+      !path.startsWith("/") && !path.includes("\\") && !path.split("/").some((part) =>
+        part === "" || part === "." || part === ".."
+      ) &&
+      ![...path].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127),
+    "Use a relative file path without traversal or control characters",
+  ),
   bytes: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
 });
