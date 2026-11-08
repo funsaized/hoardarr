@@ -1,6 +1,7 @@
-swampVersion: 20260825.172854.0
+swampVersion: 20261108.025705.0
 initializedAt: "2026-08-28T12:45:43.631Z"
 repoId: 0ee73c21-462d-4064-a93c-1adaf16d03e7
 tools:
-  - opencode
+  - pi
 gitignoreManaged: true
+upgradedAt: "2026-11-08T14:50:53.834Z"

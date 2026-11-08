@@ -80,7 +80,8 @@
     ],
     "checksum": "0968f0bd3d6ec91b6253d2990d9c95fe0e6b6cfb617964b101a7b5682d2c9add",
     "filesChecksum": "d73009ad7d15dbafebd699a4c70bfb6c296c3e4e4469ef5fd97b7d0732526dc7",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@jentz/triage-snapshot": {
     "version": "2026.07.31.0",
@@ -93,7 +94,8 @@
     ],
     "checksum": "3b0b8df0bc400f88fffee931e7c7cceb76a15a8151948ff3e59b755166d6f67e",
     "filesChecksum": "a9910d3c2493ef2a83049c509c900755456c49432e1d1bb19f35ae48d0461c90",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@mccormick/fleet": {
     "version": "2026.06.09.1",
@@ -107,7 +109,8 @@
     ],
     "checksum": "316b2fcde59fafd50bff18dfdb94916d6125015cef9c87b5cf6bb2c765f23fc4",
     "filesChecksum": "fb9d8146330cacceb07ea0a461a04ab5fd397a9f3ec41a18650fcabecc8aa2fd",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@whyvez/disk-usage": {
     "version": "2026.05.28.1",
@@ -132,7 +135,8 @@
     ],
     "checksum": "840a153fe41a99e6576785d585a6ce70c4aa153873fe5d8eb9c123a5c7504aef",
     "filesChecksum": "4320c6fdb04bc40b443c44a5c24b4ac88009a5846414e2101c169a6a212d9541",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@lint/media-curator": {
     "version": "2026.05.22.1",
@@ -146,7 +150,8 @@
     ],
     "checksum": "4794a594db09e03e4a0b4146221b1ea4ac5d3570da42b13588215414511813db",
     "filesChecksum": "9c8dcb737654793e27bbbd266418e2a69593c281c6fa3e7d2b5d64b7991573d4",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@lint/radarr": {
     "version": "2026.05.21.2",
@@ -159,7 +164,8 @@
     ],
     "checksum": "c213c67ef98a4f50a09dba33ab950df6422be93965fa5fe816fa8ad91af1a0a7",
     "filesChecksum": "005656a49f54b225fec88943749b41b2d3bf99ebc7ea0b8e541611fd420de83c",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@lint/seerr": {
     "version": "2026.05.21.3",
@@ -172,7 +178,8 @@
     ],
     "checksum": "32004ba4594521f12671974dcc74c30bfce9e1c6c9861fd21d873164e4ebcef8",
     "filesChecksum": "3142f6304ede907da05040a387ddc50e7182c8cee486ee5022ee2c370f0e8d85",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@lint/tautulli": {
     "version": "2026.07.01.1",
@@ -185,7 +192,8 @@
     ],
     "checksum": "d00228c3e2fdd6a152649d757e16b7cfce7fab91821b8e4004982443f914b3dd",
     "filesChecksum": "5cebfae5612e10e769346eb27532f9d38efe35ba8a139a8347a5a8d18072e84f",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@lint/plex": {
     "version": "2026.06.22.1",
@@ -198,7 +206,8 @@
     ],
     "checksum": "ad7c2eefcc8ea88e478988aa7ea521513c0be60b3a2cffa14416c7840004f27d",
     "filesChecksum": "bf186b616d9d8578581e8ecccf0fd5c778abb3bb6c8891d13e31bee5274faf1c",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@kneel/plocate": {
     "version": "2026.07.15.2",
@@ -211,7 +220,8 @@
     ],
     "checksum": "6a861338ba5a6d12c2a1b0ff0067dc32f304fb9ab4bebf5ed52cec0d81b8fc99",
     "filesChecksum": "b8f55c37580dec40576d080960b5b151bb877be44349cdf962af4f779ad68153",
-    "serverUrl": "https://swamp-club.com"
+    "serverUrl": "https://swamp-club.com",
+    "publishedChannel": "stable"
   },
   "@funsaized/torlink": {
     "version": "2026.11.05.1",
