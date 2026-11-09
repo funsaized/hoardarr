@@ -1,7 +1,11 @@
 # Use the DevVM CLI
 
-Use `devvm` on the physical host to list VMs, open a guest shell and manage a VM's lifecycle. Inside
-the guest, use `sudo hoardarr-operator` for application work and `sudo systemctl` for guest
+Use `devvm` on the physical host to list VMs, open a guest shell and manage a VM's lifecycle. The
+Hoardarr image supplies the application, runtimes and native provisioning tools. The persistent
+project supplies installation configuration, credentials, catalog state and media. Runtime updates
+replace the guest through DevVM; routine operation does not patch application files in the guest.
+
+Inside the guest, use `sudo hoardarr-operator` for application work and `sudo systemctl` for guest
 services. The [native build guide](native-devvm.md) covers creating and commissioning an
 installation.
 
@@ -64,6 +68,7 @@ project folder:
 | Inspect registered images        | `devvm images`           |
 | Build the Hoardarr image         | `devvm build hoardarr`   |
 | Rebuild the Hoardarr image       | `devvm rebuild hoardarr` |
+| Deploy the rebuilt image         | `devvm update`           |
 
 Before stopping or restarting a production VM, open its guest shell, inhibit admissions, and wait
 for `lease: null`:

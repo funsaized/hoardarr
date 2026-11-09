@@ -50,3 +50,12 @@ Behaviors (formerly models) are managed with `swamp behavior` — e.g.
 `swamp behavior run @<type> <method> <name>` to run against a type
 directly). Every `swamp model …` spelling remains supported.
 <!-- END swamp managed section -->
+
+# Native VM deployment
+
+The native deployment is an appliance delivered as a DevVM image. Build application/runtime changes
+into that image and deploy them with the DevVM CLI. Do not update production by copying application
+files into `/opt/hoardarr` or patching installed runtimes in place. Provisioning may restore private
+installation identity and credentials, generate the control checkout/service units, and start the
+services. Keep media, catalog state and configuration in the persistent project across image
+replacement. Preserve the user's chosen backup and qualification scope.

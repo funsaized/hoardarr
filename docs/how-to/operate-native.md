@@ -44,8 +44,13 @@ Admission and ownership checks still apply to these commands.
 
 ## Update code and restart
 
+Native application code and runtimes come from the Hoardarr DevVM image. Deploy a new version by
+rebuilding that image and replacing the guest through `devvm update`. Keep `/opt/hoardarr` and the
+installed runtimes as supplied by the image; copying new application files into a running guest
+creates a deployment that DevVM cannot reproduce.
+
 A service restart reloads the installed code and generated definitions. Pulling the source on the
-host does not update `/opt/hoardarr` or the guest control checkout.
+host prepares a build; it does not deploy it.
 
 Prepare the new runtime from the desired source revision using the
 [native build guide](native-devvm.md). A source change produces a new runtime manifest; complete the
@@ -71,8 +76,22 @@ Both should report `inactive`. If a run was interrupted, inspect its workflow re
 [recovery procedure](backup-and-recovery.md#recover-an-interrupted-run) before changing definitions.
 Keep the saved lease intact. Leave the VPN, egress guard and observation sockets available.
 
-With writers stopped, install and commission the updated native runtime. Then apply its code and
-generated workflows to the existing control checkout using the protected operator:
+With writers stopped, prepare the private credential handoff described in
+[image replacement](backup-and-recovery.md#rebuild-the-guest), then return to the host and replace
+the guest from the rebuilt image:
+
+```sh
+exit
+devvm update
+```
+
+DevVM preserves the project and home directories. Restore the private installation identity and
+credentials, then use the image's `hoardarr-provision rebuild` command to recreate the control
+checkout and service units. Verify that the installed runtime manifest matches the image before
+commissioning. These steps configure the installation; application code remains supplied by the
+image.
+
+In the replacement guest, apply its generated definitions and resume:
 
 ```sh
 sudo hoardarr-operator apply --no-pull

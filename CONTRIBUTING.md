@@ -7,6 +7,10 @@ guide index.
 Changes must preserve catalog identities, allow one owner at a time, and verify delivery before
 cleanup. If durable state is unavailable, refuse the operation.
 
+Native deployments are image based. Build runtime changes into the Hoardarr image and deploy them
+through `devvm update`. Use provisioning to restore private installation state and generate service
+assets; keep application files in `/opt/hoardarr` consistent with the shipped image.
+
 ## Run the checks
 
 From the repository root:
