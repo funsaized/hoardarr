@@ -1,5 +1,9 @@
 # Back up, restore and recover
 
+Complete backups and restores are separate maintenance tasks. Routine VM starts and restarts use the
+[DevVM CLI](devvm-cli.md). Image replacement needs a private credential handoff, described below,
+even when you choose not to take a full media backup.
+
 Take a backup only after writers have stopped. Closing admissions prevents new runs, but does not
 stop the current owner. Let it finish, or inspect its failure and recover it first.
 
@@ -48,22 +52,43 @@ Take the UUID from its manifest rather than creating a new one.
 
 ## Rebuild the guest
 
-Restoring data is only part of recovery. Use the [native build guide](native-devvm.md) to register
-the replacement pinned layer in the same isolated inventory. On the host, build it with
-`devvm rebuild hoardarr` and inspect `devvm images`.
+Follow [image deployment](operate-native.md#update-code-and-restart) for the build and cutover.
+DevVM preserves project and home directories during `devvm update`; root-owned guest credentials and
+the control checkout need recovery. Keep the matching recovery private key on the host.
 
-Before a production cutover, retain a verified complete backup and recovery key, close admissions
-and prove guest writers have stopped. From the production project folder on the host, `devvm update`
-moves the VM to its changed image and opens the replacement guest's shell. The project and home
-directories survive, while guest-local root credentials, commissioning files and the control
-checkout need recovery. `devvm restart` keeps the existing disk and cannot install the new image.
+After [pausing work](operate-native.md#pause-for-maintenance), export the root credential capsule
+inside the old guest. This additionally stops NordVPN's credential writers:
 
-Rehydrate the root credential capsule with the matching private key, restore the datastore mapping,
-and rebuild the control checkout through the provisioning procedure. Preserve the installation
-identity and saved owners. Requalify before production commissioning. The
-[qualification sheet](../reference/qualification.md) lists the evidence required. The enrolled boot
-helper pins the runtime archive and image chain; update its reviewed deployment and recovery assets
-as part of the cutover before resuming automatic host startup.
+```sh
+sudo systemctl stop nordvpnd.service nordvpnd.socket
+sudo /usr/local/libexec/hoardarr-recovery-capsule export
+```
+
+The encrypted capsule is `P/secrets/guest-recovery.json` in the persistent project. Retain it across
+the update. It contains the installation identity and VPN credentials, not a complete application or
+media snapshot.
+
+After `devvm update`, return to the host. From the source checkout, decrypt the capsule with its
+matching private key into a new private directory (requires Python's `cryptography` package):
+
+```sh
+python3 deploy/devvm/recovery-capsule.py decrypt CAPSULE PRIVATE_KEY NEW_DIRECTORY
+```
+
+From the selected production project, transfer only the decrypted recovery directory into the
+replacement guest using `devvm limactl copy --backend=scp`; keep the private key on the host. Open
+the guest with `devvm`, stop `nordvpnd.service` and `nordvpnd.socket` there, then run:
+
+```sh
+sudo hoardarr-rehydrate --source /PRIVATE/GUEST/RECOVERY
+sudo hoardarr-provision rebuild --project /ABSOLUTE/SHARED/PROJECT
+```
+
+Rehydration restores the same installation identity without copying the old runtime manifest or
+commissioning authority. Provisioning rebuilds the control checkout from the new image and
+reconnects the preserved datastore. Preserve saved owners and complete verification before resuming
+through [native operations](operate-native.md#update-code-and-restart). Remove temporary credential
+transfer copies after successful verification.
 
 For a relocation, save private inventories with `migration inventory --output PATH` before and
 after. Use `migration compare --before PATH --after PATH --mapping PATH` to compare media

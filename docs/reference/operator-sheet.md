@@ -6,29 +6,24 @@ protected operator selects the installed guest configuration for you.
 
 ## Host: select and enter the VM
 
-Use your enrolled paths; these are the standard locations:
+First [select the inventory and project](../how-to/devvm-cli.md#select-the-inventory-and-project).
+DevVM selects the VM by project folder; check the production row's `FOLDER` in `devvm ls`.
 
-```sh
-cd "$HOME/.local/share/hoardarr-devvm"
-export XDG_CONFIG_HOME="$HOME/.hoardarr-host/config"
-export XDG_DATA_HOME="$HOME/.hoardarr-host/data"
-devvm ls
-```
+| Host task                     | Command                                   |
+| ----------------------------- | ----------------------------------------- |
+| List VMs                      | `devvm ls`                                |
+| Open the project's VM shell   | `devvm`                                   |
+| Show its management hostname  | `devvm host`                              |
+| Stop the project's VM         | `devvm stop`                              |
+| Restart and open its shell    | `devvm restart`                           |
+| Rebuild the application image | `devvm rebuild hoardarr`                  |
+| Deploy the changed image      | `devvm update`                            |
+| Inspect automatic boot        | `systemctl status hoardarr-devvm.service` |
 
-Check the production row's `FOLDER` against the current directory, then run `devvm` to open its
-shell. See the [DevVM CLI guide](../how-to/devvm-cli.md) for inventory selection and maintenance.
-
-| Host task                    | Command                                   |
-| ---------------------------- | ----------------------------------------- |
-| List VMs                     | `devvm ls`                                |
-| Open the project's VM shell  | `devvm`                                   |
-| Show its management hostname | `devvm host`                              |
-| Stop the project's VM        | `devvm stop`                              |
-| Restart and open its shell   | `devvm restart`                           |
-| Inspect automatic boot       | `systemctl status hoardarr-devvm.service` |
-
-Close admissions and stop guest writers before stopping or restarting the VM. Lifecycle commands
-select by project folder. Application commands below run inside the guest shell.
+[Pause work](../how-to/operate-native.md#pause-for-maintenance) before stopping or restarting. For
+`devvm update`, follow the
+[image deployment procedure](../how-to/operate-native.md#update-code-and-restart), including private
+credential handoff. Application commands below run inside the guest shell.
 
 ## Guest: everyday commands
 
@@ -50,13 +45,9 @@ deliver all ready movies in sequence, followed by all ready episodes in sequence
 | Open admissions after verification | `sudo hoardarr-operator admit`                          |
 | Guest readiness                    | `sudo hoardarr-operator native-check`                   |
 
-For a complete snapshot, exit to the host and follow
-[backup and recovery](../how-to/backup-and-recovery.md). Enrollment installs a host backup helper
-that drives the inventoried VM through DevVM and verifies the exported application snapshot.
-
-Fresh schedules are disabled. Use the full [stopped-writer procedure](../how-to/operate-native.md)
-to change a native schedule. `schedule enable` applies definitions and leaves admissions closed
-until verification.
+Follow the procedures to [resume](../how-to/operate-native.md#resume-after-vm-maintenance),
+[change schedules](../how-to/operate-native.md#change-the-native-schedule) or
+[take a complete snapshot](../how-to/backup-and-recovery.md#take-a-native-backup).
 
 ## Guest: services and diagnosis
 

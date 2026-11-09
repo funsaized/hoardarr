@@ -1,5 +1,8 @@
 # Build and provision a native DevVM
 
+This is the image builder and initial installation guide. For an existing installation, use
+[DevVM startup](devvm-cli.md) and [native operations](operate-native.md).
+
 This build puts NordVPN, Torlink and Swamp in a disposable Ubuntu guest while preserving host
 networking. It needs Linux x86-64, KVM, systemd and Btrfs project storage. [Compose](compose.md) has
 a shorter installation path.
@@ -172,8 +175,9 @@ sudo python3 deploy/devvm/install-host.py --operator-uid "$(id -u)"
 The unit starts one VM through the enrolled DevVM lifecycle helper as the operator and checks its
 readiness. Physical host VPN/Tailscale settings stay as they are, and media scheduling stays off.
 
-Complete G6 and production commissioning before opening admissions. Verify a manual run before
-enabling the first production schedule. Continue with the [DevVM CLI](devvm-cli.md) and
-[native operations](operate-native.md) guides for routine use.
+Complete G6 and production commissioning, then follow
+[resume after VM maintenance](operate-native.md#resume-after-vm-maintenance) to enable and start the
+guest application services. Verify a manual run before enabling the first production schedule.
+Subsequent starts use `devvm`; the enabled services start with the guest.
 
 [Back to the README](../../README.md#reference)

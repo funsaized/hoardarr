@@ -42,11 +42,12 @@ bin/hoardarr status --dir "$HOME/hoardarr-demo"
 When you're ready for real downloads, [Compose](docs/how-to/compose.md) is the shorter setup. It
 runs Hoardarr and Torlink inside Gluetun's VPN network.
 
-The [native DevVM guide](docs/how-to/native-devvm.md) puts NordVPN and the applications in a Linux
-VM. It takes more setup and requires local qualification before production use. The VM keeps its
-data outside the disposable guest so it can be rebuilt. Use the
-[DevVM CLI](docs/how-to/devvm-cli.md) to select Hoardarr's inventory, enter the guest shell and
-manage the VM. Run application commands inside that shell with `sudo hoardarr-operator`.
+The native deployment is a DevVM appliance: the image supplies Hoardarr, Swamp, Torlink and NordVPN;
+the persistent project holds configuration, catalog state and media. Once provisioned, start it with
+`devvm`; enabled services start with the guest. Use the [DevVM CLI guide](docs/how-to/devvm-cli.md)
+to select the installation and [native operations](docs/how-to/operate-native.md) to check or update
+it. Updates deploy a rebuilt image with `devvm update`. The
+[native build guide](docs/how-to/native-devvm.md) covers building and commissioning an image.
 
 Schedules start disabled. Follow the [scheduling tutorial](docs/tutorials/running-and-scheduling.md)
 after your first manual run.
