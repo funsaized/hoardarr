@@ -3,5 +3,5 @@ name: hoardarr
 type: local_encryption
 config:
   auto_generate: true
-  base_dir: /home/saiguy/Projects/hoardarr
+  base_dir: /home/media/Projects/hoardarr
 createdAt: '2026-08-28T18:54:27.096Z'

@@ -1,6 +1,7 @@
 /// <reference lib="deno.ns" />
 import {
   isTorlinkInactive,
+  model,
   parseNordvpnSettings,
   parseNordvpnStatus,
   parseRouteJson,
@@ -125,6 +126,7 @@ function makeContext(): { context: MethodContext; writes: WriteRecord[] } {
       signal: new AbortController().signal,
       logger: { info: () => undefined, warning: () => undefined },
       writeResource: (specName, name, data): Promise<{ name: string }> => {
+        model.resources[specName as keyof typeof model.resources].schema.strict().parse(data);
         writes.push({ specName, name, data });
         return Promise.resolve({ name });
       },

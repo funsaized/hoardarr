@@ -1,5 +1,5 @@
 /** Offline demonstration provider. Writes harmless text fixtures, never network traffic. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 import { createHash } from "node:crypto";
 const Global = z.object({ stagingRoot: z.string() });
 type Context = {
@@ -24,7 +24,12 @@ const save = (ctx: Context, items: Torrent[]) =>
 /** Swamp behavior implementing fixture provider operations. */
 export const model = {
   type: "@funsaized/hoardarr/fixture",
-  version: "2026.11.05.1",
+  version: "2026.11.09.1",
+  upgrades: [{
+    toVersion: "2026.11.09.1",
+    description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }],
   globalArguments: Global,
   resources: {
     evidence: {

@@ -1,10 +1,15 @@
 /** Normalize the existing Gluetun integration's live status for Hoardarr. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 import { invoke, type Runtime } from "./_lib/runtime.ts";
 /** Swamp behavior implementing gluetun environment operations. */
 export const model = {
   type: "@funsaized/hoardarr/gluetun-environment",
-  version: "2026.11.05.1",
+  version: "2026.11.09.1",
+  upgrades: [{
+    toVersion: "2026.11.09.1",
+    description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }],
   globalArguments: z.object({ gluetunModel: z.string().default("gluetun") }),
   resources: {
     network: {

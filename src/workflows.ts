@@ -47,6 +47,7 @@ const ownerSchema = {
 };
 
 export function workflowDefinitions(config: Config, ids: Record<string, string>): Node[] {
+  const native = config.profile === "devvm-nordvpn-local";
   const base = (name: string, jobs: Node[], inputs: Node = ownerSchema): Node => ({
     id: ids[name],
     name,
@@ -119,7 +120,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
     call(
       "network",
       "network-provider",
-      "enterDownload",
+      native ? "assertReady" : "enterDownload",
       {},
       config.profile === "demo" ? undefined : "capacity-ready",
     ),
@@ -130,13 +131,19 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   }
   const started = String(acquisition.at(-1)!.name);
   acquisition.push(call("health", "download-provider", "health", {}, started));
+  if (native) acquisition.push(call("binding", "download-provider", "network", {}, "health"));
   acquisition.push(
     method(
       "capabilities",
       "pipeline",
       "health",
-      { ...owned, records: records("health") },
-      "health",
+      {
+        ...owned,
+        records: native
+          ? expr("steps.health.outputs.records + steps.binding.outputs.records")
+          : records("health"),
+      },
+      native ? "binding" : "health",
     ),
   );
   acquisition.push(call("snapshot-before", "download-provider", "sync", {}, "capabilities"));
@@ -253,15 +260,17 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   if (config.profile === "systemd-nordvpn-ssh") {
     acquisition.push(method("stop", "torlink-unit", "stopUser", {}, "transfer-ready"));
   }
-  acquisition.push(
-    call(
-      "transfer-network",
-      "network-provider",
-      "enterTransfer",
-      {},
-      String(acquisition.at(-1)!.name),
-    ),
-  );
+  if (!native) {
+    acquisition.push(
+      call(
+        "transfer-network",
+        "network-provider",
+        "enterTransfer",
+        {},
+        String(acquisition.at(-1)!.name),
+      ),
+    );
+  }
 
   const item = expr("inputs.item");
   const noDelivery = 'inputs.item.status != "transfer-ready"';
@@ -332,7 +341,25 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
     recovery.push(method("stop", "torlink-unit", "stopUser", {}, "ownership"));
     recovery.push(method("close", "mac", "close", { hosts: `name:${config.ssh!.host}` }, "stop"));
   }
-  recovery.push(call("restore", "network-provider", "restore", {}, String(recovery.at(-1)!.name)));
+  if (!native) {
+    recovery.push(
+      call("restore", "network-provider", "restore", {}, String(recovery.at(-1)!.name)),
+    );
+  }
+  // Native recovery needs a fresh downloader snapshot, even when the tunnel is down.
+  // Loopback remains direct; an unavailable daemon retains ownership for investigation.
+  if (native) {
+    recovery.push(call("snapshot", "download-provider", "sync", {}, "ownership"));
+    recovery.push(
+      method(
+        "reconcile",
+        "pipeline",
+        "reconcile",
+        { ...owned, records: records("snapshot") },
+        "snapshot",
+      ),
+    );
+  }
   // A container's firewall owns the fail-closed boundary; a down VPN must not prevent lease release.
   if (config.profile === "compose-vpn-local") {
     (recovery.at(-1)!.task as Node).inputs = {
@@ -352,8 +379,20 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   };
   const owner = expr("run.id");
   const rootSteps: Node[] = [
+    ...(native
+      ? [
+        skip(
+          method("readiness", "network-provider", "invoke", {
+            owner,
+            operation: "assertReady",
+            inputs: {},
+          }),
+          "inputs.dryRun && !inputs.refresh",
+        ),
+      ]
+      : []),
     skip(
-      child("discover", "hoardarr-discovery", { owner }, undefined),
+      child("discover", "hoardarr-discovery", { owner }, native ? "readiness" : undefined),
       "inputs.dryRun && !inputs.refresh",
     ),
     method("plan", "pipeline", "plan", { owner }, "discover"),

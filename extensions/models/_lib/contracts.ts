@@ -1,5 +1,5 @@
 /** Hoardarr provider contract v1. Providers are trusted Swamp extensions. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 
 export const DescriptorSchema = z.object({
   contractVersion: z.literal(1),
@@ -55,7 +55,10 @@ export function validateBinding(descriptor: Descriptor, role: Descriptor["roles"
   if (!descriptor.roles.includes(role)) {
     throw new Error(`${descriptor.id} does not support ${role}`);
   }
-  for (const name of requiredMethods[role]) {
+  const methods = role === "network" && descriptor.capabilities.includes("guest-readiness")
+    ? ["inspect", "assertReady"]
+    : requiredMethods[role];
+  for (const name of methods) {
     if (!descriptor.methods[name]) throw new Error(`${descriptor.id} lacks ${role}.${name}`);
   }
 }

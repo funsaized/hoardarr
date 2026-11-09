@@ -4,7 +4,10 @@ Deno.test("installation lease rejects concurrent ownership and stale release", (
   temporary(async (root) => {
     const ctx = {
       repoDir: root,
-      writeResource: async (_s: string, name: string, _v: Record<string, unknown>) => ({ name }),
+      writeResource: async (_s: string, name: string, value: Record<string, unknown>) => {
+        coordinator.resources.lease.schema.strict().parse(value);
+        return { name };
+      },
     };
     const a = crypto.randomUUID(), b = crypto.randomUUID();
     const outcomes = await Promise.allSettled([

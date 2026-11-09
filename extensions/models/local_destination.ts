@@ -1,5 +1,7 @@
 /** Verified local or mounted-library delivery. No source cleanup occurs here. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
+import { syncDirectory } from "./_lib/durable.ts";
+import { assertStorage, type Storage, StorageSchema } from "./_lib/storage.ts";
 import { createHash } from "node:crypto";
 import { dirname, join, relative, resolve } from "node:path";
 import { type Receipt, ReceiptSchema, type Transfer, TransferSchema } from "./_lib/contracts.ts";
@@ -40,6 +42,24 @@ export async function fileHash(path: string, signal?: AbortSignal): Promise<stri
     file.close();
   }
   return hash.digest("hex");
+}
+
+/** Flush leaves before directories, then let the caller flush the publication parent. */
+export async function syncTree(root: string): Promise<void> {
+  for await (const entry of Deno.readDir(root)) {
+    const path = join(root, entry.name);
+    if (entry.isSymlink) throw new Error("Cannot sync a symlinked tree");
+    if (entry.isDirectory) await syncTree(path);
+    else if (entry.isFile) {
+      const file = await Deno.open(path, { read: true });
+      try {
+        await file.sync();
+      } finally {
+        file.close();
+      }
+    } else throw new Error("Cannot sync a special file");
+  }
+  await syncDirectory(root);
 }
 
 /** Verify exact contents, sizes, and aggregate manifest identity. */
@@ -86,10 +106,11 @@ export async function verifyTree(
 /** Copy, verify, and publish without authorizing source removal. */
 export async function deliverLocal(
   transfer: Transfer,
-  roots: { stagingRoot: string; libraryRoot: string },
+  roots: { stagingRoot: string; libraryRoot: string; storage?: Storage },
   signal?: AbortSignal,
 ): Promise<Receipt> {
   transfer = TransferSchema.parse(transfer);
+  if (roots.storage) await assertStorage(roots.storage);
   const source = await checkedPath(roots.stagingRoot, transfer.stagingDir);
   if (source !== resolve(roots.stagingRoot, transfer.key)) {
     throw new Error("Source path does not match media identity");
@@ -100,6 +121,7 @@ export async function deliverLocal(
     join(roots.libraryRoot, transfer.mediaKind === "movie" ? "Movies" : "TV"),
   );
   await Deno.mkdir(parent, { recursive: true });
+  await syncDirectory(roots.libraryRoot);
   const final = join(parent, transfer.key);
   const receipt = (): Receipt =>
     ReceiptSchema.parse({
@@ -114,6 +136,8 @@ export async function deliverLocal(
   try {
     await Deno.lstat(final);
     await verifyTree(final, transfer, signal);
+    await syncTree(final);
+    await syncDirectory(parent);
     return receipt();
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) throw error;
@@ -138,6 +162,7 @@ export async function deliverLocal(
       }
     }
     await verifyTree(temporary, transfer, signal);
+    await syncTree(temporary);
     signal?.throwIfAborted();
     try {
       await Deno.lstat(final);
@@ -145,8 +170,11 @@ export async function deliverLocal(
     } catch (error) {
       if (!(error instanceof Deno.errors.NotFound)) throw error;
       await Deno.rename(temporary, final);
+      await syncDirectory(parent);
     }
     await verifyTree(final, transfer, signal);
+    if (roots.storage) await assertStorage(roots.storage);
+    await syncDirectory(parent);
     return receipt();
   } finally {
     try {
@@ -162,8 +190,17 @@ export async function deliverLocal(
 /** Swamp behavior implementing local destination operations. */
 export const model = {
   type: "@funsaized/hoardarr/local-destination",
-  version: "2026.11.05.1",
-  globalArguments: z.object({ stagingRoot: z.string().min(1), libraryRoot: z.string().min(1) }),
+  version: "2026.11.09.1",
+  upgrades: [{
+    toVersion: "2026.11.09.1",
+    description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }],
+  globalArguments: z.object({
+    stagingRoot: z.string().min(1),
+    libraryRoot: z.string().min(1),
+    storage: StorageSchema.optional(),
+  }),
   resources: {
     receipt: {
       description: "Verified destination receipt",
@@ -181,7 +218,7 @@ export const model = {
         args: Transfer,
         context: {
           signal: AbortSignal;
-          globalArgs: { stagingRoot: string; libraryRoot: string };
+          globalArgs: { stagingRoot: string; libraryRoot: string; storage?: Storage };
           writeResource(spec: string, name: string, value: Receipt): Promise<{ name: string }>;
         },
       ) => {

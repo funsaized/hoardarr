@@ -1,0 +1,450 @@
+diff --git i/src/config/config.ts w/src/config/config.ts
+index 2800b38..d327175 100644
+--- i/src/config/config.ts
++++ w/src/config/config.ts
+@@ -16,11 +16,15 @@ export async function loadConfig(): Promise<Config> {
+   let raw: string;
+   try {
+     raw = await fs.readFile(configFile, "utf8");
+-  } catch {
+-    return { ...defaultConfig, trackers: [] };
++  } catch (error) {
++    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ...defaultConfig, trackers: [] };
++    throw error;
+   }
+   try {
+     const parsed = JSON.parse(raw) as Partial<Config>;
++    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
++      (parsed.downloadDir !== undefined && typeof parsed.downloadDir !== "string") ||
++      (parsed.trackers !== undefined && (!Array.isArray(parsed.trackers) || !parsed.trackers.every(t => typeof t === "string")))) throw new Error("Corrupt Torlink config");
+     const cfg: Config = {
+       downloadDir:
+         typeof parsed.downloadDir === "string" && parsed.downloadDir
+@@ -31,9 +35,7 @@ export async function loadConfig(): Promise<Config> {
+         : [],
+     };
+     return cfg;
+-  } catch {
+-    return { ...defaultConfig, trackers: [] };
+-  }
++  } catch (error) { throw error; }
+ }
+ 
+ const write = serializeWrites();
+diff --git i/src/daemon/serve.ts w/src/daemon/serve.ts
+index 4fdc8bb..9bd3e59 100644
+--- i/src/daemon/serve.ts
++++ w/src/daemon/serve.ts
+@@ -423,6 +423,9 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
+       } catch {
+         out = { status: 500, body: { error: "internal error" } };
+       }
++      // A successful mutation must survive a daemon/guest crash before its HTTP acknowledgement.
++      // Errors remain ambiguous to callers; persisting the actual in-memory outcome is still required.
++      if (method !== "GET" && method !== "HEAD") runtime.queue.persistSync();
+       const payload = JSON.stringify(out.body);
+       res.writeHead(out.status, { "Content-Type": "application/json" });
+       res.end(payload);
+diff --git i/src/download/bootguard.ts w/src/download/bootguard.ts
+index dd19374..a4bfa23 100644
+--- i/src/download/bootguard.ts
++++ w/src/download/bootguard.ts
+@@ -1,3 +1,4 @@
++import { syncDirectorySync, writeJsonAtomicSync } from "../util/atomic";
+ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+ import path from "node:path";
+ import { bootMarkerFile } from "../config/paths";
+@@ -29,14 +30,13 @@ export function wasBootInterrupted(): boolean {
+ export function armBootMarker(): void {
+   try {
+     mkdirSync(path.dirname(bootMarkerFile), { recursive: true });
+-    writeFileSync(bootMarkerFile, JSON.stringify({ at: Date.now(), pid: process.pid }));
+-  } catch {
+-    // Failing to write the marker never blocks a boot.
+-  }
++    writeJsonAtomicSync(bootMarkerFile, { at: Date.now(), pid: process.pid });
++  } catch (error) { throw error; }
+ }
+ 
+ export function disarmBootMarker(): void {
+   try {
+     rmSync(bootMarkerFile, { force: true });
+-  } catch {}
++    syncDirectorySync(path.dirname(bootMarkerFile));
++  } catch (error) { throw error; }
+ }
+diff --git i/src/download/history.ts w/src/download/history.ts
+index 1f0cb8c..55401cd 100644
+--- i/src/download/history.ts
++++ w/src/download/history.ts
+@@ -1,7 +1,7 @@
+ import { promises as fs, mkdirSync, writeFileSync, renameSync } from "node:fs";
+ import path from "node:path";
+ import { historyFile } from "../config/paths";
+-import { serializeWrites, writeJsonAtomic } from "../util/atomic";
++import { serializeWrites, writeJsonAtomic, writeJsonAtomicSync, readArray } from "../util/atomic";
+ import type { SourceId } from "../sources/types";
+ 
+ export const HISTORY_CAP = 500;
+@@ -26,14 +26,7 @@ export function saveHistory(items: HistoryItem[]): Promise<void> {
+   return write(() => writeJsonAtomic(historyFile, items.slice(0, HISTORY_CAP)));
+ }
+ 
+-export function saveHistorySync(items: HistoryItem[]): void {
+-  try {
+-    mkdirSync(path.dirname(historyFile), { recursive: true });
+-    const tmp = `${historyFile}.sync.tmp`;
+-    writeFileSync(tmp, JSON.stringify(items.slice(0, HISTORY_CAP), null, 2), "utf8");
+-    renameSync(tmp, historyFile);
+-  } catch {}
+-}
++export function saveHistorySync(items: HistoryItem[]): void { writeJsonAtomicSync(historyFile, items.slice(0, HISTORY_CAP)); }
+ 
+ function isHistoryItem(v: unknown): v is HistoryItem {
+   if (!v || typeof v !== "object") return false;
+@@ -41,17 +34,4 @@ function isHistoryItem(v: unknown): v is HistoryItem {
+   return typeof r.id === "string" && typeof r.name === "string" && typeof r.magnet === "string";
+ }
+ 
+-export async function loadHistory(): Promise<HistoryItem[]> {
+-  let raw: string;
+-  try {
+-    raw = await fs.readFile(historyFile, "utf8");
+-  } catch {
+-    return [];
+-  }
+-  try {
+-    const parsed = JSON.parse(raw) as unknown;
+-    return Array.isArray(parsed) ? parsed.filter(isHistoryItem).slice(0, HISTORY_CAP) : [];
+-  } catch {
+-    return [];
+-  }
+-}
++export async function loadHistory(): Promise<HistoryItem[]> { return readArray(historyFile, isHistoryItem); }
+diff --git i/src/download/persist.ts w/src/download/persist.ts
+index 537a38a..923a22d 100644
+--- i/src/download/persist.ts
++++ w/src/download/persist.ts
+@@ -1,8 +1,15 @@
+-import { promises as fs, mkdirSync, writeFileSync, renameSync, existsSync, rmSync } from "node:fs";
++import { promises as fs, mkdirSync, writeFileSync, renameSync, existsSync, rmSync, openSync, fsyncSync, closeSync } from "node:fs";
+ import path from "node:path";
+ import { queueFile, seedsFile, torrentsDir } from "../config/paths";
+-import { serializeWrites, writeJsonAtomic } from "../util/atomic";
++import { serializeWrites, writeJsonAtomic, writeJsonAtomicSync, readArray, syncDirectorySync, fatalPersistence } from "../util/atomic";
+ import type { QueueItem } from "./types";
++import { randomUUID } from "node:crypto";
++
++// Retain the pre-breaker intent as evidence; recovery must never infer that a crash pause
++// was an operator pause or automatically resume it. Each observation is immutable.
++export function preserveRestoreEvidence(kind: "queue" | "seeds", rows: unknown[]): void {
++  writeJsonAtomicSync(path.join(path.dirname(queueFile), "recovery", `${kind}-${Date.now()}-${randomUUID()}.json`), rows);
++}
+ 
+ const write = serializeWrites();
+ 
+@@ -10,14 +17,7 @@ export function saveQueue(items: QueueItem[]): Promise<void> {
+   return write(() => writeJsonAtomic(queueFile, items));
+ }
+ 
+-export function saveQueueSync(items: QueueItem[]): void {
+-  try {
+-    mkdirSync(path.dirname(queueFile), { recursive: true });
+-    const tmp = `${queueFile}.sync.tmp`;
+-    writeFileSync(tmp, JSON.stringify(items, null, 2), "utf8");
+-    renameSync(tmp, queueFile);
+-  } catch {}
+-}
++export function saveQueueSync(items: QueueItem[]): void { writeJsonAtomicSync(queueFile, items); }
+ 
+ function isQueueItem(v: unknown): v is QueueItem {
+   if (!v || typeof v !== "object") return false;
+@@ -25,20 +25,7 @@ function isQueueItem(v: unknown): v is QueueItem {
+   return typeof r.id === "string" && typeof r.magnet === "string";
+ }
+ 
+-export async function loadQueue(): Promise<QueueItem[]> {
+-  let raw: string;
+-  try {
+-    raw = await fs.readFile(queueFile, "utf8");
+-  } catch {
+-    return [];
+-  }
+-  try {
+-    const parsed = JSON.parse(raw) as unknown;
+-    return Array.isArray(parsed) ? parsed.filter(isQueueItem) : [];
+-  } catch {
+-    return [];
+-  }
+-}
++export async function loadQueue(): Promise<QueueItem[]> { return readArray(queueFile, isQueueItem); }
+ 
+ // We persist the user-meaningful seed states so a deliberate pause survives a
+ // restart (and stays paused), not just the seeding ids. Missing is runtime-only
+@@ -54,14 +41,7 @@ export function saveSeeds(records: SeedRecord[]): Promise<void> {
+   return write(() => writeJsonAtomic(seedsFile, records));
+ }
+ 
+-export function saveSeedsSync(records: SeedRecord[]): void {
+-  try {
+-    mkdirSync(path.dirname(seedsFile), { recursive: true });
+-    const tmp = `${seedsFile}.sync.tmp`;
+-    writeFileSync(tmp, JSON.stringify(records, null, 2), "utf8");
+-    renameSync(tmp, seedsFile);
+-  } catch {}
+-}
++export function saveSeedsSync(records: SeedRecord[]): void { writeJsonAtomicSync(seedsFile, records); }
+ 
+ // --- per-torrent .torrent metadata cache ------------------------------------
+ 
+@@ -82,14 +62,18 @@ export function torrentExportName(name: string, id: string): string {
+   return `${(base || id || "torrent").slice(0, 180)}.torrent`;
+ }
+ 
+-export async function saveTorrentMeta(id: string, data: Uint8Array): Promise<void> {
++// Metadata publication must finish before an onMetadata callback can advance the queue or
++// acknowledge a seed/pause. A detached async write leaves acknowledged resume state incomplete.
++export function saveTorrentMeta(id: string, data: Uint8Array): Promise<void> {
+   try {
+-    await fs.mkdir(torrentsDir, { recursive: true });
+-    const file = torrentMetaPath(id);
+-    const tmp = `${file}.tmp`;
+-    await fs.writeFile(tmp, data);
+-    await fs.rename(tmp, file);
+-  } catch {}
++    mkdirSync(torrentsDir, { recursive: true });
++    const file = torrentMetaPath(id), tmp = `${file}.tmp`;
++    const output = openSync(tmp, "w", 0o600);
++    try { writeFileSync(output, data); fsyncSync(output); } finally { closeSync(output); }
++    renameSync(tmp, file);
++    syncDirectorySync(torrentsDir);
++    return Promise.resolve();
++  } catch (error) { fatalPersistence(error); }
+ }
+ 
+ export async function exportTorrentMeta(id: string, name: string, dir: string): Promise<string | null> {
+@@ -108,33 +92,15 @@ export async function exportTorrentMeta(id: string, name: string, dir: string):
+ export function deleteTorrentMeta(id: string): void {
+   try {
+     rmSync(torrentMetaPath(id), { force: true });
+-  } catch {}
++  } catch (error) { throw error; }
+ }
+ 
+ export async function loadSeeds(): Promise<SeedRecord[]> {
+-  let raw: string;
+-  try {
+-    raw = await fs.readFile(seedsFile, "utf8");
+-  } catch {
+-    return [];
+-  }
+-  try {
+-    const parsed = JSON.parse(raw) as unknown;
+-    if (!Array.isArray(parsed)) return [];
+-    const out: SeedRecord[] = [];
+-    for (const el of parsed) {
+-      // Legacy format was a bare id array; treat each as a seeding entry.
+-      if (typeof el === "string") {
+-        out.push({ id: el, status: "seeding" });
+-      } else if (el && typeof el === "object") {
+-        const r = el as Record<string, unknown>;
+-        if (typeof r.id === "string" && (r.status === "seeding" || r.status === "paused")) {
+-          out.push({ id: r.id, status: r.status });
+-        }
+-      }
+-    }
+-    return out;
+-  } catch {
+-    return [];
+-  }
++  const records = await readArray<SeedRecord | string>(seedsFile, (v): v is SeedRecord | string => {
++    if (typeof v === "string") return /^[a-f0-9]{40}$/i.test(v);
++    if (!v || typeof v !== "object") return false;
++    const r = v as Record<string, unknown>;
++    return typeof r.id === "string" && (r.status === "seeding" || r.status === "paused");
++  });
++  return records.map(r => typeof r === "string" ? {id: r, status: "seeding"} : r);
+ }
+diff --git i/src/download/queue.ts w/src/download/queue.ts
+index bad7cdd..047f594 100644
+--- i/src/download/queue.ts
++++ w/src/download/queue.ts
+@@ -1,7 +1,9 @@
++import { fatalPersistence } from "../util/atomic";
+ import { EventEmitter } from "node:events";
+ import { TorrentEngine, message, type AddHandlers, type NetworkPatch, type ReconfigureResult } from "./engine";
+ import type { NetworkStatus } from "./network";
+ import {
++  preserveRestoreEvidence,
+   saveQueue,
+   saveQueueSync,
+   saveSeeds,
+@@ -699,6 +701,7 @@ export class DownloadQueue extends EventEmitter {
+   }
+ 
+   restoreSeeds(records: SeedRecord[], opts: RestoreOptions = {}): void {
++    if (opts.safe) preserveRestoreEvidence("seeds", records);
+     for (const r of records) {
+       const h = this.history.find((x) => x.id === r.id);
+       if (!h) continue;
+@@ -742,11 +745,12 @@ export class DownloadQueue extends EventEmitter {
+   }
+ 
+   private persistSeeds(): Promise<void> {
+-    return saveSeeds(this.seedRecords()).catch(() => {});
++    return saveSeeds(this.seedRecords()).catch(fatalPersistence);
+   }
+ 
+   restore(items: QueueItem[], opts: RestoreOptions = {}): void {
+     if (opts.safe) {
++      preserveRestoreEvidence("queue", items);
+       // Engines stay cold: pause everything that would have started and keep
+       // the rest as saved, then persist so the paused state is the new truth.
+       for (const raw of items) {
+@@ -800,7 +804,7 @@ export class DownloadQueue extends EventEmitter {
+     if (h) {
+       if (seedTimeMs === undefined) delete h.seedTimeMs;
+       else h.seedTimeMs = seedTimeMs;
+-      void saveHistory(this.history).catch(() => {});
++      void saveHistory(this.history).catch(fatalPersistence);
+     }
+     if (!it && !h) return false;
+     this.changed();
+@@ -819,7 +823,7 @@ export class DownloadQueue extends EventEmitter {
+       ...(it.seedTimeMs !== undefined ? { seedTimeMs: it.seedTimeMs } : {}),
+     };
+     this.history = [rec, ...this.history.filter((h) => h.id !== it.id)].slice(0, HISTORY_MAX);
+-    void saveHistory(this.history).catch(() => {});
++    void saveHistory(this.history).catch(fatalPersistence);
+   }
+ 
+   removeHistory(id: string): void {
+@@ -835,7 +839,7 @@ export class DownloadQueue extends EventEmitter {
+       this.maybeStopPoll();
+     }
+     deleteTorrentMeta(id);
+-    void saveHistory(this.history).catch(() => {});
++    void saveHistory(this.history).catch(fatalPersistence);
+     this.changed();
+   }
+ 
+@@ -851,7 +855,7 @@ export class DownloadQueue extends EventEmitter {
+       void this.persistSeeds();
+       this.maybeStopPoll();
+     }
+-    void saveHistory(this.history).catch(() => {});
++    void saveHistory(this.history).catch(fatalPersistence);
+     this.changed();
+   }
+ 
+@@ -860,7 +864,7 @@ export class DownloadQueue extends EventEmitter {
+   }
+ 
+   private async persist(): Promise<void> {
+-    await saveQueue(this.getItems()).catch(() => {});
++    await saveQueue(this.getItems()).catch(fatalPersistence);
+   }
+ 
+   // Synchronously flush every state file from current memory. Used on quit so
+diff --git i/src/util/atomic.ts w/src/util/atomic.ts
+index 5df0267..60cca56 100644
+--- i/src/util/atomic.ts
++++ w/src/util/atomic.ts
+@@ -1,17 +1,35 @@
+-import { promises as fs } from "node:fs";
++import { promises as fs, mkdirSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync } from "node:fs";
+ import path from "node:path";
+ 
++// Publication is deliberately synchronous: a queued async save must never overwrite a later
++// successful pause/remove acknowledgement or the shutdown flush with an older snapshot.
+ export function serializeWrites(): (task: () => Promise<void>) => Promise<void> {
+-  let chain: Promise<void> = Promise.resolve();
+-  return (task) => {
+-    chain = chain.then(task).catch(() => {});
+-    return chain;
+-  };
++  return (task) => { try { return task(); } catch (error) { return Promise.reject(error); } };
++}
++export function syncDirectorySync(dir: string): void {
++  const fd = openSync(dir, "r");
++  try { fsyncSync(fd); } finally { closeSync(fd); }
++}
++export function writeJsonAtomicSync(file: string, data: unknown): void {
++  mkdirSync(path.dirname(file), {recursive: true});
++  const tmp = `${file}.sync.tmp`;
++  const fd = openSync(tmp, "w", 0o600);
++  try { writeFileSync(fd, JSON.stringify(data, null, 2)); fsyncSync(fd); } finally { closeSync(fd); }
++  renameSync(tmp, file);
++  syncDirectorySync(path.dirname(file));
+ }
+-
+ export async function writeJsonAtomic(file: string, data: unknown): Promise<void> {
+-  await fs.mkdir(path.dirname(file), { recursive: true });
+-  const tmp = `${file}.tmp`;
+-  await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
+-  await fs.rename(tmp, file);
++  writeJsonAtomicSync(file, data);
++}
++export async function readArray<T>(file: string, valid: (value: unknown) => value is T): Promise<T[]> {
++  let raw: string;
++  try { raw = await fs.readFile(file, "utf8"); }
++  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
++  const parsed: unknown = JSON.parse(raw);
++  if (!Array.isArray(parsed) || !parsed.every(valid)) throw new Error(`Corrupt persistent state: ${file}`);
++  return parsed;
++}
++export function fatalPersistence(_error: unknown): never {
++  console.error("Persistent state write failed; daemon inhibited. Inspect storage before restart.");
++  process.exit(74);
+ }
+diff --git i/vitest.config.ts w/vitest.config.ts
+index f4eb86d..e27bef3 100644
+--- i/vitest.config.ts
++++ w/vitest.config.ts
+@@ -8,8 +8,6 @@ import { defineConfig } from "vitest/config";
+ // paths.ts, so every write during a run lands here instead.
+ export default defineConfig({
+   test: {
+-    env: {
+-      TORLINK_STATE_DIR: path.join(os.tmpdir(), "torlink-test-state"),
+-    },
++    setupFiles: ["./test/setup-state.ts"],
+   },
+ });
+diff --git a/test/setup-state.ts b/test/setup-state.ts
+new file mode 100644
+index 0000000..212584f
+--- /dev/null
++++ b/test/setup-state.ts
+@@ -0,0 +1,6 @@
++// Every test file has its own real state root. Concurrent workers must never share .tmp files.
++// Leave deletion until the runner exits: background engine teardown may still finish metadata I/O.
++import { mkdtempSync } from "node:fs";
++import os from "node:os";
++import path from "node:path";
++process.env.TORLINK_STATE_DIR = mkdtempSync(path.join(os.tmpdir(), "hoardarr-torlink-test-"));
+diff --git a/src/download/persist.metadata-crash.test.ts b/src/download/persist.metadata-crash.test.ts
+new file mode 100644
+index 0000000..494f2d8
+--- /dev/null
++++ b/src/download/persist.metadata-crash.test.ts
+@@ -0,0 +1,19 @@
++import { describe, it, expect } from "vitest";
++import { mkdtempSync, readFileSync, rmSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { spawnSync } from "node:child_process";
++
++describe("acknowledged torrent metadata", () => {
++  it("survives immediate process exit without waiting for a detached write", () => {
++    const root = mkdtempSync(join(tmpdir(), "torlink-metadata-ack-"));
++    try {
++      const id = "a".repeat(40), payload = "resume-metadata-before-ack";
++      const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e",
++        `import { saveTorrentMeta } from './src/download/persist.ts'; saveTorrentMeta('${id}', Buffer.from('${payload}')); process.exit(88);`],
++        { cwd: process.cwd(), env: { ...process.env, TORLINK_STATE_DIR: root }, encoding: "utf8" });
++      expect(result.status, result.stderr).toBe(88);
++      expect(readFileSync(join(root, "data/torrents", id + ".torrent"), "utf8")).toBe(payload);
++    } finally { rmSync(root, { recursive: true, force: true }); }
++  });
++});

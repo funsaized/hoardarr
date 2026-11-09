@@ -1,5 +1,5 @@
 /** Wait for the Torlink HTTP server to accept requests after systemd starts it. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 
 const TIMEOUT_MS = 10_000;
 const POLL_MS = 250;

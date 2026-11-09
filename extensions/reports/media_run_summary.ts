@@ -1,5 +1,5 @@
 /** Hoardarr unified media workflow summary report (movies + episodes). @module */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 
 const REPORT_NAME = "hoardarr/media-run-summary";
 const TMDB = "@keeb/tmdb-lookup",

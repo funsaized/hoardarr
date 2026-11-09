@@ -18,7 +18,7 @@
  *
  * @module
  */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 
 // --- Pure helpers (mirrors of base internals — bundled sources are not importable) ---
 

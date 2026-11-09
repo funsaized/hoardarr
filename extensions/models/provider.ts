@@ -1,7 +1,7 @@
 /** Dispatch one provider capability through Swamp, retaining fresh per-item evidence. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 import { DescriptorSchema } from "./_lib/contracts.ts";
-import { assertLease, type Runtime } from "./_lib/runtime.ts";
+import { assertLease, recordExternalIntent, type Runtime } from "./_lib/runtime.ts";
 const Globals = z.object({ definition: z.string(), descriptor: DescriptorSchema });
 const Args = z.object({
   owner: z.uuid(),
@@ -12,7 +12,12 @@ const Args = z.object({
 /** Swamp behavior implementing provider operations. */
 export const model = {
   type: "@funsaized/hoardarr/provider",
-  version: "2026.11.05.1",
+  version: "2026.11.09.1",
+  upgrades: [{
+    toVersion: "2026.11.09.1",
+    description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }],
   globalArguments: Globals,
   resources: {
     result: {
@@ -41,6 +46,13 @@ export const model = {
         await assertLease(ctx.repoDir, args.owner);
         const method = ctx.globalArgs.descriptor.methods[args.operation];
         if (!method) throw new Error(`Unsupported operation: ${args.operation}`);
+        if (["add", "control", "stage", "deliver", "cleanup"].includes(args.operation)) {
+          await recordExternalIntent(
+            ctx.repoDir,
+            args.owner,
+            `${ctx.globalArgs.definition}.${method}`,
+          );
+        }
         const before = new Map(
           (await ctx.readModelData(ctx.globalArgs.definition)).map((r) => [r.name, r.version]),
         );

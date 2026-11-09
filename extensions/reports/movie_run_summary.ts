@@ -1,5 +1,5 @@
 /** Hoardarr movie workflow summary report. @module */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 
 const REPORT_NAME = "hoardarr/movie-run-summary";
 

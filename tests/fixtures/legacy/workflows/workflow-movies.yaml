@@ -792,7 +792,7 @@ jobs:
             timeoutSec: 60
             script: |
               set -eu
-              root='/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'
+              root='/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'
               id='${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}'
               mkdir -p "$root/.hoardarr-staging/$id"
         dependsOn:
@@ -809,8 +809,8 @@ jobs:
           methodName: copy
           inputs:
             hosts: name:mini
-            src: '/home/saiguy/Downloads/hoardarr/movies/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/'
-            dst: '/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/.hoardarr-staging/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/'
+            src: '/home/media/Downloads/hoardarr/movies/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/'
+            dst: '/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/.hoardarr-staging/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/'
             direction: to
             recursive: true
             useRsync: true
@@ -833,7 +833,7 @@ jobs:
             timeoutSec: 3600
             script: |
               set -eu
-              root='/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'
+              root='/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'
               id='${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}'
               expected='${{ data.latest("media-files", "manifest-" + string(data.latest("movie-catalog", "plan-current").attributes.transferReady[0])).attributes.aggregateSha256 }}'
               stage="$root/.hoardarr-staging/$id"
@@ -894,8 +894,8 @@ jobs:
                 .map(movie, {
                   "tmdbId": movie.tmdbId,
                   "to": "transferred",
-                  "localPath": "/home/saiguy/Downloads/hoardarr/movies/" + string(movie.tmdbId),
-                  "remotePath": "/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/" + string(movie.tmdbId),
+                  "localPath": "/home/media/Downloads/hoardarr/movies/" + string(movie.tmdbId),
+                  "remotePath": "/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/" + string(movie.tmdbId),
                   "bytes": data.latest("media-files", "manifest-" + string(movie.tmdbId)).attributes.totalBytes,
                   "sha256": data.latest("media-files", "manifest-" + string(movie.tmdbId)).attributes.aggregateSha256,
                   "transferredAt": run.startedAt

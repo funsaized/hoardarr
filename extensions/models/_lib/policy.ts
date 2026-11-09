@@ -1,5 +1,5 @@
 /** Versioned deterministic media policy, shared by both catalogs. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 
 export const PolicySchema = z.object({
   version: z.literal(1).default(1),

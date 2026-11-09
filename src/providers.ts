@@ -7,6 +7,14 @@ import type { Config } from "./config.ts";
 
 export const builtins: Descriptor[] = [
   {
+    id: "guest-nordvpn",
+    roles: ["network"],
+    type: "hoardarr/network-session",
+    version: "2026.11.09.1",
+    capabilities: ["guest-readiness"],
+    methods: { inspect: "inspect-guest", assertReady: "assert-guest" },
+  },
+  {
     id: "torlink",
     roles: ["search", "downloader"],
     type: "@funsaized/torlink",
@@ -15,6 +23,7 @@ export const builtins: Descriptor[] = [
     methods: {
       search: "search",
       health: "health",
+      network: "network",
       add: "add",
       sync: "sync",
       wait: "wait",
@@ -33,7 +42,7 @@ export const builtins: Descriptor[] = [
     id: "local",
     roles: ["destination"],
     type: "@funsaized/hoardarr/local-destination",
-    version: "2026.11.05.1",
+    version: "2026.11.09.1",
     capabilities: ["verified-receipt", "local-payload"],
     methods: { deliver: "deliver" },
   },
@@ -41,7 +50,7 @@ export const builtins: Descriptor[] = [
     id: "ssh",
     roles: ["destination"],
     type: "@funsaized/hoardarr/ssh-destination",
-    version: "2026.11.05.1",
+    version: "2026.11.09.1",
     capabilities: ["verified-receipt", "local-payload"],
     methods: { deliver: "deliver" },
   },
@@ -49,7 +58,7 @@ export const builtins: Descriptor[] = [
     id: "nordvpn",
     roles: ["network"],
     type: "hoardarr/network-session",
-    version: "2026.08.28.6",
+    version: "2026.11.09.1",
     capabilities: ["host-transition"],
     methods: {
       inspect: "inspect",
@@ -62,7 +71,7 @@ export const builtins: Descriptor[] = [
     id: "gluetun",
     roles: ["network"],
     type: "@funsaized/hoardarr/gluetun-environment",
-    version: "2026.11.05.1",
+    version: "2026.11.09.1",
     capabilities: ["isolated-network"],
     methods: {
       inspect: "inspect",
@@ -75,7 +84,7 @@ export const builtins: Descriptor[] = [
     id: "fixture",
     roles: ["discovery", "search", "downloader", "network"],
     type: "@funsaized/hoardarr/fixture",
-    version: "2026.11.05.1",
+    version: "2026.11.09.1",
     capabilities: ["torrent", "seed-time", "local-payload", "offline"],
     methods: {
       movies: "movies",

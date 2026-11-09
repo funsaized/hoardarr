@@ -1,5 +1,6 @@
 /** User-owned configuration. Generated Swamp definitions are an implementation detail. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
+import { StorageSchema } from "../extensions/models/_lib/storage.ts";
 import { parse, stringify } from "npm:yaml@2.8.1";
 import { episodePolicy, moviePolicy, PolicySchema } from "../extensions/models/_lib/policy.ts";
 
@@ -11,8 +12,21 @@ const binding = z.string().regex(/^[a-z][a-z0-9-]*$/);
 const credential = z.string().regex(/^\$\{\{ vault\.get\("[\w-]+", "[\w-]+"\) \}\}$/);
 
 export const ConfigSchema = z.object({
-  schemaVersion: z.literal(1),
-  profile: z.enum(["systemd-nordvpn-ssh", "compose-vpn-local", "demo"]),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
+  profile: z.enum(["systemd-nordvpn-ssh", "compose-vpn-local", "demo", "devvm-nordvpn-local"]),
+  guest: z.object({
+    installationId: z.uuid(),
+    projectRoot: absolutePath,
+    repoRoot: absolutePath,
+    purpose: z.enum(["qualification", "production"]),
+    user: z.string().regex(/^[a-z_][a-z0-9_-]*$/),
+    uid: z.number().int().positive(),
+    gid: z.number().int().positive(),
+    home: absolutePath,
+    storage: StorageSchema,
+    vpnInterface: z.enum(["nordlynx", "nordtun"]),
+    vpnProtocol: z.enum(["NORDLYNX", "OPENVPN_TCP"]),
+  }).strict().optional(),
   paths: z.object({ staging: absolutePath, state: absolutePath, library: absolutePath }).strict(),
   providers: z.object({
     discovery: binding.default("tmdb"),
@@ -81,6 +95,63 @@ export const ConfigSchema = z.object({
     episodes: absolutePath,
   }).strict().optional(),
 }).strict().superRefine((c, ctx) => {
+  const native = c.profile === "devvm-nordvpn-local";
+  if (
+    (native && (c.schemaVersion !== 2 || !c.guest)) ||
+    (!native && (c.schemaVersion !== 1 || c.guest))
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Native profile requires explicit schema v2 guest settings; v1 profiles remain v1",
+    });
+  }
+  if (native && c.guest) {
+    const g = c.guest, p = g.projectRoot;
+    if (g.repoRoot === p || g.repoRoot.startsWith(p + "/")) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Rebuildable Swamp checkout must be on guest-native storage, outside the project share",
+      });
+    }
+    if (
+      c.host || c.ssh || c.providers.network !== "guest-nordvpn" ||
+      c.providers.destination !== "local" ||
+      c.providers.downloader !== "torlink" || c.torlink.interface !== g.vpnInterface ||
+      c.torlink.binary !== "/opt/torlink/dist/cli.cjs" ||
+      g.home !== `${p}/runtime-home` || c.paths.staging !== `${p}/downloads` ||
+      c.paths.state !== `${p}/state/torlink` || c.paths.library !== `${p}/library` ||
+      g.storage.installationId !== g.installationId
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Native profile requires local providers, bound Torlink and explicit durable guest layout",
+      });
+    }
+    if ((g.vpnProtocol === "NORDLYNX") !== (g.vpnInterface === "nordlynx")) {
+      ctx.addIssue({
+        code: "custom",
+        message: "VPN interface must match the selected vendor protocol",
+      });
+    }
+    const expected = [
+      `${p}/instance`,
+      c.paths.staging,
+      c.paths.state,
+      c.paths.library,
+      g.home,
+      `${p}/state/maintenance`,
+      `${p}/secrets`,
+    ].sort();
+    if (JSON.stringify(g.storage.roots.map((r) => r.path).sort()) !== JSON.stringify(expected)) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Storage identities must cover every native state, payload, credential and maintenance root",
+      });
+    }
+  }
   if (
     c.providers.downloader === "torlink" &&
     !["127.0.0.1", "localhost", "[::1]"].includes(new URL(c.torlink.baseUrl).hostname)
@@ -98,11 +169,20 @@ export const ConfigSchema = z.object({
       message: "The systemd profile needs host and ssh configuration",
     });
   }
-  const roots = [c.paths.staging.replace(/\/+$/, ""), c.paths.library.replace(/\/+$/, "")];
-  if (
-    roots[0] === roots[1] || roots[0].startsWith(roots[1] + "/") ||
-    roots[1].startsWith(roots[0] + "/")
-  ) ctx.addIssue({ code: "custom", message: "Staging and library roots must be separate" });
+  const roots = Object.values(c.paths).map((p) => p.replace(/\/+$/, ""));
+  for (let a = 0; a < roots.length; a++) {
+    for (let b = a + 1; b < roots.length; b++) {
+      if (
+        roots[a] === roots[b] || roots[a].startsWith(roots[b] + "/") ||
+        roots[b].startsWith(roots[a] + "/")
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Staging, state and library roots must be separate",
+        });
+      }
+    }
+  }
   if (c.profile === "compose-vpn-local" && c.providers.network !== "gluetun") {
     ctx.addIssue({
       code: "custom",

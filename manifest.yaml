@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: '@funsaized/hoardarr'
-version: 2026.11.05.1
+version: 2026.11.09.1
 description: Recoverable movie and TV automation with configurable Swamp providers
 license: MIT
 repository: https://github.com/funsaized/hoardarr
@@ -12,13 +12,33 @@ models:
   - ssh_destination.ts
   - gluetun_environment.ts
   - fixture_provider.ts
+  - public_network_session.ts
+  - public_guest_network.ts
+  - torlink_migration.ts
+  - public_movie_catalog.ts
+  - public_episode_catalog.ts
+  - public_media_files.ts
 reports:
   - portable_run_summary.ts
+  - migration_comparison.ts
 include:
+  - _lib/network_session_definition.ts
+  - _lib/movie_catalog_definition.ts
+  - _lib/episode_catalog_definition.ts
+  - _lib/media_files_definition.ts
+  - guest_network.ts
   - _lib/contracts.ts
   - _lib/runtime.ts
   - _lib/policy.ts
   - _lib/media_paths.ts
+  - _lib/durable.ts
+  - _lib/storage.ts
+  - _lib/migration.ts
+  - _lib/migration_actions.ts
+  - _lib/torlink_state.ts
+  - _lib/torrent_identity.ts
+  - _lib/guest.ts
+  - _lib/socket.ts
 additionalFiles:
   - README.md
   - LICENSE

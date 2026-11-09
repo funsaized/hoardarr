@@ -255,20 +255,20 @@ Deno.test("movie-transfer preserves the original Mac Movies semantics and path",
   const copy = step("copy-payload", movieJobStart);
   assert(
     copy.includes(
-      'src: \'/home/saiguy/Downloads/hoardarr/movies/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/\'',
+      'src: \'/home/media/Downloads/hoardarr/movies/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/\'',
     ),
-    "movie src must use the original /home/saiguy/Downloads/hoardarr/movies/<id> path",
+    "movie src must use the original /home/media/Downloads/hoardarr/movies/<id> path",
   );
   assert(
     copy.includes(
-      'dst: \'/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/.hoardarr-staging/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/\'',
+      'dst: \'/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/.hoardarr-staging/${{ data.latest("movie-catalog", "plan-current").attributes.transferReady[0] }}/\'',
     ),
     "movie dst must use the original iCloud Movies staging path",
   );
   const verify = step("verify-and-promote", movieJobStart);
   assert(
     verify.includes(
-      "root='/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'",
+      "root='/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies'",
     ),
     "movie verify-and-promote must use the Movies Mac root",
   );
@@ -281,12 +281,12 @@ Deno.test("movie-transfer preserves the original Mac Movies semantics and path",
   assert(verify.includes("timeoutSec: 3600"), "verify-and-promote must allow one hour");
   const transferred = step("mark-transferred", movieJobStart);
   assert(
-    transferred.includes('"/home/saiguy/Downloads/hoardarr/movies/" + string(movie.tmdbId)'),
+    transferred.includes('"/home/media/Downloads/hoardarr/movies/" + string(movie.tmdbId)'),
     "movie mark-transferred must record the original localPath",
   );
   assert(
     transferred.includes(
-      '"/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/" + string(movie.tmdbId)',
+      '"/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies/" + string(movie.tmdbId)',
     ),
     "movie mark-transferred must record the original remotePath",
   );
@@ -314,24 +314,24 @@ Deno.test("episode-transfer targets the iCloud TV root with e-<id> naming", () =
   assert(manifest.includes("mediaKind: episode"), "episode manifest must pass mediaKind=episode");
   const prepare = step("prepare-remote", epJobStart);
   assert(
-    prepare.includes("root='/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/TV'"),
+    prepare.includes("root='/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/TV'"),
     "episode prepare-remote must use the TV Mac root",
   );
   assert(prepare.includes("id='e-${{"), "episode prepare-remote must use the e-<id> remote id");
   const copy = step("copy-payload", epJobStart);
   assert(
-    copy.includes("src: '/home/saiguy/Downloads/hoardarr/movies/e-${{"),
-    "episode src must be /home/saiguy/Downloads/hoardarr/movies/e-<id>",
+    copy.includes("src: '/home/media/Downloads/hoardarr/movies/e-${{"),
+    "episode src must be /home/media/Downloads/hoardarr/movies/e-<id>",
   );
   assert(
     copy.includes(
-      "dst: '/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/TV/.hoardarr-staging/e-${{",
+      "dst: '/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/TV/.hoardarr-staging/e-${{",
     ),
     "episode dst must use the TV staging root with e-<id>",
   );
   const verify = step("verify-and-promote", epJobStart);
   assert(
-    verify.includes("root='/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/TV'"),
+    verify.includes("root='/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/TV'"),
     "episode verify-and-promote must use the TV Mac root",
   );
   assert(verify.includes("id='e-${{"), "episode verify-and-promote must use the e-<id> remote id");
@@ -344,13 +344,13 @@ Deno.test("episode-transfer targets the iCloud TV root with e-<id> naming", () =
   const transferred = step("mark-transferred", epJobStart);
   assert(
     transferred.includes(
-      '"/home/saiguy/Downloads/hoardarr/movies/e-" + string(episode.tmdbEpisodeId)',
+      '"/home/media/Downloads/hoardarr/movies/e-" + string(episode.tmdbEpisodeId)',
     ),
     "episode mark-transferred must record the e-<id> localPath",
   );
   assert(
     transferred.includes(
-      '"/Users/saiguy/Library/Mobile Documents/com~apple~CloudDocs/Media/TV/e-" + string(episode.tmdbEpisodeId)',
+      '"/Users/media/Library/Mobile Documents/com~apple~CloudDocs/Media/TV/e-" + string(episode.tmdbEpisodeId)',
     ),
     "episode mark-transferred must record the TV e-<id> remotePath",
   );
