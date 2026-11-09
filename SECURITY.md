@@ -1,26 +1,38 @@
 # Security
 
 Report vulnerabilities through the repository's private GitHub security reporting channel when it is
-available. If it is unavailable, contact the maintainer through their GitHub profile to arrange a
-private report before sending details. Do not put credentials, acquisition locators or private logs
-in a public issue.
+available. Otherwise, contact the maintainer through their GitHub profile to arrange a private
+report. Keep credentials, acquisition locators and private logs out of public issues.
 
-Hoardarr protects against accidental overlap, stale provider evidence, conflicting destination
-files, unsafe path traversal, missing native storage and application egress outside the selected VPN
-boundary. It does not treat root, a compromised VM kernel, the Docker daemon or the host
-administrator as untrusted. VPN use also does not make acquired content trustworthy.
+## Runtime boundaries
 
-Keep control APIs on loopback. Use the management transport for operations. Application containers
-run without capabilities; only the VPN gateway needs network administration privileges. Native
-application processes run as an unprivileged UID without the NordVPN control group. Root helpers
-have narrow provisioning, observation and recovery duties.
+Hoardarr checks for overlapping runs, stale provider evidence, conflicting destination files, unsafe
+paths and missing native storage. It also restricts application traffic to the selected VPN
+boundary.
 
-Use private secret files or vault prompts. Prefer scoped, expiring Swamp credentials appropriate to
-the installation. Public images contain code and dependencies, never operator credentials. Backups,
-semantic inventories and diagnostic captures are private and need access control and retention
-rules.
+Root, the Docker daemon, the host administrator and a compromised VM kernel are outside that
+boundary. Using a VPN does not make downloaded content trustworthy.
 
-Dependency pins make a build inspectable, but do not provide automatic security updates. Review
-upstream fixes, rebuild, run checks and repeat native qualification for a changed runtime. A failed
-native preflight must leave admissions closed. Avoid bypassing checks to restore availability; use
-the recovery procedures and preserve evidence of incomplete operations.
+Keep control APIs on loopback and use the management transport for operations. Application
+containers run without capabilities; only the VPN gateway needs network administration privileges.
+
+Native applications run as an unprivileged UID without the NordVPN control group. Root helpers
+handle narrowly scoped provisioning, observation and recovery tasks.
+
+## Credentials and private data
+
+Use private secret files or vault prompts. Prefer scoped, expiring Swamp credentials suited to the
+installation. Public images contain code and dependencies, never operator credentials.
+
+Backups, inventories and diagnostic captures can contain private data. Control access and set a
+retention policy for them.
+
+## Updates and recovery
+
+Pins let you inspect a build; they do not install security updates. Review upstream fixes, rebuild
+and run the checks. Repeat native qualification when the runtime changes.
+
+A failed native preflight must leave admissions closed. Use the recovery procedures and preserve
+records of incomplete work rather than bypassing the checks to restart a service.
+
+[Back to the README](README.md#reference)

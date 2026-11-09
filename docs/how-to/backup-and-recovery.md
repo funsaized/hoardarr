@@ -1,9 +1,9 @@
 # Back up, restore and recover
 
-A backup must represent stopped writers. Inhibiting new admissions does not terminate an existing
-owner. Let it finish, or inspect its failure and recover it before taking the backup.
+Take a backup only after writers have stopped. Closing admissions prevents new runs, but does not
+stop the current owner. Let it finish, or inspect its failure and recover it first.
 
-## Native host backup
+## Take a native backup
 
 After enrollment, run on the physical host:
 
@@ -12,19 +12,21 @@ python3 deploy/devvm/host-backup.py \
   --deployment "$HOME/.hoardarr-host/production-deployment.json"
 ```
 
-The helper checks the installation and recovery-key pair, inhibits admissions, stops writers,
-exports an encrypted root credential capsule, creates a complete guest snapshot, copies it to
-private host storage and verifies checksums. It preserves the recovery private key separately under
-the backup root. Review its result before reopening admissions. A backup is private even when some
-payloads are public: it includes credentials, configuration and catalog history.
+The helper checks the installation and recovery-key pair, then closes admissions and stops writers.
+It exports an encrypted root credential capsule, takes a complete guest snapshot, copies it to
+private host storage and checks its hashes.
 
-Keep another copy of the recovery key and backup manifest off the machine. A backup and its only
-recovery key on one disk do not protect against losing that disk.
+The recovery private key is saved separately under the backup root. Review the result before
+reopening admissions. Backups contain credentials, configuration and catalog history, even when the
+payloads themselves are public.
 
-## Restore into new roots
+Keep another copy of the key and backup manifest off the machine. Losing one disk must not mean
+losing both the backup and its only recovery key.
 
-Restore snapshots to new, explicit paths. Do not restore over the running project. A mapping file
-maps each snapshot label to its destination, for example:
+## Restore data into new directories
+
+Choose new, explicit paths. Do not restore over the running project. Map each snapshot label to its
+destination:
 
 ```json
 {
@@ -37,26 +39,35 @@ maps each snapshot label to its destination, for example:
 bin/hoardarr restore --snapshot /private/backup/SNAPSHOT --mapping /private/restore-mapping.json
 ```
 
-The snapshot manifest and file hashes must pass. Restore retains maintenance ownership and inhibited
-admissions. `recover-maintenance --snapshot PATH --owner UUID` verifies and releases that snapshot's
-own maintenance owner; use the UUID recorded in its manifest, not a new one. This is only the data
-restore. Rebuild the pinned guest layer, rehydrate its root credential capsule with the matching
-private key, restore its datastore mapping, and requalify before production commissioning. The
-[qualification sheet](../reference/qualification.md) lists required evidence.
+The manifest and file hashes must pass. Restore keeps maintenance ownership and admissions closed.
+Use `recover-maintenance --snapshot PATH --owner UUID` to verify and release that snapshot's owner.
+Take the UUID from its manifest rather than creating a new one.
 
-Use `migration inventory --output PATH` before and after a relocation, then
-`migration compare
---before PATH --after PATH --mapping PATH` to compare media identities, catalogs,
-receipts and payloads. These inventories are private. `migration prepare` and `migration resume`
-maintain a journal for an explicit path relocation and require a complete snapshot.
+## Rebuild the guest
+
+Restoring data is only part of recovery. Rebuild the pinned layer, rehydrate the root credential
+capsule with the matching private key, and restore the datastore mapping. Requalify before
+production commissioning. The [qualification sheet](../reference/qualification.md) lists the
+evidence required.
+
+For a relocation, save private inventories with `migration inventory --output PATH` before and
+after. Use `migration compare --before PATH --after PATH --mapping PATH` to compare media
+identities, catalogs, receipts and payloads.
+
+`migration prepare` and `migration resume` keep a journal for an explicit path relocation. Both
+require a complete snapshot.
 
 ## Recover an interrupted run
 
-Inspect the workflow report first. For native recovery, stop Swamp and Torlink writers, then use the
-protected guest operator's `recover` command. It verifies stopped writers and executes the recovery
-DAG before releasing ownership. Restart services only after its result is understood.
+Inspect its workflow report first. For native recovery, stop Swamp and Torlink writers, then call
+`recover` through the protected guest operator. It checks that writers have stopped and runs the
+recovery workflow before releasing ownership. Review the result before restarting services.
 
-An interrupted configuration transaction uses `recover-apply --journal PATH`; it is a different
-owner from a media run. Do not delete lease files or restore an old catalog over downloads created
-after that catalog snapshot. Saved journals and external side-effect records exist to resolve those
-cases.
+A configuration transaction has a different owner from a media run. Recover it with
+`recover-apply --journal PATH`.
+
+Keep lease files and journals intact. If downloads happened after a catalog snapshot, reconcile
+those effects before restoring older catalog state; the journals and outside-effect records help you
+resolve them.
+
+[Back to the README](../../README.md#reference)

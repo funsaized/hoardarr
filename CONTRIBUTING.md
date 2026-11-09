@@ -1,10 +1,15 @@
 # Contributing
 
-Start with a [demo installation](docs/tutorials/first-run.md) and the
-[architecture explanation](docs/explanation/tools.md). Changes should preserve catalog identities,
-explicit ownership, verified delivery and refusal when durable state is unavailable.
+Start with a [demo installation](docs/tutorials/first-run.md), then read the
+[architecture explanation](docs/explanation/tools.md). The [README](README.md#reference) is the main
+guide index.
 
-Run from the repository root:
+Changes must preserve catalog identities, allow one owner at a time, and verify delivery before
+cleanup. If durable state is unavailable, refuse the operation.
+
+## Run the checks
+
+From the repository root:
 
 ```sh
 deno task check
@@ -14,19 +19,24 @@ python3 tests/docs_links.py
 deno fmt --check extensions src cli tests docs README.md
 ```
 
-Tests use temporary fixture trees. Real network isolation tests run separately with Docker using
-`tests/network_isolation.sh`; they create an ephemeral WireGuard gateway and require no commercial
-VPN credentials. Native fault tests require a disposable qualification guest. Do not run them on a
-production installation.
+Tests use temporary fixture directories. Run `tests/network_isolation.sh` separately with Docker; it
+creates an ephemeral WireGuard gateway and needs no commercial VPN credentials.
 
-Follow the repository's `AGENTS.md` when working on Swamp integrations. Search existing extensions
-and behavior types before adding an integration. Keep npm/JSR dependencies explicitly versioned. Add
-a provider through its typed contract rather than wrapping a CLI in a shell behavior.
+Native fault tests need a disposable qualification guest. Do not run them on production.
 
-For a behavior change, test partial failure, retries, cancellation and resumed execution where those
-can affect external work. Keep generated catalogs, credentials, logs, packet captures and local
-configuration out of commits. Example data should use fictional users and reserved addresses.
+## Add or change a provider
 
-Explain the changed behavior and relevant validation in a pull request. New CLI options need
-reference documentation; a new operator task needs a how-to guide. Use plain language and runnable
-examples. See the [release guide](docs/how-to/release.md) for package and image publication.
+Follow `AGENTS.md` for Swamp integrations. Search existing extensions and behavior types first. Use
+the typed provider contract, and pin npm/JSR dependencies explicitly. Do not wrap a CLI in a shell
+behavior.
+
+Where a change affects outside work, test partial failure, retries, cancellation and resumed calls.
+Keep generated catalogs, credentials, logs, packet captures and local configuration out of commits.
+Use fictional users and reserved addresses in examples.
+
+## Send a change
+
+Describe the resulting behavior and the checks you ran in the pull request. Add reference docs for a
+new CLI option and a how-to guide for a new operator task. Use plain language and runnable examples.
+
+See the [release guide](docs/how-to/release.md) for package and image publication.

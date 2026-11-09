@@ -1,9 +1,11 @@
 # Operate a commissioned VM
 
-These commands assume a provisioned, qualified and commissioned production VM, with a private host
-deployment file created by `enroll-host.py`. Enrollment does not commission a guest.
+Start here once the production VM is provisioned, qualified and commissioned. `enroll-host.py` must
+also have created its private host deployment file. Enrollment alone does not commission the guest.
 
-From the source directory on the host:
+## Check or run from the host
+
+From the source directory:
 
 ```sh
 python3 deploy/devvm/host_operator.py status
@@ -12,18 +14,24 @@ python3 deploy/devvm/host_operator.py plan --refresh
 python3 deploy/devvm/host_operator.py run
 ```
 
-The wrapper selects the inventoried VM, enters its management channel, and invokes the guest's
-protected operator. It does not pass host credentials into application arguments. In a guest
-management shell, the equivalent entry point is `sudo /usr/local/sbin/hoardarr-operator`.
+| Command          | What it does                                    |
+| ---------------- | ----------------------------------------------- |
+| `status`         | Shows the catalog, effective schedule and owner |
+| `plan`           | Previews work already in the catalog            |
+| `plan --refresh` | Refreshes discovery, then previews              |
+| `run`            | Searches, downloads, delivers and cleans up     |
 
-`status` reports catalog state, effective schedule and ownership. `plan` previews saved catalog
-work; `--refresh` refreshes discovery. `run` can search, download, deliver and clean up. All require
-the appropriate admission and ownership checks.
+The wrapper chooses the VM from your inventory and calls its protected guest operator through the
+management channel. It does not put host credentials in application arguments. Inside a guest
+management shell, use `sudo /usr/local/sbin/hoardarr-operator`.
+
+Admission and ownership checks still apply to these commands.
 
 ## Change the native schedule
 
-Wait for the existing owner to finish. In the guest management shell, stop both application daemons
-before changing generated definitions. The VPN and observation sockets stay available:
+Enabling requires production commissioning and admissions open at the start. Wait for the current
+owner to finish, then stop both application daemons in the guest management shell. Leave the VPN and
+observation sockets available:
 
 ```sh
 sudo /usr/local/sbin/hoardarr-operator status
@@ -34,15 +42,17 @@ sudo systemctl start hoardarr-torlink.service hoardarr-swamp.service
 sudo /usr/local/sbin/hoardarr-operator status
 ```
 
-Enabling requires production commissioning and admissions already open at the start of the
-operation. The configuration transaction then inhibits admissions; `admit` reopens them after
-verification. Use `schedule disable` in the same stopped-writer sequence to remove the trigger. This
-changes the preserved activation record, not just the YAML default. A failure leaves the
-installation inhibited; inspect the error and saved ownership before retrying.
+The configuration transaction closes admissions. After verification, `admit` opens them again. Use
+`schedule disable` in the same sequence to remove the trigger.
 
-To change the cron expression, inhibit admissions, stop the application daemons, edit
-`P/hoardarr.yaml`, run `apply`, verify, then `admit` and start the daemons. Do not edit generated
-workflow YAML directly.
+This updates the preserved activation record, not just the YAML default. If it fails, admissions
+stay closed. Inspect the error and saved owner before retrying.
+
+## Change the cron expression
+
+Close admissions and stop the application daemons. Edit `P/hoardarr.yaml`, run `apply`, and verify
+the result. Then run `admit` and start the daemons. Edit the configuration rather than generated
+workflow YAML.
 
 ## Inspect a problem
 
@@ -54,4 +64,7 @@ python3 deploy/devvm/host_operator.py swamp report get @swamp/workflow-summary -
 
 In the guest, use `journalctl -u hoardarr-swamp -u hoardarr-torlink` privately. Reports, inventories
 and journals can contain media names, paths and acquisition locators. Redact them before sharing.
-See [backup and recovery](backup-and-recovery.md) for interrupted ownership and restore procedures.
+
+For interrupted ownership or a restore, follow [backup and recovery](backup-and-recovery.md).
+
+[Back to the README](../../README.md#reference)

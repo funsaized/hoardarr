@@ -1,7 +1,7 @@
 # Scheduling and ownership
 
-Swamp serve owns the clock. The `media` root workflow owns reconciliation. systemd keeps the guest
-and daemons available; it does not decide when to search or download.
+Swamp serve watches the clock. The `media` workflow does the media work. systemd keeps the VM and
+daemons available, but does not decide when to search or download.
 
 ```text
 cron tick / manual run
@@ -15,32 +15,46 @@ cron tick / manual run
   recover environment + release
 ```
 
-The root DAG acquires an installation owner before its child workflows run. Child calls assert that
-same owner. A schedule tick during an unfinished run cannot acquire a second owner. Ownership has no
-automatic timeout because a slow or interrupted external operation can outlive its caller.
+## One owner at a time
 
-There are three independent native controls:
+The root workflow acquires an installation owner before starting its children. Each child checks
+that same owner. A schedule tick during an unfinished run cannot acquire a second one.
 
-| Control             | Purpose                                                       |
-| ------------------- | ------------------------------------------------------------- |
-| Commissioning       | Root authorizes a particular qualified image and installation |
-| Admission           | An operator permits new media runs after maintenance checks   |
-| Schedule activation | Swamp may start automatic runs at configured cron slots       |
+There is no automatic timeout. A slow or interrupted download can outlive the caller, so elapsed
+time alone cannot prove it is safe to start again.
 
-A commissioned VM can serve diagnostics with admissions inhibited. Manual operation can be open
-while the schedule is disabled. New installations start with scheduling disabled; native
-provisioning also inhibits admissions.
+## Three separate controls
 
-Native activation lives in `P/state/maintenance/activation.json`, outside the rebuildable checkout.
-Configuration application preserves that intent. The YAML `schedule.enabled` field alone does not
-describe native activation. Changing native definitions requires stopped application writers and
-leaves admissions inhibited until verification.
+| Control             | What it allows                                        |
+| ------------------- | ----------------------------------------------------- |
+| Commissioning       | Root authorizes a qualified image and installation    |
+| Admission           | An operator permits new runs after maintenance checks |
+| Schedule activation | Swamp may start runs at the configured times          |
 
-Cron follows the serve process's local time zone. The generated trigger skips missed slots instead
-of catching up after downtime. Recovery is explicit: prove writers have stopped, inspect the report
-and journal, reconcile side effects, then release the saved owner. Deleting a lease file bypasses
-that sequence and can let two runs operate on the same files.
+A commissioned VM can serve diagnostics while admissions are closed. Manual runs can be allowed
+while scheduling is off. New installations start with scheduling disabled; native provisioning also
+closes admissions.
 
-Each reconciliation selects every ready movie and at most one ready episode for delivery. The DAG
-passes that run's delivery plan to sequential child calls, so multiple ready movies can finish in
-one run without concurrent library writers. Discovery/download batch limits still apply separately.
+## Where the schedule lives
+
+Native activation is saved in `P/state/maintenance/activation.json`, outside the rebuildable
+checkout. Applying configuration preserves that choice, so `schedule.enabled` in YAML alone does not
+tell you whether a native schedule is active.
+
+Changing native definitions requires stopped writers. Admissions remain closed until you verify and
+reopen them.
+
+Cron uses the serve process's local time zone. Missed slots are skipped rather than replayed after
+downtime.
+
+## Delivery and recovery
+
+A run selects every ready movie and at most one ready episode. Child calls use that run's delivery
+plan and run in sequence, so multiple movies can finish without concurrent library writers.
+Discovery and download batch limits apply separately.
+
+To recover, prove writers have stopped, inspect the report and journal, reconcile outside effects,
+then release the saved owner. Deleting the lease file skips those checks and can let two runs touch
+the same files.
+
+[Back to the README](../../README.md#reference)

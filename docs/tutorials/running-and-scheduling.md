@@ -1,9 +1,11 @@
 # Run on a schedule
 
-Use the demo from [the first lesson](first-run.md). This lets you observe the scheduler without
-starting real downloads. You need two terminals and the same Swamp credentials in both.
+Use the demo from [the first lesson](first-run.md). You can watch the scheduler without starting
+real downloads. Open two terminals with the same Swamp credentials.
 
-In `~/hoardarr-demo/hoardarr.yaml`, change the cron expression to once per minute:
+## Set a time
+
+In `~/hoardarr-demo/hoardarr.yaml`, set the cron expression to once per minute:
 
 ```yaml
 schedule:
@@ -11,41 +13,46 @@ schedule:
   cron: "* * * * *"
 ```
 
-From the source directory, enable the generated trigger:
+From the source directory, enable the trigger:
 
 ```sh
 bin/hoardarr schedule enable --dir "$HOME/hoardarr-demo"
 ```
 
-Start the server in the first terminal:
+## Start Swamp serve
+
+In the first terminal:
 
 ```sh
 swamp serve --repo-dir "$HOME/hoardarr-demo" --host 127.0.0.1 --port 9090
 ```
 
-In the second terminal, inspect workflow history after the next minute boundary:
+After the next minute boundary, check history in the second terminal:
 
 ```sh
 swamp workflow history media --repo-dir "$HOME/hoardarr-demo" --json
 bin/hoardarr status --dir "$HOME/hoardarr-demo"
 ```
 
-A scheduled run appears in history even if everything was already delivered. The root workflow uses
-`dryRun: false`, so enabling a real installation's trigger authorizes real reconciliation. The demo
-still uses fixture providers.
+You'll see a scheduled run even if everything was already delivered. The trigger uses
+`dryRun: false`, so it authorizes real work on a real installation. This demo still uses fixtures.
 
-The cron expression uses the Swamp server process's local time zone. Inspect the server environment
-when interpreting a time. The native guest launcher removes inherited `TZ`, so its OS time-zone
-configuration applies. Missed slots are skipped (`catchUp.policy: none`). A host boot service starts
-the VM; it does not schedule media work.
+Cron uses the Swamp server process's local time zone. Check its environment when interpreting a
+time. The native launcher removes inherited `TZ`, so the guest's OS time zone applies there. Missed
+slots are skipped (`catchUp.policy: none`). The host boot service only starts the VM.
 
-Turn the schedule off, then stop serve with Ctrl-C:
+## Turn it off
+
+After the current run finishes, disable the schedule. Then stop serve with Ctrl-C:
 
 ```sh
 bin/hoardarr schedule disable --dir "$HOME/hoardarr-demo"
 ```
 
-For Compose, edit `schedule.enabled` in the host-mounted configuration and apply it; that file is
-the startup source of truth. For a commissioned native VM, follow the stopped-writer procedure in
-[Operate a commissioned VM](../how-to/operate-native.md). The demo command sequence is not a
-substitute for native maintenance checks.
+Compose reads schedule settings from the host-mounted configuration at startup. Edit
+`schedule.enabled` there and apply it.
+
+A native VM needs the full [stopped-writer procedure](../how-to/operate-native.md). Use that guide
+after commissioning; the demo steps do not replace its maintenance checks.
+
+[Back to the README](../../README.md#reference)

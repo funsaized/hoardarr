@@ -1,24 +1,54 @@
 # Native qualification gates
 
-Qualification applies to an exact runtime manifest and an installation, not to a branch name or a
-successful unit-test run. Use a disposable guest with `purpose: qualification` for fault injection.
-The root commission tool refuses to treat a qualification guest as production.
+Qualification belongs to an exact runtime manifest and installation. A branch name or a passing unit
+suite is not enough. Use a disposable guest with `purpose: qualification` for fault tests; the
+commission tool will not treat it as production.
 
-| Gate                     | Required observation                                                                                                                                                                           |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| G1: reconstruction       | Pins and licenses retained; public inputs contain no private data; rebuild from retained inputs; immutable code root-owned; application environment/proxy isolation checked                    |
-| G2: network boundary     | Real Torlink traffic; tunnel loss/recovery, administrative disconnect, daemon failure, unauthenticated VPN; host proxy/relay bypass attempts; IPv4, IPv6 and DNS packet/counter evidence       |
-| G3: storage/recovery     | Root identities and missing/replaced mount refusal; durable publication; large payload hashes; abrupt process loss; overlap refusal; complete backup and restore including credential recovery |
-| G4: workflows            | Extension loading and validation; authenticated manual and scheduled synthetic acquisition, seed, detach, verified delivery, cleanup and reports                                               |
-| G5: migration            | Semantic inventories and typed mappings; rehearsal on copies; catalog/behavior/workflow identities retained; pending relocation resumes safely                                                 |
-| G6: production lifecycle | Cold cutover with previous writers fenced; production canary; unattended physical reboot; VM remake and full restore with key escrow verified                                                  |
+## G1: Rebuild the runtime
 
-`deploy/devvm/qualification` contains guarded fault probes, a synthetic torrent/webseed generator
-and a fixture search extension. It is a test kit, not a command that certifies every gate
-automatically. Fault probes intentionally manipulate networking inside a disposable guest. Keep
-their output private.
+Retain the pins and licenses. Check that public inputs contain no private data and rebuild from
+those retained inputs. Verify root ownership of immutable code, and check the application's
+environment and proxy isolation.
 
-Commissioning evidence has this structure; fill it from actual reviewed observations:
+## G2: Check the network boundary
+
+Test with real Torlink traffic. Cover tunnel loss and recovery, an administrative disconnect, daemon
+failure and an unauthenticated VPN. Attempt to bypass the tunnel through the host proxy and relay.
+Keep packet and counter evidence for IPv4, IPv6 and DNS.
+
+## G3: Check storage and recovery
+
+Verify directory identities and refusal of missing or replaced mounts. Check durable publication,
+large-payload hashes, abrupt process loss and overlap refusal. Take and restore a complete backup,
+including credential recovery.
+
+## G4: Exercise the workflows
+
+Load the extensions and validate the workflows. Run authenticated manual and scheduled synthetic
+acquisition through seeding, detachment, verified delivery and cleanup. Inspect the reports.
+
+## G5: Rehearse migration
+
+Use semantic inventories and typed path mappings. Rehearse on copies, verify catalog, behavior and
+workflow identities, and check that a pending relocation resumes safely.
+
+## G6: Test the production lifecycle
+
+Fence previous writers before a cold cutover. Run a production canary, an unattended physical
+reboot, a VM remake and a full restore. Verify key escrow as part of the restore.
+
+## Test tools
+
+`deploy/devvm/qualification` includes guarded fault probes, a synthetic torrent/webseed generator
+and a fixture search extension. These tools support the tests; they do not certify every gate
+automatically. The fault probes deliberately change guest networking. Keep their output private.
+
+Btrfs host integration tests skip on other filesystems. Container firewall tests do not qualify the
+native NordVPN boundary. Your native image still needs its own physical lifecycle checks.
+
+## Commissioning evidence
+
+Fill this structure from actual reviewed observations:
 
 ```json
 {
@@ -35,12 +65,11 @@ Commissioning evidence has this structure; fill it from actual reviewed observat
 }
 ```
 
-Root runs `hoardarr-commission commissioning --evidence PATH` only after G1–G5, and
-`hoardarr-commission production --evidence PATH` only after G1–G6. It verifies the installed
-manifest, protected runtime assets, live VPN guard, identity and inhibited admissions. Evidence is a
-root operator attestation, not a cryptographic proof that the tests were performed. Never copy
-another installation's proof or change failed/missing gates to `true` to bypass commissioning.
+Root runs `hoardarr-commission commissioning --evidence PATH` after G1 through G5, and
+`hoardarr-commission production --evidence PATH` after G1 through G6.
 
-Host-only Btrfs integration tests skip on non-Btrfs CI workspaces. Container firewall tests do not
-qualify the native NordVPN boundary. The source kit remains an advanced deployment path until your
-own image passes the physical lifecycle checks.
+The tool checks the installed manifest, protected runtime files, live VPN guard, identity and closed
+admissions. The evidence is the root operator's attestation, not cryptographic proof that the tests
+happened. Do not reuse another installation's proof or mark missing or failed checks as passed.
+
+[Back to the README](../../README.md#reference)
