@@ -33,7 +33,7 @@ type Item = z.infer<typeof WorkItem>;
 function deliveryBatch(items: Item[]): Item[] {
   return [
     ...items.filter((item) => item.mediaKind === "movie"),
-    ...items.filter((item) => item.mediaKind === "episode").slice(0, 1),
+    ...items.filter((item) => item.mediaKind === "episode"),
   ];
 }
 const WorkSchema = z.object({
@@ -195,8 +195,7 @@ export const model = {
               ).length > searchable.length ||
             all.filter((r) => r.status === "selected" && r.input).length > selected.length ||
             new Set(active.map((r) => r.infoHash)).size > 100 ||
-            new Set(stopped.map((r) => r.infoHash)).size > 100 ||
-            delivery.filter((r) => r.mediaKind === "episode").length > 1,
+            new Set(stopped.map((r) => r.infoHash)).size > 100,
           queries: searchable.map((r) => ({ key: r.key, query: r.query, category: r.category })),
           additions: selected.map((r) => ({
             key: r.key,

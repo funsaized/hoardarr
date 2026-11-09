@@ -49,9 +49,9 @@ cleanup.
 A receipt proves the filesystem copy. Copying over SSH into a cloud-synced folder does not prove the
 cloud service uploaded it.
 
-Each run delivers every ready movie in sequence, then at most one ready episode. A delivery failure
-stops that phase. Catalogs and receipts retain what a later run needs; movies still downloading wait
-until they are ready.
+Each run delivers every ready movie in sequence, then every ready episode. A delivery failure stops
+that phase. Catalogs and receipts retain what a later run needs; movies still downloading wait until
+they are ready.
 
 ## Keeping a complete backup
 

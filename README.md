@@ -97,8 +97,8 @@ details.
 | `systemd-nordvpn-ssh` | Existing host VPN and SSH delivery installations    |
 
 Native commissioning, admission and scheduling are separate controls. A newly built VM needs its own
-qualification. Each reconciliation delivers all ready movies sequentially, then at most one ready
-episode. Discovery and download batch limits apply separately.
+qualification. Each reconciliation delivers all ready movies, then all ready episodes, sequentially.
+Discovery and download batch limits apply separately.
 
 ### Releases and packages
 

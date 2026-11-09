@@ -1,7 +1,7 @@
 import { deepStrictEqual } from "node:assert";
 import { testing } from "../extensions/models/pipeline.ts";
 
-Deno.test("delivery includes every ready movie before the first episode", () => {
+Deno.test("delivery includes every ready movie followed by every ready episode", () => {
   const item = (kind: "movie" | "episode", id: number) => ({
     key: `${kind}-${id}`,
     id,
@@ -19,5 +19,5 @@ Deno.test("delivery includes every ready movie before the first episode", () => 
     item("movie", 3),
     item("episode", 4),
   ]);
-  deepStrictEqual(batch.map((row) => row.key), ["movie-2", "movie-3", "episode-1"]);
+  deepStrictEqual(batch.map((row) => row.key), ["movie-2", "movie-3", "episode-1", "episode-4"]);
 });

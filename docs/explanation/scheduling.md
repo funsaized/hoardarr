@@ -49,9 +49,9 @@ downtime.
 
 ## Delivery and recovery
 
-A run selects every ready movie and at most one ready episode. Child calls use that run's delivery
-plan and run in sequence, so multiple movies can finish without concurrent library writers.
-Discovery and download batch limits apply separately.
+A run selects every ready movie and every ready episode. Child calls use that run's delivery plan
+and run in sequence, so multiple downloads can finish without concurrent library writers. Discovery
+and download batch limits apply separately.
 
 To recover, prove writers have stopped, inspect the report and journal, reconcile outside effects,
 then release the saved owner. Deleting the lease file skips those checks and can let two runs touch

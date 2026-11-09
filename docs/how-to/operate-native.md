@@ -27,6 +27,52 @@ management shell, use `sudo /usr/local/sbin/hoardarr-operator`.
 
 Admission and ownership checks still apply to these commands.
 
+## Update code and restart
+
+A service restart reloads the installed code and generated definitions. Pulling the source on the
+host does not update `/opt/hoardarr` or the guest control checkout.
+
+Prepare the new runtime from the desired source revision using the
+[native build guide](native-devvm.md). A source change produces a new runtime manifest; complete the
+required [qualification gates](../reference/qualification.md) for that runtime before admitting
+production work. Preserve the existing installation identity, configuration and durable project data
+during the update.
+
+In the guest management shell, close admissions and inspect the current owner:
+
+```sh
+sudo /usr/local/sbin/hoardarr-operator inhibit --reason "Code update"
+sudo /usr/local/sbin/hoardarr-operator status
+```
+
+Wait for `lease` to become `null`, then stop both application services:
+
+```sh
+sudo systemctl stop hoardarr-swamp.service hoardarr-torlink.service
+sudo systemctl is-active hoardarr-swamp.service hoardarr-torlink.service
+```
+
+Both should report `inactive`. If a run was interrupted, inspect its workflow report and use the
+[recovery procedure](backup-and-recovery.md#recover-an-interrupted-run) before changing definitions.
+Keep the saved lease intact. Leave the VPN, egress guard and observation sockets available.
+
+With writers stopped, install and commission the updated native runtime. Then apply its code and
+generated workflows to the existing control checkout using the protected operator:
+
+```sh
+sudo /usr/local/sbin/hoardarr-operator apply --no-pull
+sudo /usr/local/sbin/hoardarr-operator doctor
+sudo /usr/local/sbin/hoardarr-operator admit
+sudo systemctl start hoardarr-torlink.service hoardarr-swamp.service
+sudo /usr/local/sbin/hoardarr-operator native-check
+sudo /usr/local/sbin/hoardarr-operator status
+```
+
+Run each step only after the previous step succeeds. `apply` validates the generated workflows and
+keeps admissions closed until `admit`. The existing schedule activation is preserved; starting Swamp
+resumes an enabled schedule. For an immediate manual reconciliation, run
+`sudo /usr/local/sbin/hoardarr-operator run` when no other run owns the installation.
+
 ## Change the native schedule
 
 Enabling requires production commissioning and admissions open at the start. Wait for the current

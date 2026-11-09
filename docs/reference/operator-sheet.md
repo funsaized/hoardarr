@@ -13,7 +13,7 @@ The native wrapper selects the installed guest configuration for you.
 | Manual reconciliation         | `python3 deploy/devvm/host_operator.py run`            |
 
 `plan --refresh` can contact discovery services. `run` does real acquisition and cleanup. A run can
-deliver multiple ready movies in sequence, followed by at most one ready episode.
+deliver all ready movies in sequence, followed by all ready episodes in sequence.
 
 ## Maintenance
 
