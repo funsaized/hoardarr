@@ -14,7 +14,9 @@ jobs:
           deno-version: v2.9.8
       - run: deno task check
       - run: deno task test
-      - run: deno fmt --check extensions src cli tests
+      - run: deno fmt --check extensions src cli tests docs README.md
+      - run: python3 -m unittest discover -s tests -p '*_test.py'
+      - run: python3 tests/docs_links.py
   container:
     runs-on: ubuntu-latest
     steps:
@@ -29,6 +31,6 @@ jobs:
           cache-to: type=gha,mode=max
       - run: docker run --rm hoardarr:ci help
       - run: docker run --rm hoardarr:ci init --profile compose-vpn-local --dir /tmp/installer-check
-      - run: docker run --rm --entrypoint deno hoardarr:ci task test
+      - run: docker run --rm --entrypoint deno hoardarr:ci task check
       - run: docker compose -f deploy/compose/compose.yaml config --quiet
       - run: tests/network_isolation.sh
