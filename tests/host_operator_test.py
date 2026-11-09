@@ -17,7 +17,7 @@ class HostOperator(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             deployment = root / 'deployment.json'
-            config = dict(devvm='/usr/bin/true', projectRoot=str(root), configHome=str(root),
+            config = dict(devvm=str(Path('/usr/bin/true').resolve()), projectRoot=str(root), configHome=str(root),
                           dataHome=str(root), vm='devvm-fixture-1234567890abcd')
             deployment.write_text(json.dumps(config)); deployment.chmod(0o600)
             command, env, cwd = subject.invocation(deployment, ['plan', '--refresh', '$(touch /tmp/unsafe)'])
