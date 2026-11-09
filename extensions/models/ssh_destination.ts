@@ -1,5 +1,5 @@
 /** SSH destination adapter using the installed @swamp/ssh integration. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 import { resolve } from "node:path";
 import { ReceiptSchema, type Transfer, TransferSchema } from "./_lib/contracts.ts";
 import { checkedPath, verifyTree } from "./local_destination.ts";
@@ -51,7 +51,12 @@ test "$(manifest_hash "$final")" = "$expected"
 /** Swamp behavior implementing ssh destination operations. */
 export const model = {
   type: "@funsaized/hoardarr/ssh-destination",
-  version: "2026.11.05.1",
+  version: "2026.11.09.1",
+  upgrades: [{
+    toVersion: "2026.11.09.1",
+    description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }],
   globalArguments: Globals,
   resources: {
     receipt: {

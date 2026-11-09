@@ -1,0 +1,4 @@
+# Preserve upstream license text and the context bytes of checksum-pinned patches.
+deploy/devvm/patches/*.patch -whitespace
+licenses/* -whitespace
+deploy/devvm/patches/swamp-COPYING* -whitespace

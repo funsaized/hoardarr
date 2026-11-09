@@ -1,9 +1,114 @@
 /// <reference lib="deno.ns" />
 import { type Cleanup, type Context, model, testing } from "./media_files.ts";
+import { deliverLocal } from "./local_destination.ts";
+import { payload, rejects, temporary } from "../../tests/helpers.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
+
+Deno.test("native cleanup resumes after deletion and interrupted evidence persistence using durable intent and the real receipt", () =>
+  temporary(async (root) => {
+    const transfer = await payload(root);
+    const receipt = await deliverLocal(transfer, {
+      stagingRoot: `${root}/staging`,
+      libraryRoot: `${root}/library`,
+    });
+    const { context, store, written } = makeContext({
+      stagingRoot: `${root}/staging`,
+      catalogType: "hoardarr/movie-catalog",
+      catalogId: "catalog",
+      catalogResources: [{
+        name: "catalog-movie-1",
+        value: {
+          status: "transferred",
+          remotePath: receipt.destination,
+          sha256: transfer.aggregateSha256,
+        },
+      }],
+    });
+    store.resources.set("manifest-1", {
+      specName: "manifest",
+      value: {
+        tmdbId: 1,
+        generatedAt: new Date().toISOString(),
+        stagingDir: transfer.stagingDir,
+        entries: transfer.entries,
+        totalBytes: transfer.totalBytes,
+        aggregateSha256: transfer.aggregateSha256,
+      },
+    });
+    context.globalArgs.libraryRoot = `${root}/library`;
+    context.globalArgs.journalRoot = `${root}/journal`;
+    const lookup = context.definitionRepository.findByNameGlobal;
+    context.definitionRepository.findByNameGlobal = (name) =>
+      name === "local-destination"
+        ? Promise.resolve({
+          type: "@funsaized/hoardarr/local-destination",
+          definition: { id: "destination" },
+        })
+        : lookup(name);
+    const read = context.dataRepository.getContent;
+    context.dataRepository.getContent = (type, id, name) =>
+      type === "@funsaized/hoardarr/local-destination" && id === "destination" &&
+        name === "receipt-1"
+        ? Promise.resolve(new TextEncoder().encode(JSON.stringify(receipt)))
+        : read(type, id, name);
+    const write = context.writeResource;
+    context.writeResource = (spec, name, value) => {
+      if (spec === "cleanup") throw new Error("synthetic interruption after source removal");
+      return write(spec, name, value);
+    };
+    await rejects(() => model.methods.cleanup.execute({ tmdbId: 1 }, context));
+    assert(
+      !await statExists(transfer.stagingDir),
+      "verified source was removed before interruption",
+    );
+    context.writeResource = write;
+    await model.methods.cleanup.execute({ tmdbId: 1 }, context);
+    assert(
+      written.some((w) => w.specName === "cleanup" && w.value.outcome === "absent"),
+      "retry settles only from preserved evidence",
+    );
+    await Deno.writeTextFile(`${root}/library/Movies/1/movie.mkv`, "changed!");
+    await rejects(() => model.methods.cleanup.execute({ tmdbId: 1 }, context));
+  }));
+
+Deno.test("native cleanup refuses missing payload without durable delete intent even with a valid destination", () =>
+  temporary(async (root) => {
+    const transfer = await payload(root);
+    const receipt = await deliverLocal(transfer, {
+      stagingRoot: `${root}/staging`,
+      libraryRoot: `${root}/library`,
+    });
+    const { context, store } = makeContext({
+      stagingRoot: `${root}/staging`,
+      catalogType: "hoardarr/movie-catalog",
+      catalogId: "catalog",
+      catalogResources: [{
+        name: "catalog-movie-1",
+        value: {
+          status: "transferred",
+          remotePath: receipt.destination,
+          sha256: transfer.aggregateSha256,
+        },
+      }],
+    });
+    store.resources.set("manifest-1", {
+      specName: "manifest",
+      value: {
+        tmdbId: 1,
+        generatedAt: new Date().toISOString(),
+        stagingDir: transfer.stagingDir,
+        entries: transfer.entries,
+        totalBytes: transfer.totalBytes,
+        aggregateSha256: transfer.aggregateSha256,
+      },
+    });
+    context.globalArgs.journalRoot = `${root}/journal`;
+    await Deno.rename(transfer.stagingDir, `${root}/unavailable-source`);
+    await rejects(() => model.methods.cleanup.execute({ tmdbId: 1 }, context));
+  }));
 
 Deno.test("episode payload ids are namespaced from movie ids", () => {
   assert(testing.payloadKey(42, "movie") === "42", "movie compatibility");
@@ -106,6 +211,7 @@ function makeContext(opts: FakeOptions): {
       return Promise.resolve(found ? deepClone(found.value) : null);
     },
     writeResource: (specName: string, name: string, data: Record<string, unknown>) => {
+      model.resources[specName as keyof typeof model.resources].schema.strict().parse(data);
       const result = writeResource(store, specName, name, data);
       written.push({ specName, name, value: deepClone(data) });
       return Promise.resolve(result);
@@ -602,7 +708,7 @@ Deno.test("manifest produces deterministic sorted entries and aggregate hash", a
   }
 });
 
-Deno.test("cleanup returns absent immediately and writes an absent record without manifest", async () => {
+Deno.test("cleanup refuses an absent payload without manifest and catalog authority", async () => {
   const root = await Deno.makeTempDir({ prefix: "hoardarr-cleanup-" });
   try {
     const tmdbId = 7005;
@@ -611,11 +717,17 @@ Deno.test("cleanup returns absent immediately and writes an absent record withou
       catalogType: "hoardarr/movie-catalog",
       catalogId: "cat-1",
     });
-    const result = await model.methods.cleanup.execute({ tmdbId }, context);
-    const cleanup = written.find((w) => w.specName === "cleanup");
-    assert(cleanup, "cleanup record written even when absent");
-    assert(cleanup!.value.outcome === "absent", "absent outcome");
-    assert(result.dataHandles.length === 1, "single handle returned");
+    let failed = false;
+    try {
+      await model.methods.cleanup.execute({ tmdbId }, context);
+    } catch {
+      failed = true;
+    }
+    assert(failed, "absence does not establish verified cleanup");
+    assert(
+      !written.some((w) => w.specName === "cleanup" && w.value.outcome === "absent"),
+      "no false cleanup evidence",
+    );
   } finally {
     await Deno.remove(root, { recursive: true });
   }

@@ -1,0 +1,15 @@
+[Unit]
+Description=Independent Hoardarr guest application egress guard
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target hoardarr-torlink.service hoardarr-swamp.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/hoardarr-egress-guard
+RemainAfterExit=yes
+# Deliberately no ExecStop: stopping a service must not remove traffic enforcement.
+
+[Install]
+WantedBy=multi-user.target

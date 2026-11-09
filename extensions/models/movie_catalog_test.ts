@@ -59,6 +59,7 @@ function makeContext(initial: Record<string, Record<string, unknown>> = {}): {
     modelId: "movie-catalog",
     readResource: (name: string) => Promise.resolve(store.resources.get(name) ?? null),
     writeResource: (spec: string, name: string, data: Record<string, unknown>) => {
+      model.resources[spec as keyof typeof model.resources].schema.parse(data);
       store.writes.push({ spec, name, data });
       store.resources.set(name, data);
       return Promise.resolve({ name });
@@ -181,6 +182,17 @@ Deno.test("evaluateRelease applies the deterministic policy", () => {
     assert(!result.ok, `${c.expected} should reject`);
     assert(result.reasons.includes(c.expected), `${c.expected} reason recorded`);
   }
+});
+
+Deno.test("catalog transitions retain unknown source evidence", async () => {
+  const retained = { source: { receiptVersion: 7, authority: "original-destination" } };
+  const { context, store } = makeContext({ "catalog-movie-1": { ...baseMovie(), retained } });
+  await testing.executeTransition({ transitions: [{ tmdbId: 1, to: "ignored" }] }, context);
+  assertEquals(
+    store.resources.get("catalog-movie-1")?.retained,
+    retained,
+    "source evidence must survive a catalog write",
+  );
 });
 
 Deno.test("pickBest chooses the highest-seeded acceptable release with stable tie-break", () => {
@@ -1318,27 +1330,25 @@ Deno.test("plan categorizes every actionable lifecycle state", async () => {
   assertEquals(result.dataHandles.length, 1, "one plan resource written");
 });
 
-Deno.test("malformed catalog records are logged not swallowed", async () => {
+Deno.test("malformed catalog records block planning instead of becoming empty work", async () => {
   const { context, store } = makeContext();
   store.resources.set("catalog-movie-1", baseMovie({ tmdbId: 1, status: "wanted" }));
   store.resources.set("catalog-movie-2", {
     ...baseMovie({ tmdbId: 2 }),
     title: null,
   });
-  const before = store.logs.length;
-  const movies = await (await import("./movie_catalog.ts")).testing.executePlan({}, context);
-  assertEquals(movies.dataHandles.length, 1, "plan still written");
-  const warning = store.logs
-    .slice(before)
-    .find((c) => c.level === "warning" && c.msg === "Discarded malformed catalog records");
-  assert(warning, "warning logged for malformed record");
-  const names = (warning!.props as { names: string[] }).names;
-  assert(names.includes("catalog-movie-2"), "malformed name recorded");
+  let failure = "";
+  try {
+    await (await import("./movie_catalog.ts")).testing.executePlan({}, context);
+  } catch (error) {
+    failure = String(error);
+  }
+  assert(failure.includes("catalog-movie-2"), "unreadable catalog remains an explicit error");
 });
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.11.05.1", "model version");
+  assertEquals(model.version, "2026.11.09.1", "model version");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {

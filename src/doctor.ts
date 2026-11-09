@@ -3,7 +3,10 @@ import type { Config } from "./config.ts";
 import { resolveProviders } from "./providers.ts";
 import { command, jsonCommand } from "./swamp.ts";
 import { checkedPath } from "../extensions/models/local_destination.ts";
-import { readLease } from "../extensions/models/_lib/runtime.ts";
+import { ownershipDirectory, readLease } from "../extensions/models/_lib/runtime.ts";
+import { assertCommissioned } from "./native.ts";
+import { readTorlinkState } from "./torlink_state.ts";
+import runtimePins from "../deploy/devvm/pins.json" with { type: "json" };
 
 /** Read-only preflight. Live daemon checks are opt-in because systemd starts it inside the VPN window. */
 export async function doctor(config: Config, repo: string, live = false) {
@@ -21,7 +24,10 @@ export async function doctor(config: Config, repo: string, live = false) {
   };
   await check("Swamp", async () => {
     const version = (await command(["--version"])).trim();
-    if (!/20261105\.030003\.0-sha\.363a1dad/.test(version)) {
+    const expected = config.guest
+      ? runtimePins.swamp.derivative.version
+      : runtimePins.swamp.version;
+    if (version.split(/\s+/).at(-1) !== expected) {
       throw new Error(`Untested runtime: ${version}; use the pinned release`);
     }
     return version;
@@ -116,12 +122,26 @@ export async function doctor(config: Config, repo: string, live = false) {
     });
   }
   await check("Reconciliation ownership", async () => {
-    const lease = await readLease(join(repo, ".hoardarr/lease.json"));
+    const lease = await readLease(join(await ownershipDirectory(repo), "lease.json"));
     if (lease) {
       throw new Error(`Run ${lease.owner} holds ownership; inspect active runs before recovery`);
     }
     return "Available";
   });
+  if (config.guest) {
+    await check("Native identity, commissioning and storage", async () => {
+      await assertCommissioned(config, repo);
+      return "Protected guest identity and every enrolled storage root match";
+    });
+    await check("Durable downloader state", async () => {
+      const state = await readTorlinkState(config.paths.state);
+      return `${state.queue.length} queued records, ${state.history.length} history records, ${state.seeds.length} seed records`;
+    });
+    await check("Guest VPN and egress guard", async () => {
+      await command(["model", "method", "run", "network-session", "assert-guest", "--json"], repo);
+      return "Fresh protected guest observation verified";
+    });
+  }
   if (config.profile === "systemd-nordvpn-ssh") {
     await check("Systemd and VPN prerequisites", async () => {
       await command(["model", "method", "run", "host-bootstrap", "inspect", "--json"], repo);

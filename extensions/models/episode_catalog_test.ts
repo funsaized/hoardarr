@@ -1,6 +1,17 @@
 /// <reference lib="deno.ns" />
 import { model, testing } from "./episode_catalog.ts";
 
+Deno.test("episode transitions retain unknown source evidence", async () => {
+  const retained = { source: { receiptVersion: 7, authority: "original-destination" } };
+  const { context, store } = makeContext({ "catalog-episode-1": { ...baseEpisode(), retained } });
+  await testing.executeTransition({ transitions: [{ tmdbEpisodeId: 1, to: "ignored" }] }, context);
+  assertEquals(
+    store.resources.get("catalog-episode-1")?.retained,
+    retained,
+    "source evidence must survive a catalog write",
+  );
+});
+
 type CatalogContext = Parameters<typeof testing.executeIngest>[1];
 type Episode = ReturnType<typeof testing.schemas.episode.parse>;
 type EpisodeStatus = ReturnType<typeof testing.schemas.status.parse>;
@@ -65,6 +76,7 @@ function makeContext(initial: Record<string, Record<string, unknown>> = {}): {
     },
     readResource: (name: string) => Promise.resolve(store.resources.get(name) ?? null),
     writeResource: (spec: string, name: string, data: Record<string, unknown>) => {
+      model.resources[spec as keyof typeof model.resources].schema.parse(data);
       store.writes.push({ spec, name, data });
       store.resources.set(name, data);
       return Promise.resolve({ name });
@@ -176,7 +188,7 @@ Deno.test("identity: tmdbEpisodeId must be a positive integer and instance name 
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/episode-catalog", "model type");
-  assertEquals(model.version, "2026.11.05.1", "model version");
+  assertEquals(model.version, "2026.11.09.1", "model version");
   assert("episode" in model.resources, "episode spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {

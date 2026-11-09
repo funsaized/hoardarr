@@ -1,7 +1,9 @@
 /** Import existing deployment definitions without copying secret values into configuration. */
 import { dirname, join, resolve } from "node:path";
 import { parse } from "npm:yaml@2.8.1";
-import { type Config, ConfigSchema } from "./config.ts";
+import { type Config, ConfigSchema, readConfig } from "./config.ts";
+import { assertGuestStopped, assertRecoveryCapsule, configurationPath } from "./native.ts";
+import { createSnapshot, withMaintenance } from "./maintenance.ts";
 import { ensureIdle, exists } from "./install.ts";
 import { pins } from "./install.ts";
 import { command, jsonCommand } from "./swamp.ts";
@@ -41,9 +43,7 @@ export async function importDeployment(repo: string): Promise<Config> {
     ? await Deno.readTextFile(join(repo, "workflows", await firstWorkflow(repo)))
     : "";
   const remote = workflowText.match(/\/Users\/[^'"\n]+\/Media\/Movies/)?.[0] ??
-    `/Users/${
-      transport.user ?? "saiguy"
-    }/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies`;
+    `/Users/${transport.user ?? "media"}/Library/Mobile Documents/com~apple~CloudDocs/Media/Movies`;
   return ConfigSchema.parse({
     schemaVersion: 1,
     profile: "systemd-nordvpn-ssh",
@@ -68,14 +68,14 @@ export async function importDeployment(repo: string): Promise<Config> {
       user: host.operatorUser ?? home.split("/").at(-1),
       home,
       swamp: host.swampBinary ?? `${home}/.local/bin/swamp`,
-      node: host.nodeBinary ?? `${home}/.local/share/mise/installs/node/26.7.0/bin/node`,
+      node: host.nodeBinary ?? "/usr/bin/node",
       torlinkDir: host.torlinkDir ?? dirname(dirname(binary)),
       vpnCountry: network.vpnCountry ?? "Netherlands",
       vpnCity: network.vpnCity ?? "Amsterdam",
     },
     ssh: {
-      host: hosts[0]?.name ?? network.macHost ?? "mini",
-      user: transport.user ?? "saiguy",
+      host: hosts[0]?.name ?? network.macHost ?? "library.example.invalid",
+      user: transport.user ?? "media",
       identityFile: transport.identityFile ?? `${home}/.ssh/id_ed25519`,
       knownHostsFile: transport.knownHostsFile ?? `${home}/.ssh/known_hosts`,
       movies: remote,
@@ -94,6 +94,28 @@ async function firstWorkflow(repo: string): Promise<string> {
 export async function backup(repo: string, destination: string): Promise<string> {
   repo = resolve(repo);
   destination = resolve(destination);
+  const configPath = await configurationPath(repo);
+  if (await exists(configPath)) {
+    const config = await readConfig(configPath);
+    if (config.guest) {
+      let capsuleSha = "";
+      return await withMaintenance(repo, async () => {
+        await ensureIdle(repo);
+        await assertGuestStopped(config, repo);
+        capsuleSha = await assertRecoveryCapsule(config, repo);
+      }, async () => {
+        const snapshot = await createSnapshot([
+          { label: "project", path: config.guest!.projectRoot },
+          { label: "checkout", path: repo },
+        ], destination);
+        await assertGuestStopped(config, repo);
+        if (await assertRecoveryCapsule(config, repo, Infinity) !== capsuleSha) {
+          throw new Error("Credential recovery capsule changed during backup");
+        }
+        return snapshot;
+      });
+    }
+  }
   await ensureIdle(repo);
   if (destination === repo || destination.startsWith(repo + "/")) {
     throw new Error("Backup must be outside the installation");

@@ -8,13 +8,13 @@ globalArguments:
   name: hoardarr-mac
   transport:
     kind: ssh
-    user: saiguy
+    user: media
     port: 22
     auth:
       kind: key
-    identityFile: /home/saiguy/.ssh/id_ed25519
+    identityFile: /home/media/.ssh/id_ed25519
     identitiesOnly: true
-    knownHostsFile: /home/saiguy/.ssh/known_hosts
+    knownHostsFile: /home/media/.ssh/known_hosts
     strictHostKeyChecking: 'yes'
     connectTimeoutSec: 10
     extraOptions: []
@@ -28,6 +28,6 @@ globalArguments:
         - mac
         - media
       attrs:
-        tailscaleDns: mini.tail3e3e86.ts.net
-        tailscaleIp: 100.93.185.64
+        tailscaleDns: library.example.invalid
+        tailscaleIp: 192.0.2.10
 methods: {}

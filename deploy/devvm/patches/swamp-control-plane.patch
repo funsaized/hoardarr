@@ -1,0 +1,249 @@
+diff --git i/src/infrastructure/persistence/fs_control_plane_store.ts w/src/infrastructure/persistence/fs_control_plane_store.ts
+index 226eab2..0dd5525 100644
+--- i/src/infrastructure/persistence/fs_control_plane_store.ts
++++ w/src/infrastructure/persistence/fs_control_plane_store.ts
+@@ -17,9 +17,25 @@
+ // You should have received a copy of the GNU Affero General Public License
+ // along with Swamp.  If not, see <https://www.gnu.org/licenses/>.
+ 
+-import { dirname, join } from "@std/path";
++import { dirname, isAbsolute, join } from "@std/path";
+ import type { ControlPlaneStore } from "../../domain/datastore/control_plane_store.ts";
+-import { atomicWriteFile } from "./atomic_write.ts";
++import {
++  atomicWriteFile,
++  type AtomicWriteSync,
++  writeSyncedTempFile,
++} from "./atomic_write.ts";
++
++// Hoardarr's Linux derivative: directory fsync is required, including unsupported
++// errors. Retaining empty directories avoids a concurrent delete unlinking a
++// parent after an acknowledged durable write.
++async function syncControlDirectory(path: string): Promise<void> {
++  const dir = await Deno.open(path, { read: true });
++  try {
++    await dir.sync();
++  } finally {
++    dir.close();
++  }
++}
+ import { cleanupEmptyParentDirs } from "./directory_cleanup.ts";
+ import { assertContainedPath } from "./safe_path.ts";
+ 
+@@ -33,15 +49,36 @@ export type MakeDirectory = (
+ export class FileSystemControlPlaneStore implements ControlPlaneStore {
+   readonly #rootDir: string;
+   readonly #mkdir: MakeDirectory;
++  readonly #sync: AtomicWriteSync | undefined;
+ 
+-  constructor(datastorePath: string, mkdir: MakeDirectory = Deno.mkdir) {
+-    this.#rootDir = join(datastorePath, "_control");
++  constructor(
++    datastorePath: string,
++    mkdir: MakeDirectory = Deno.mkdir,
++    sync: AtomicWriteSync | undefined =
++      Deno.env.get("SWAMP_DATASTORE_DURABLE") === "1"
++        ? { syncDirectory: syncControlDirectory }
++        : undefined,
++  ) {
++    this.#sync = sync;
++    const persistent = Deno.env.get("SWAMP_CONTROL_PLANE_DIR");
++    if (persistent !== undefined && !isAbsolute(persistent)) {
++      throw new Error("SWAMP_CONTROL_PLANE_DIR must be an absolute directory");
++    }
++    this.#rootDir = join(persistent ?? datastorePath, "_control");
+     this.#mkdir = mkdir;
+   }
+ 
+   async put(key: string, data: Uint8Array): Promise<void> {
+     const path = this.#keyToPath(key);
+-    await this.#writeInParent(path, () => atomicWriteFile(path, data));
++    await this.#writeInParent(
++      path,
++      () =>
++        atomicWriteFile(
++          path,
++          data,
++          this.#sync ? { sync: this.#sync } : undefined,
++        ),
++    );
+   }
+ 
+   async putIfAbsent(key: string, data: Uint8Array): Promise<boolean> {
+@@ -49,21 +86,29 @@ export class FileSystemControlPlaneStore implements ControlPlaneStore {
+     // Written in full beside the key, then linked into place: a hard link
+     // fails when the key exists, and a reader never sees a record half
+     // written. `list` skips the `.tmp` name.
+-    const staged = `${path}.${crypto.randomUUID()}.tmp`;
++    let staged = `${path}.${crypto.randomUUID()}.tmp`;
+     await this.#writeInParent(
+       path,
+-      () => Deno.writeFile(staged, data, { createNew: true }),
++      async () => {
++        if (this.#sync) {
++          staged = await writeSyncedTempFile(path, data, this.#sync, 0o600);
++        } else await Deno.writeFile(staged, data, { createNew: true });
++      },
+     );
+     try {
+       await Deno.link(staged, path);
++      if (this.#sync) await this.#syncParents(path);
+       return true;
+     } catch (error) {
+       if (error instanceof Deno.errors.AlreadyExists) return false;
++      // Durable mode cannot expose a partially written key through createNew.
++      if (this.#sync) throw error;
+       // A filesystem without hard links: create the key itself.
+       return await this.#createNew(path, data);
+     } finally {
+       try {
+         await Deno.remove(staged);
++        if (this.#sync) await this.#syncParents(path);
+       } catch { /* best-effort cleanup */ }
+     }
+   }
+@@ -76,8 +121,12 @@ export class FileSystemControlPlaneStore implements ControlPlaneStore {
+   ): Promise<void> {
+     for (let attempt = 1;; attempt++) {
+       try {
+-        await this.#mkdir(dirname(path), { recursive: true });
++        await this.#mkdir(dirname(path), {
++          recursive: true,
++          ...(this.#sync ? { mode: 0o700 } : {}),
++        });
+         await write();
++        if (this.#sync) await this.#syncParents(path);
+         return;
+       } catch (error) {
+         if (
+@@ -90,6 +139,16 @@ export class FileSystemControlPlaneStore implements ControlPlaneStore {
+     }
+   }
+ 
++  async #syncParents(path: string): Promise<void> {
++    let dir = dirname(path);
++    while (true) {
++      await (this.#sync!.syncDirectory ?? syncControlDirectory)(dir);
++      const parent = dirname(dir);
++      if (parent === dir) break;
++      dir = parent;
++    }
++  }
++
+   async #createNew(path: string, data: Uint8Array): Promise<boolean> {
+     try {
+       const file = await Deno.open(path, { createNew: true, write: true });
+@@ -136,7 +195,8 @@ export class FileSystemControlPlaneStore implements ControlPlaneStore {
+       }
+       throw error;
+     }
+-    await cleanupEmptyParentDirs(path, this.#rootDir);
++    if (this.#sync) await this.#syncParents(path);
++    else await cleanupEmptyParentDirs(path, this.#rootDir);
+   }
+ 
+   async list(prefix: string): Promise<string[]> {
+diff --git i/src/infrastructure/persistence/fs_control_plane_store_test.ts w/src/infrastructure/persistence/fs_control_plane_store_test.ts
+index 2fea9eb..d315035 100644
+--- i/src/infrastructure/persistence/fs_control_plane_store_test.ts
++++ w/src/infrastructure/persistence/fs_control_plane_store_test.ts
+@@ -494,3 +494,99 @@ Deno.test("FileSystemControlPlaneStore: put rejects with NotFound once a parent
+     assertEquals(await store.get("pending-runs/new"), null);
+   });
+ });
++
++Deno.test("Hoardarr durable control plane: conformance across fresh handles", async () => {
++  await withTempDir(async (dir) => {
++    await assertControlPlaneStoreConformance(() =>
++      new FileSystemControlPlaneStore(dir, Deno.mkdir, {})
++    );
++  });
++});
++
++Deno.test("Hoardarr durable control plane: file failure preserves prior token", async () => {
++  await withTempDir(async (dir) => {
++    const original = new FileSystemControlPlaneStore(dir, Deno.mkdir, {});
++    await original.put("auth/token", encoder.encode("prior"));
++    const failing = new FileSystemControlPlaneStore(dir, Deno.mkdir, {
++      syncFile: () => {
++        throw new Error("injected file sync failure");
++      },
++    });
++    await assertRejects(() =>
++      failing.put("auth/token", encoder.encode("replacement"))
++    );
++    assertEquals(decoder.decode((await original.get("auth/token"))!), "prior");
++    await assertRejects(() =>
++      failing.putIfAbsent("auth/other", encoder.encode("other"))
++    );
++    assertEquals(await original.get("auth/other"), null);
++  });
++});
++
++Deno.test("Hoardarr durable control plane: syncs the file before publishing and all parent entries", async () => {
++  await withTempDir(async (dir) => {
++    const events: string[] = [];
++    const store = new FileSystemControlPlaneStore(dir, Deno.mkdir, {
++      syncFile: async (file, paths) => {
++        assertEquals(
++          await new FileSystemControlPlaneStore(dir).get("nested/token"),
++          null,
++        );
++        events.push("file:" + paths.target);
++        await file.sync();
++      },
++      syncDirectory: async (path) => {
++        events.push("dir:" + path);
++        const handle = await Deno.open(path, { read: true });
++        try {
++          await handle.sync();
++        } finally {
++          handle.close();
++        }
++      },
++    });
++    await store.putIfAbsent("nested/token", encoder.encode("issued"));
++    assertEquals(events[0], "file:" + join(dir, "_control/nested/token"));
++    assertEquals(events.includes("dir:" + dir), true);
++    assertEquals(events.includes("dir:" + join(dir, "_control/nested")), true);
++    assertEquals(
++      decoder.decode(
++        (await new FileSystemControlPlaneStore(dir).get("nested/token"))!,
++      ),
++      "issued",
++    );
++  });
++});
++
++Deno.test("Hoardarr durable control plane: publication and deletion sync failures cannot acknowledge", async () => {
++  await withTempDir(async (dir) => {
++    const good = new FileSystemControlPlaneStore(dir, Deno.mkdir, {});
++    await good.put("auth/token", encoder.encode("prior"));
++    const failing = new FileSystemControlPlaneStore(dir, Deno.mkdir, {
++      syncDirectory: () => {
++        throw new Error("injected directory sync failure");
++      },
++    });
++    await assertRejects(() =>
++      failing.put("auth/token", encoder.encode("updated"))
++    );
++    await assertRejects(() => failing.delete("auth/token"));
++  });
++});
++
++Deno.test("Hoardarr durable control plane: unsupported hardlink cannot publish partial key", async () => {
++  await withTempDir(async (dir) => {
++    const link = Deno.link;
++    Deno.link = () => Promise.reject(new Deno.errors.NotSupported("injected"));
++    try {
++      const store = new FileSystemControlPlaneStore(dir, Deno.mkdir, {});
++      await assertRejects(() =>
++        store.putIfAbsent("auth/token", encoder.encode("issued"))
++      );
++      assertEquals(await store.get("auth/token"), null);
++      assertEquals(await store.list(""), []);
++    } finally {
++      Deno.link = link;
++    }
++  });
++});

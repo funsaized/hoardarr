@@ -1,5 +1,5 @@
 /** Weekly TMDB digital-release discovery extension for Hoardarr. @module */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const MAX_RESPONSE_BYTES = 1024 * 1024;

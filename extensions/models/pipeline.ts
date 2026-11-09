@@ -1,5 +1,5 @@
 /** Catalog-facing batch operations. Swamp workflows own phase ordering and recovery. */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 import { assertLease, invoke, type RecordData, type Runtime } from "./_lib/runtime.ts";
 import { ReceiptSchema, TransferSchema } from "./_lib/contracts.ts";
 const Globals = z.object({
@@ -10,6 +10,7 @@ const Globals = z.object({
   movieEnabled: z.boolean().default(true),
   downloadProvider: z.string().default("torlink"),
   batchLimit: z.number().int().min(1).max(100).default(100),
+  expectedInterface: z.string().optional(),
 });
 type Context = Runtime & { globalArgs: z.infer<typeof Globals> };
 type Row = Record<string, unknown>;
@@ -29,6 +30,12 @@ const WorkItem = z.object({
   input: z.string().nullable(),
 });
 type Item = z.infer<typeof WorkItem>;
+function deliveryBatch(items: Item[]): Item[] {
+  return [
+    ...items.filter((item) => item.mediaKind === "movie"),
+    ...items.filter((item) => item.mediaKind === "episode").slice(0, 1),
+  ];
+}
 const WorkSchema = z.object({
   truncated: z.boolean(),
   items: z.array(WorkItem),
@@ -85,7 +92,12 @@ async function write(ctx: Context, spec: string, data: Row) {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.05.1",
+  version: "2026.11.09.1",
+  upgrades: [{
+    toVersion: "2026.11.09.1",
+    description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }],
   globalArguments: Globals,
   resources: {
     work: resource(WorkSchema, "Current durable catalog work"),
@@ -105,6 +117,21 @@ export const model = {
         if (
           !instance?.ok || !(instance.capabilities as string[] | undefined)?.includes("seed-time")
         ) throw new Error("Downloader must be healthy and support per-item seed time");
+        if (ctx.globalArgs.expectedInterface) {
+          const network = getRecord(args.records, "network-current") as {
+            interface?: string;
+            address?: string;
+            online?: boolean;
+          } | undefined;
+          if (
+            network?.interface !== ctx.globalArgs.expectedInterface || !network.address ||
+            network.online !== true
+          ) {
+            throw new Error(
+              "Native Torlink must report the exact configured VPN binding and an online address",
+            );
+          }
+        }
         return write(ctx, "summary", { ok: true });
       },
     },
@@ -168,9 +195,7 @@ export const model = {
               ).length > searchable.length ||
             all.filter((r) => r.status === "selected" && r.input).length > selected.length ||
             new Set(active.map((r) => r.infoHash)).size > 100 ||
-            new Set(stopped.map((r) => r.infoHash)).size > 100 || delivery.filter((r) =>
-                r.mediaKind === "movie"
-              ).length > 1 ||
+            new Set(stopped.map((r) => r.infoHash)).size > 100 ||
             delivery.filter((r) => r.mediaKind === "episode").length > 1,
           queries: searchable.map((r) => ({ key: r.key, query: r.query, category: r.category })),
           additions: selected.map((r) => ({
@@ -180,10 +205,7 @@ export const model = {
           })),
           activeIds: [...new Set(active.map((r) => r.infoHash!))].slice(0, 100),
           stoppedIds: [...new Set(stopped.map((r) => r.infoHash!))].slice(0, 100),
-          deliveries: [
-            ...delivery.filter((r) => r.mediaKind === "movie").slice(0, 1),
-            ...delivery.filter((r) => r.mediaKind === "episode").slice(0, 1),
-          ],
+          deliveries: deliveryBatch(delivery),
           movieIds: movieRows.map((r) => r.tmdbId),
           episodeIds: episodeRows.map((r) => r.tmdbEpisodeId),
         });
@@ -369,4 +391,4 @@ export const model = {
   },
 };
 /** Pure helpers exposed for contract tests. */
-export const testing = { workItem };
+export const testing = { workItem, deliveryBatch };

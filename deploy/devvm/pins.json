@@ -1,0 +1,43 @@
+{
+  "platform": "linux-x86_64",
+  "devvm": {
+    "version": "0.1.0",
+    "source": "e9bd270398730bf0f7ffe44e8f78f5da323daeb7"
+  },
+  "lima": "2.3.0",
+  "ubuntu": {
+    "release": "release-20261016",
+    "image": "ubuntu-26.04-server-cloudimg-amd64.img",
+    "sha256": "5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5"
+  },
+  "swamp": {
+    "version": "20261105.030003.0-sha.363a1dad",
+    "sha256": "76dee1c4138de46aea5c530f0b84c45980b5e3b6da934a40b5e8fd32ff146ad3",
+    "source": "363a1dad37a424b7f59e3bbce366ad95a8109c00",
+    "derivative": {
+      "version": "20261105.030003.0-sha.363a1dad.hoardarr.1",
+      "sha256": "10481a004579da75928915651ca29be08b524225bcb11bd9a2b2ecd6a3034d21",
+      "sourceArchiveSha256": "08394946862f534b577fad235a9535f1b707ae6f7f5f280906b45fb5c53b7266",
+      "patch": "patches/swamp-control-plane.patch",
+      "patchSha256": "dcc68e1b5f1f5574a95e8484d7094019e0fcb53787584183ac43990d125f995c"
+    }
+  },
+  "deno": {
+    "version": "2.9.8",
+    "archiveSha256": "e890975bc2549807bbcc0b584ffafda72cc7c93349dd99c80483dd784f6c4609"
+  },
+  "node": {
+    "version": "22.21.1",
+    "archiveSha256": "680d3f30b24a7ff24b98db5e96f294c0070f8f9078df658da1bce1b9c9873c88"
+  },
+  "torlink": {
+    "version": "1.10.0",
+    "source": "c9f0ab0e90e9d02b63ecbb860d0f51722893e579",
+    "patch": "patches/torlink-durable.patch",
+    "runtimeEntrypointSha256": "ab9a7bf4cf155147556d249c3d3be40dd765294d1976ee9d78be2dbece9b90f9"
+  },
+  "nordvpn": {
+    "version": "6.0.2",
+    "debSha256": "81df7907ca8cd54e0ed08b5221dd6be2bc2aac9c47300625bf9494a8dea943e1"
+  }
+}

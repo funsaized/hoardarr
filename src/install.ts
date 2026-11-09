@@ -9,6 +9,16 @@ import { workflowDefinitions } from "./workflows.ts";
 import { command, jsonCommand, swamp } from "./swamp.ts";
 import { applyTransaction, RollbackError } from "./transaction.ts";
 import { leaseOperation, readLease } from "../extensions/models/_lib/runtime.ts";
+import { durableJson, durableRemove } from "../extensions/models/_lib/durable.ts";
+import { assertStorage } from "../extensions/models/_lib/storage.ts";
+import {
+  assertGuestContext,
+  assertGuestStopped,
+  configurationPath,
+  guestAssets,
+} from "./native.ts";
+import { inhibitAdmissions } from "./maintenance.ts";
+import { fileHash } from "../extensions/models/local_destination.ts";
 export const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const pins = {
   "@funsaized/torlink": "2026.11.05.1",
@@ -18,6 +28,17 @@ export const pins = {
   "@aaronge/systemd-panel": "2026.08.27.2",
   "@whyvez/disk-usage": "2026.05.28.1",
 };
+export function profilePins(config: Config): Record<string, string> {
+  if (config.profile === "demo") return {};
+  if (config.profile === "devvm-nordvpn-local") {
+    return Object.fromEntries(
+      Object.entries(pins).filter(([name]) =>
+        ["@funsaized/torlink", "@keeb/mms", "@whyvez/disk-usage"].includes(name)
+      ),
+    );
+  }
+  return pins;
+}
 export async function exists(path: string): Promise<boolean> {
   try {
     await Deno.lstat(path);
@@ -37,6 +58,28 @@ export async function copyTree(from: string, to: string): Promise<void> {
     ) await Deno.copyFile(join(from, entry.name), join(to, entry.name));
   }
 }
+
+/** Hydrate known public cache files; an empty directory is not an installed package. */
+async function hydratePublicTree(from: string, to: string): Promise<void> {
+  await Deno.mkdir(to, { recursive: true });
+  const directory = await Deno.lstat(to);
+  if (!directory.isDirectory || directory.isSymlink) {
+    throw new Error("Unsafe public cache directory");
+  }
+  for await (const entry of Deno.readDir(from)) {
+    const source = join(from, entry.name), target = join(to, entry.name);
+    if (entry.isSymlink) throw new Error("Unexpected symlink in public extension cache");
+    if (entry.isDirectory) await hydratePublicTree(source, target);
+    else if (entry.isFile) {
+      if (await exists(target)) {
+        const actual = await Deno.lstat(target);
+        if (
+          !actual.isFile || actual.isSymlink || await fileHash(source) !== await fileHash(target)
+        ) throw new Error(`Cached extension differs from the pinned layer: ${target}`);
+      } else await Deno.copyFile(source, target);
+    }
+  }
+}
 export async function ensureIdle(repo: string): Promise<void> {
   if (!await exists(join(repo, ".swamp.yaml"))) return;
   const state = await jsonCommand<{ runs: unknown[] }>(["run", "history", "--active"], repo);
@@ -51,31 +94,56 @@ export async function install(
   repo: string,
   options: { pull?: boolean; beforeApply?: () => Promise<unknown> } = {},
 ): Promise<void> {
+  if (config.guest) {
+    await assertGuestContext(config, repo);
+    await assertStorage(config.guest.storage);
+    await inhibitAdmissions(repo, "Configuration application awaiting verification");
+    await assertGuestStopped(config, repo);
+  }
   await ensureIdle(repo);
   const owner = crypto.randomUUID();
   await leaseOperation(repo, async (path) => {
     if (await readLease(path)) {
       throw new Error("Reconciliation ownership is held; recover before applying configuration");
     }
-    await Deno.writeTextFile(
+    await durableJson(
       path,
-      JSON.stringify({ owner, acquiredAt: new Date().toISOString() }),
-      { mode: 0o600 },
+      {
+        owner,
+        kind: "configuration",
+        acquiredAt: new Date().toISOString(),
+        ...(config.guest ? { storage: config.guest.storage } : {}),
+      },
     );
   });
   let release = true;
   try {
-    await applyTransaction(repo, async () => {
-      await options.beforeApply?.();
-      await installUnlocked(config, repo, options);
-    });
+    await applyTransaction(
+      repo,
+      async () => {
+        await options.beforeApply?.();
+        await installUnlocked(config, repo, options);
+      },
+      config.guest
+        ? {
+          owner,
+          journalRoot: `${config.guest.projectRoot}/state/maintenance/apply`,
+          externalManaged: [
+            `${config.guest.projectRoot}/instance/datastore`,
+            `${config.guest.projectRoot}/hoardarr.yaml`,
+            `${config.guest.projectRoot}/instance/checkout.json`,
+          ],
+          effectsRoot: `${config.guest.projectRoot}/state/maintenance/effects`,
+        }
+        : {},
+    );
   } catch (error) {
     release = !(error instanceof RollbackError);
     throw error;
   } finally {
     if (release) {
       await leaseOperation(repo, async (path) => {
-        if ((await readLease(path))?.owner === owner) await Deno.remove(path);
+        if ((await readLease(path))?.owner === owner) await durableRemove(path);
       });
     }
   }
@@ -92,16 +160,68 @@ async function installUnlocked(
   if (!await exists(join(repo, ".swamp.yaml"))) {
     await command(["repo", "init", repo, "--no-vault", "--tool", "none", "--json"]);
   }
+  if (config.guest) {
+    const marker = parse(await Deno.readTextFile(join(repo, ".swamp.yaml"))) as {
+      datastore?: { type?: string; path?: string; managedConfig?: boolean };
+    };
+    const path = `${config.guest.projectRoot}/instance/datastore`;
+    if (!marker.datastore) {
+      await command(["datastore", "setup", "filesystem", "--path", path, "--json"], repo);
+      await command(["datastore", "config", "migrate", "--json"], repo);
+    } else if (
+      marker.datastore.path !== path || marker.datastore.type !== "filesystem" ||
+      !marker.datastore.managedConfig
+    ) {
+      throw new Error("Native datastore mapping differs from the reviewed durable layout");
+    }
+    // Rehydrate the exact public extension installation shipped in the pinned layer.
+    // Credentials and behavior data are never part of this cache; their datastore stays on the share.
+    const cache = "/opt/hoardarr-public-extensions";
+    if (!pull && await exists(cache)) {
+      const lock = `${path}/config/upstream_extensions.json`;
+      if (!await exists(lock)) {
+        await durableJson(
+          lock,
+          JSON.parse(await Deno.readTextFile(`${cache}/upstream_extensions.json`)),
+        );
+      }
+      const cached = join(repo, ".swamp/config/pulled-extensions");
+      await hydratePublicTree(`${cache}/pulled-extensions`, cached);
+      if (await exists(`${cache}/additional-files`)) {
+        await hydratePublicTree(`${cache}/additional-files`, repo);
+      }
+    }
+  }
   if (repo !== sourceRoot) {
-    for (const directory of ["extensions", "src", "cli", "bin", "deploy", "docs", "examples"]) {
+    for (
+      const directory of [
+        "extensions",
+        "src",
+        "cli",
+        "bin",
+        "deploy",
+        "docs",
+        "examples",
+        "licenses",
+      ]
+    ) {
       await copyTree(join(sourceRoot, directory), join(repo, directory));
     }
-    for (const filename of ["manifest.yaml", "deno.json", "deno.lock", "README.md", "LICENSE"]) {
+    for (
+      const filename of [
+        "manifest.yaml",
+        "deno.json",
+        "deno.lock",
+        "README.md",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+      ]
+    ) {
       await Deno.copyFile(join(sourceRoot, filename), join(repo, filename));
     }
   }
   if (pull && config.profile !== "demo") {
-    for (const [name, version] of Object.entries(pins)) {
+    for (const [name, version] of Object.entries(profilePins(config))) {
       await command(["extension", "pull", `${name}@${version}`, "--yes", "--json"], repo);
     }
   }
@@ -148,11 +268,25 @@ async function installUnlocked(
         globalArguments: Record<string, unknown>;
         version: number;
         tags: Record<string, string>;
+        reports?: { require?: (string | { name: string; methods?: string[] })[]; skip?: string[] };
       }
     >(["model", "get", name], repo);
+    const migrationReport = "@funsaized/hoardarr/migration-comparison";
+    const reports = name === "coordinator"
+      ? {
+        ...current.reports,
+        require: [
+          ...(current.reports?.require ?? []).filter((ref) =>
+            (typeof ref === "string" ? ref : ref.name) !== migrationReport
+          ),
+          { name: migrationReport, methods: ["compareMigration"] },
+        ],
+      }
+      : current.reports;
     if (
       JSON.stringify(current.globalArguments) === JSON.stringify(globalArguments) &&
-      current.typeVersion === current.currentTypeVersion
+      current.typeVersion === current.currentTypeVersion &&
+      JSON.stringify(current.reports) === JSON.stringify(reports)
     ) return;
     await command(
       ["model", "edit", name, "--json"],
@@ -166,6 +300,7 @@ async function installUnlocked(
         tags: current.tags ?? {},
         globalArguments,
         methods: {},
+        ...(reports ? { reports } : {}),
       }),
     );
   };
@@ -183,12 +318,24 @@ async function installUnlocked(
     catalogModelName: "movie-catalog",
     episodeCatalogModelName: "episode-catalog",
     sha256Binary: "/usr/bin/sha256sum",
+    ...(config.guest
+      ? {
+        storage: config.guest.storage,
+        libraryRoot: config.paths.library,
+        journalRoot: `${config.guest.projectRoot}/state/maintenance/cleanup`,
+      }
+      : {}),
   });
-  await define("coordinator", "@funsaized/hoardarr/coordinator", {});
+  await define(
+    "coordinator",
+    "@funsaized/hoardarr/coordinator",
+    config.guest ? { storage: config.guest.storage } : {},
+  );
   await define("pipeline", "@funsaized/hoardarr/pipeline", {
     seedTime: config.download.seedTime,
     movieEnabled: config.interests.movies,
     downloadProvider: config.providers.downloader,
+    ...(config.guest ? { expectedInterface: config.guest.vpnInterface } : {}),
   });
   const actual: Record<string, string> = {};
   const defined = new Set<string>();
@@ -198,7 +345,7 @@ async function installUnlocked(
       ? "torlink"
       : id === "tmdb"
       ? "movie-discovery"
-      : id === "nordvpn"
+      : id === "nordvpn" || id === "guest-nordvpn"
       ? "network-session"
       : id === "fixture"
       ? "fixture"
@@ -218,7 +365,11 @@ async function installUnlocked(
       if (id === "tmdb") settings = { apiKey: config.tmdbKey };
       if (id === "fixture") settings = { stagingRoot: config.paths.staging };
       if (id === "local") {
-        settings = { stagingRoot: config.paths.staging, libraryRoot: config.paths.library };
+        settings = {
+          stagingRoot: config.paths.staging,
+          libraryRoot: config.paths.library,
+          ...(config.guest ? { storage: config.guest.storage } : {}),
+        };
       }
       if (id === "ssh") {
         settings = {
@@ -237,6 +388,12 @@ async function installUnlocked(
         };
       }
       if (id === "gluetun") settings = { gluetunModel: "gluetun" };
+      if (id === "guest-nordvpn") {
+        settings = {
+          guestInterface: config.guest!.vpnInterface,
+          guestProtocol: config.guest!.vpnProtocol,
+        };
+      }
       await define(name, descriptor.type, settings);
       defined.add(name);
     }
@@ -246,6 +403,7 @@ async function installUnlocked(
       { definition: name, descriptor },
     );
   }
+  if (config.guest) await guestAssets(config, repo);
   await define("files-provider", "@funsaized/hoardarr/provider", {
     definition: "media-files",
     descriptor: DescriptorSchema.parse({
@@ -253,7 +411,7 @@ async function installUnlocked(
       id: "files",
       roles: ["destination"],
       type: "hoardarr/media-files",
-      version: "2026.08.30.1",
+      version: "2026.11.09.1",
       capabilities: [],
       methods: {
         deliver: "stage",
@@ -328,7 +486,8 @@ async function installUnlocked(
     ids[name] = value.id;
     paths[name] = value.path;
   }
-  for (const workflow of workflowDefinitions(config, ids)) {
+  const effectiveConfig = await effectiveConfiguration(config);
+  for (const workflow of workflowDefinitions(effectiveConfig, ids)) {
     await Deno.writeTextFile(paths[String(workflow.name)], stringify(workflow));
   }
   // Retain the old manual name and UUID, but route it through the same exclusion boundary.
@@ -373,15 +532,25 @@ async function installUnlocked(
       "local_encryption",
       "hoardarr",
       "--config",
-      JSON.stringify({ auto_generate: true, base_dir: repo }),
+      JSON.stringify({
+        auto_generate: true,
+        base_dir: config.guest ? `${config.guest.projectRoot}/secrets/vault` : repo,
+      }),
       "--json",
     ], repo);
   }
   for (const path of Object.values(config.paths)) await Deno.mkdir(path, { recursive: true });
-  await Deno.writeTextFile(join(repo, "hoardarr.yaml"), encodeConfig(config), { mode: 0o600 });
+  await Deno.writeTextFile(await configurationPath(repo), encodeConfig(config), { mode: 0o600 });
   await command(["workflow", "validate", "media", "--json"], repo);
   for (const name of Object.keys(ids).filter((n) => n !== "media")) {
     await command(["workflow", "validate", name, "--json"], repo);
+  }
+  if (config.guest) {
+    // Preserve Swamp's assigned repository identity and external datastore mapping for a fresh disk.
+    await durableJson(
+      `${config.guest.projectRoot}/instance/checkout.json`,
+      parse(await Deno.readTextFile(join(repo, ".swamp.yaml"))),
+    );
   }
 }
 
@@ -422,4 +591,24 @@ export async function systemdAssets(c: Config, repo: string): Promise<void> {
       argument(repo)
     } --host 127.0.0.1 --port 9090\nRestart=on-failure\nRestartSec=5\n[Install]\nWantedBy=default.target\n`,
   );
+}
+
+/** Resolve native activation from preserved state, including for operator status. */
+export async function effectiveConfiguration(config: Config): Promise<Config> {
+  if (config.guest) {
+    const activationPath = `${config.guest.projectRoot}/state/maintenance/activation.json`;
+    let enabled = false;
+    try {
+      const activation = JSON.parse(await Deno.readTextFile(activationPath));
+      if (
+        typeof activation.enabled !== "boolean" ||
+        activation.installationId !== config.guest.installationId
+      ) throw new Error("Invalid native activation record");
+      enabled = activation.enabled;
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+    return { ...config, schedule: { ...config.schedule, enabled } };
+  }
+  return config;
 }

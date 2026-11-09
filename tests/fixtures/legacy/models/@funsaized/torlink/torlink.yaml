@@ -5,7 +5,7 @@ name: torlink
 version: 1
 tags: {}
 globalArguments:
-  binary: /home/saiguy/Projects/torlink/dist/cli.cjs
+  binary: /home/media/Projects/torlink/dist/cli.cjs
   baseUrl: 'http://127.0.0.1:9161'
   allowInsecureRemote: false
 methods: {}

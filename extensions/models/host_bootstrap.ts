@@ -1,19 +1,21 @@
 /** Idempotent local host bootstrap for Hoardarr. @module */
-import { z } from "npm:zod@4";
+import { z } from "npm:zod@4.5.1";
 import { resolve } from "node:path";
 
 const VERSION = "2026.11.06.1";
 const UNITS = ["hoardarr-swamp.service", "torlink.service"] as const;
+const home = Deno.env.get("HOME") ?? "/nonexistent";
+const operator = Deno.env.get("USER") ?? "media";
 const CONFIG = {
   assetsDir: "assets/systemd",
-  unitDir: "/home/saiguy/.config/systemd/user",
-  stateDir: "/home/saiguy/.local/state/hoardarr/torlink",
-  stagingDir: "/home/saiguy/Downloads/hoardarr/movies",
-  torlinkDir: "/home/saiguy/Projects/torlink",
-  operatorUser: "saiguy",
-  swampBinary: "/home/saiguy/.local/bin/swamp",
-  nodeBinary: "/home/saiguy/.local/share/mise/installs/node/26.7.0/bin/node",
-  torlinkBinary: "/home/saiguy/Projects/torlink/dist/cli.cjs",
+  unitDir: `${home}/.config/systemd/user`,
+  stateDir: `${home}/.local/state/hoardarr/torlink`,
+  stagingDir: `${home}/Downloads/hoardarr/movies`,
+  torlinkDir: `${home}/Projects/torlink`,
+  operatorUser: operator,
+  swampBinary: `${home}/.local/bin/swamp`,
+  nodeBinary: "/usr/bin/node",
+  torlinkBinary: `${home}/Projects/torlink/dist/cli.cjs`,
   nordvpnBinary: "/usr/bin/nordvpn",
   tailscaleBinary: "/usr/bin/tailscale",
   sshBinary: "/usr/bin/ssh",

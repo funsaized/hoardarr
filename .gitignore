@@ -25,3 +25,9 @@ node_modules/
 /payload/
 /instance/
 /runtime-home/
+
+# Local Python caches and private qualification evidence
+__pycache__/
+*.py[cod]
+/deploy/devvm/qualification/results/
+*.pcap
