@@ -1,107 +1,73 @@
 # Hoardarr
 
-Recoverable movie and TV automation built on [Swamp](https://github.com/swamp-club/swamp).
-Hoardarr discovers releases, applies configurable selection rules, downloads through
-Torlink, and delivers checksum-verified files to a local library or an SSH host.
-Use it with content you are authorized to download.
+Hoardarr runs recoverable movie and TV workflows with [Swamp](https://github.com/swamp-club/swamp).
+It discovers candidates, selects releases, tracks downloads and seeding, copies completed files to a
+library, verifies their contents, and then cleans up staging files. Providers are replaceable Swamp
+behaviors. Catalog state survives interrupted runs.
 
-Configuration lives in `hoardarr.yaml`. Historical deployment definitions are kept under `tests/fixtures/legacy` for regression tests.
-Catalogs, credentials, and runtime state belong
-to your installation directory. Upgrading application code does not replace them.
-
-## Try the demo
-
-Install Swamp using its [official instructions](https://github.com/swamp-club/swamp)
-and run `swamp auth login`. Swamp authentication is required, including for fixture
-workflows. Linux x86-64 is the initial supported platform.
+Start with the [offline demo](docs/tutorials/first-run.md). It writes small text fixtures and needs
+no VPN, media account or torrents. Swamp authentication is required.
 
 ```sh
 git clone https://github.com/funsaized/hoardarr.git
 cd hoardarr
+swamp auth login
 bin/hoardarr init --profile demo --dir "$HOME/hoardarr-demo"
-bin/hoardarr doctor --dir "$HOME/hoardarr-demo"
-bin/hoardarr plan --dir "$HOME/hoardarr-demo"
 bin/hoardarr run --dir "$HOME/hoardarr-demo"
 bin/hoardarr status --dir "$HOME/hoardarr-demo"
 ```
 
-The demo uses synthetic metadata and a harmless text payload named `movie.mkv`.
-It exercises native Swamp workflows through discovery, selection, acquisition,
-verified delivery, and source cleanup. Run it again to check idempotence. It uses
-no torrent service or host VPN changes. Output appears under
-`$HOME/hoardarr-demo/payload/library/Movies/1`.
+Install Deno and Swamp first; see [requirements](docs/reference/compatibility.md). The CLI is a Deno
+application, not an npm package.
 
-The launcher uses Swamp's bundled Deno, or `deno` on PATH. The tested matrix is
-Swamp `20261105.030003.0-sha.363a1dad`, Deno `2.9.8`, Torlink commit
-`c9f0ab0e90e9d02b63ecbb860d0f51722893e579`, and swamp-torlink `2026.11.05.1`.
-Container builds pin Node `22.21.1` and Gluetun `3.41.3`.
-
-## Choose an installation
-
-| Profile | Network | Destination | Guide |
-| --- | --- | --- | --- |
-| `demo` | Fixture operations | Local directory | Commands above |
-| `compose-vpn-local` | Torlink and search share Gluetun's VPN namespace | Local or mounted NAS library | [Container installation](docs/container.md) |
-| `systemd-nordvpn-ssh` | Host NordVPN/Tailscale transitions | Verified SSH copy | [Migration](docs/migration.md) |
-
-Schedules start disabled. A local destination must be a filesystem mount visible
-inside Hoardarr; object storage and remote downloaders without a supported payload
-mapping are outside this release. iCloud upload is asynchronous: the SSH receipt
-confirms the remote filesystem copy, not cloud upload completion.
-
-## Operate
-
-```sh
-bin/hoardarr plan --dir /path/to/instance          # existing catalog only
-bin/hoardarr plan --refresh --dir /path/to/instance # explicitly refresh discovery
-bin/hoardarr run --dir /path/to/instance
-bin/hoardarr status --dir /path/to/instance
-bin/hoardarr recover --dir /path/to/instance
-bin/hoardarr schedule enable --dir /path/to/instance
-bin/hoardarr schedule disable --dir /path/to/instance
-bin/hoardarr upgrade --dir /path/to/instance
+```text
+                     Swamp serve
+                   clock / manual run
+                          |
+                   ownership + preflight
+                          |
+discovery -> catalog -> search -> download -> seed -> detach
+                          |                            |
+                      durable state             copy + SHA-256
+                                                       |
+                                                 library receipt
+                                                       |
+                                                 staging cleanup
 ```
 
-`plan` does not acquire, transfer, or delete media. `--refresh` updates discovery
-and catalog metadata. `run` performs the configured external operations and removes
-local payloads only after verified delivery. `schedule enable` writes the Swamp
-schedule; a running `swamp serve` process is needed to execute it. Times use Swamp's
-cron interpretation. Set the host/container timezone deliberately.
+Choose a deployment:
 
-A single installation lease excludes overlapping reconciliations. It never expires
-automatically. After a crash, inspect the Swamp report, ensure no worker is still
-active, then use `recover`. Recovery restores the network environment before releasing
-the lease; the next run reconciles catalog progress. Do not delete the lease file.
+| Profile               | Use                                                       | Status                                                               |
+| --------------------- | --------------------------------------------------------- | -------------------------------------------------------------------- |
+| `demo`                | Learn the complete flow with harmless fixtures            | Start here                                                           |
+| `compose-vpn-local`   | Run Torlink and Hoardarr inside Gluetun's VPN namespace   | General Linux container path                                         |
+| `devvm-nordvpn-local` | Keep host networking separate from a native NordVPN guest | Advanced Linux x86-64/Btrfs source kit; requires local qualification |
+| `systemd-nordvpn-ssh` | Import an existing host VPN and SSH delivery installation | Legacy migration path                                                |
 
-## Configure and extend
+Fresh schedules are disabled. Native VM commissioning and admission are separate from scheduling. A
+new VM build does not inherit another installation's qualification.
 
-Edit the generated configuration, then run `apply`. The schema rejects unknown
-settings. Paths are absolute, staging and library roots must be separate, and
-credentials use Swamp vault references. Provider roles are discovery, search,
-downloader, destination, and network. Movie and episode policies configure
-resolution, size limits, seeders, and ranking; media eligibility precedes ranking.
+[Read the docs](docs/README.md) for tutorials, task guides, explanations of networking/storage/
+scheduling/tools, and an [operator sheet](docs/reference/operator-sheet.md).
 
-- [Provider contracts and example](docs/providers.md)
-- [Configuration and recovery design](docs/architecture.md)
-- [Migration and rollback](docs/migration.md)
-- [Original deployment reference](docs/legacy-deployment.md)
+Reusable artifacts:
 
-Providers run as trusted code with the installation user's privileges. Install
-extensions only from authors you trust. No web UI or distributed runners are included.
+- [GitHub releases](https://github.com/funsaized/hoardarr/releases): source archives and native
+  build inputs.
+- `ghcr.io/funsaized/hoardarr:0.2.0`: the application image used by Compose, with patched Torlink.
+- `@funsaized/hoardarr`: Swamp behaviors and reports, installable with
+  `swamp extension pull @funsaized/hoardarr`. The CLI generates installation-specific workflows from
+  your configuration; the package alone does not provision a VM or enable scheduling.
 
-## Develop
+For development, run `deno task check`, `deno task test`, and
+`python3 -m unittest discover -s tests -p '*_test.py'`. See [contributing](CONTRIBUTING.md),
+[security](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md). Hoardarr's own code is
+MIT licensed.
 
-```sh
-export PATH="$HOME/.swamp/deno:$PATH"
-deno task check
-deno task test
-deno fmt --check extensions src cli tests
-./tests/swamp_smoke.sh  # requires Swamp authentication
-```
-
-CI runs type checks, unit/contract tests, a pinned container build, and a network
-isolation test with an ephemeral WireGuard gateway. The smoke test validates real
-Swamp execution and repeated delivery. Keep runtime data and credentials out of Git.
-Changes to deletion or network invariants need corresponding failure tests.
-
-[MIT](LICENSE).
+Native behaviors use bounded, read-only `/usr/bin/cat` and `/usr/bin/findmnt` probes because the
+pinned Swamp executable cannot read those procfs interfaces directly. Media hashing invokes a
+configured SHA-256 tool with contained absolute file paths as separate arguments. The legacy network
+behavior invokes VPN, Tailscale and service tools through validated argv; it belongs in an
+explicitly configured host deployment. These behaviors run with the operator/service permissions, so
+review provider configuration as executable policy. See
+[networking](docs/explanation/networking.md).
