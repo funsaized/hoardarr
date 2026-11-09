@@ -44,7 +44,9 @@ runs Hoardarr and Torlink inside Gluetun's VPN network.
 
 The [native DevVM guide](docs/how-to/native-devvm.md) puts NordVPN and the applications in a Linux
 VM. It takes more setup and requires local qualification before production use. The VM keeps its
-data outside the disposable guest so it can be rebuilt.
+data outside the disposable guest so it can be rebuilt. Use the
+[DevVM CLI](docs/how-to/devvm-cli.md) to select Hoardarr's inventory, enter the guest shell and
+manage the VM. Run application commands inside that shell with `sudo hoardarr-operator`.
 
 Schedules start disabled. Follow the [scheduling tutorial](docs/tutorials/running-and-scheduling.md)
 after your first manual run.
@@ -63,6 +65,7 @@ details.
 | Run automatically               | [Scheduling tutorial](docs/tutorials/running-and-scheduling.md)    |
 | Install the containers          | [Compose setup](docs/how-to/compose.md)                            |
 | Build a native VM               | [DevVM setup](docs/how-to/native-devvm.md)                         |
+| Find, enter or restart a VM     | [DevVM CLI](docs/how-to/devvm-cli.md)                              |
 | Use an existing native VM       | [Native operations](docs/how-to/operate-native.md)                 |
 | Save or recover an installation | [Backup, restore and recovery](docs/how-to/backup-and-recovery.md) |
 | Add a provider                  | [Provider contract and example](docs/providers.md)                 |

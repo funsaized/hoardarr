@@ -42,7 +42,9 @@ checkout. Applying configuration preserves that choice, so `schedule.enabled` in
 tell you whether a native schedule is active.
 
 Changing native definitions requires stopped writers. Admissions remain closed until you verify and
-reopen them.
+reopen them. Enter the guest with the host's `devvm` CLI, then use `sudo hoardarr-operator schedule`
+and the guest service commands in
+[native operations](../how-to/operate-native.md#change-the-native-schedule).
 
 Cron uses the serve process's local time zone. Missed slots are skipped rather than replayed after
 downtime.

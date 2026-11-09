@@ -35,6 +35,12 @@ storage adds durable file publication and explicit ownership to protect writes a
 Compose runs the application image beside a Gluetun VPN gateway. DevVM uses a disposable Linux guest
 with pinned tools, code, extensions and public caches.
 
+For native operation, the host's `devvm` CLI selects the isolated inventory and the VM belonging to
+the current project folder. `devvm` opens its management shell; `sudo hoardarr-operator` inside that
+shell applies the application's service identity and protected configuration. The
+[DevVM CLI guide](../how-to/devvm-cli.md) describes that entry point. Build, enrollment and complete
+backup helpers supply the installation-specific assets around it.
+
 ## What starts what
 
 Guest systemd starts the VPN, firewall guard and application daemons. Host systemd starts one VM as

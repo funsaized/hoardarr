@@ -3,15 +3,34 @@
 Start here once the production VM is provisioned, qualified and commissioned. `enroll-host.py` must
 also have created its private host deployment file. Enrollment alone does not commission the guest.
 
-## Check or run from the host
+## Enter the VM from the host
 
-From the source directory:
+Follow the [DevVM CLI setup](devvm-cli.md#select-the-inventory-and-project) to select the isolated
+inventory and persistent project. On the physical host:
 
 ```sh
-python3 deploy/devvm/host_operator.py status
-python3 deploy/devvm/host_operator.py plan
-python3 deploy/devvm/host_operator.py plan --refresh
-python3 deploy/devvm/host_operator.py run
+cd "$HOME/.local/share/hoardarr-devvm"
+export XDG_CONFIG_HOME="$HOME/.hoardarr-host/config"
+export XDG_DATA_HOME="$HOME/.hoardarr-host/data"
+devvm ls
+```
+
+Confirm the production row's `FOLDER` matches the project, then open its management shell:
+
+```sh
+devvm
+```
+
+## Check or run inside the guest
+
+All application and guest service commands below run in that shell. The protected operator selects
+the installed configuration and service identity:
+
+```sh
+sudo hoardarr-operator status
+sudo hoardarr-operator plan
+sudo hoardarr-operator plan --refresh
+sudo hoardarr-operator run
 ```
 
 | Command          | What it does                                    |
@@ -20,10 +39,6 @@ python3 deploy/devvm/host_operator.py run
 | `plan`           | Previews work already in the catalog            |
 | `plan --refresh` | Refreshes discovery, then previews              |
 | `run`            | Searches, downloads, delivers and cleans up     |
-
-The wrapper chooses the VM from your inventory and calls its protected guest operator through the
-management channel. It does not put host credentials in application arguments. Inside a guest
-management shell, use `sudo /usr/local/sbin/hoardarr-operator`.
 
 Admission and ownership checks still apply to these commands.
 
@@ -41,8 +56,8 @@ during the update.
 In the guest management shell, close admissions and inspect the current owner:
 
 ```sh
-sudo /usr/local/sbin/hoardarr-operator inhibit --reason "Code update"
-sudo /usr/local/sbin/hoardarr-operator status
+sudo hoardarr-operator inhibit --reason "Code update"
+sudo hoardarr-operator status
 ```
 
 Wait for `lease` to become `null`, then stop both application services:
@@ -60,18 +75,40 @@ With writers stopped, install and commission the updated native runtime. Then ap
 generated workflows to the existing control checkout using the protected operator:
 
 ```sh
-sudo /usr/local/sbin/hoardarr-operator apply --no-pull
-sudo /usr/local/sbin/hoardarr-operator doctor
-sudo /usr/local/sbin/hoardarr-operator admit
+sudo hoardarr-operator apply --no-pull
+sudo hoardarr-operator doctor
+sudo hoardarr-operator admit
 sudo systemctl start hoardarr-torlink.service hoardarr-swamp.service
-sudo /usr/local/sbin/hoardarr-operator native-check
-sudo /usr/local/sbin/hoardarr-operator status
+sudo hoardarr-operator native-check
+sudo hoardarr-operator status
 ```
 
 Run each step only after the previous step succeeds. `apply` validates the generated workflows and
 keeps admissions closed until `admit`. The existing schedule activation is preserved; starting Swamp
 resumes an enabled schedule. For an immediate manual reconciliation, run
-`sudo /usr/local/sbin/hoardarr-operator run` when no other run owns the installation.
+`sudo hoardarr-operator run` when no other run owns the installation. A whole-VM restart uses
+`devvm restart` on the host; it keeps the installed code. An image replacement follows
+[backup and recovery](backup-and-recovery.md#rebuild-the-guest).
+
+## Resume after VM maintenance
+
+After `devvm` or `devvm restart` opens the guest shell, check the saved owner. If `lease` is still
+held after an interruption, inspect the workflow report and follow
+[run recovery](backup-and-recovery.md#recover-an-interrupted-run) before reopening admissions.
+
+With no outstanding owner, verify and resume:
+
+```sh
+sudo hoardarr-operator status
+sudo hoardarr-operator doctor
+sudo hoardarr-operator admit
+sudo systemctl start hoardarr-torlink.service hoardarr-swamp.service
+sudo hoardarr-operator native-check
+sudo hoardarr-operator status
+```
+
+Run each step only after the previous step succeeds. An enabled schedule resumes once Swamp is
+running and admissions are open.
 
 ## Change the native schedule
 
@@ -80,12 +117,12 @@ owner to finish, then stop both application daemons in the guest management shel
 observation sockets available:
 
 ```sh
-sudo /usr/local/sbin/hoardarr-operator status
+sudo hoardarr-operator status
 sudo systemctl stop hoardarr-swamp.service hoardarr-torlink.service
-sudo /usr/local/sbin/hoardarr-operator schedule enable
-sudo /usr/local/sbin/hoardarr-operator admit
+sudo hoardarr-operator schedule enable
+sudo hoardarr-operator admit
 sudo systemctl start hoardarr-torlink.service hoardarr-swamp.service
-sudo /usr/local/sbin/hoardarr-operator status
+sudo hoardarr-operator status
 ```
 
 The configuration transaction closes admissions. After verification, `admit` opens them again. Use
@@ -102,10 +139,14 @@ workflow YAML.
 
 ## Inspect a problem
 
+On the host, use `devvm ls` to check the selected inventory and
+`systemctl status hoardarr-devvm.service` to inspect automatic boot. Open the guest with `devvm`,
+then inspect application state there:
+
 ```sh
-systemctl status hoardarr-devvm.service
-python3 deploy/devvm/host_operator.py swamp workflow history media --json
-python3 deploy/devvm/host_operator.py swamp report get @swamp/workflow-summary --workflow media --json
+sudo systemctl status hoardarr-swamp.service hoardarr-torlink.service
+sudo hoardarr-operator swamp workflow history media --json
+sudo hoardarr-operator swamp report get @swamp/workflow-summary --workflow media --json
 ```
 
 In the guest, use `journalctl -u hoardarr-swamp -u hoardarr-torlink` privately. Reports, inventories

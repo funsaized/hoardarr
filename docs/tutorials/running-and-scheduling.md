@@ -52,7 +52,8 @@ bin/hoardarr schedule disable --dir "$HOME/hoardarr-demo"
 Compose reads schedule settings from the host-mounted configuration at startup. Edit
 `schedule.enabled` there and apply it.
 
-A native VM needs the full [stopped-writer procedure](../how-to/operate-native.md). Use that guide
-after commissioning; the demo steps do not replace its maintenance checks.
+For a native VM, open the guest through the [DevVM CLI](../how-to/devvm-cli.md) and follow the full
+[stopped-writer procedure](../how-to/operate-native.md). Use that guide after commissioning; the
+demo steps do not replace its maintenance checks.
 
 [Back to the README](../../README.md#reference)

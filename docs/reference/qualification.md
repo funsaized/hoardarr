@@ -4,6 +4,12 @@ Qualification belongs to an exact runtime manifest and installation. A branch na
 suite is not enough. Use a disposable guest with `purpose: qualification` for fault tests; the
 commission tool will not treat it as production.
 
+Use the [DevVM CLI guide](../how-to/devvm-cli.md) to select Hoardarr's isolated inventory.
+`devvm ls` must show the qualification VM's separate project folder. Enter that folder and run
+`devvm` on the host to open the guest shell for the checks below. The
+[native build guide](../how-to/native-devvm.md) covers creating that guest and a separate production
+VM. Run guest application commands through `sudo hoardarr-operator`.
+
 ## G1: Rebuild the runtime
 
 Retain the pins and licenses. Check that public inputs contain no private data and rebuild from
@@ -65,8 +71,9 @@ Fill this structure from actual reviewed observations:
 }
 ```
 
-Root runs `hoardarr-commission commissioning --evidence PATH` after G1 through G5, and
-`hoardarr-commission production --evidence PATH` after G1 through G6.
+In the production guest shell opened by `devvm`, run
+`sudo hoardarr-commission commissioning --evidence PATH` after G1 through G5, and
+`sudo hoardarr-commission production --evidence PATH` after G1 through G6.
 
 The tool checks the installed manifest, protected runtime files, live VPN guard, identity and closed
 admissions. The evidence is the root operator's attestation, not cryptographic proof that the tests

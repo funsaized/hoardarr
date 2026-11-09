@@ -22,7 +22,9 @@ deno fmt --check extensions src cli tests docs README.md
 Tests use temporary fixture directories. Run `tests/network_isolation.sh` separately with Docker; it
 creates an ephemeral WireGuard gateway and needs no commercial VPN credentials.
 
-Native fault tests need a disposable qualification guest. Do not run them on production.
+Native fault tests need a disposable qualification guest. Do not run them on production. Select its
+isolated inventory with the [DevVM CLI](docs/how-to/devvm-cli.md), verify the project folder in
+`devvm ls`, and use `devvm` from that folder to open the qualification guest shell.
 
 ## Add or change a provider
 

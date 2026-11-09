@@ -5,7 +5,7 @@ that connection fails a moment later. Hoardarr needs both.
 
 ```text
 Compose host                    Native DevVM host
-  | docker exec                   | DevVM management transport
+  | docker exec                   | devvm management shell
   v                               v
 gluetun namespace               Linux guest
   Hoardarr + Torlink               management user / root -> VM administration
@@ -33,8 +33,10 @@ separate firewall guard restricts that UID's outgoing traffic. Torlink binds to 
 interface.
 
 The launcher gives the application a clean environment without inherited proxies or shell startup
-hooks. Management access uses a separate identity, so an operator can still diagnose a broken VPN.
-The host's own VPN and Tailscale routing do not need to change for local library delivery.
+hooks. The host's `devvm` CLI opens a management shell under a separate identity, so an operator can
+still diagnose a broken VPN. Application commands use `sudo hoardarr-operator` from that shell. See
+[DevVM access](../how-to/devvm-cli.md). The host's own VPN and Tailscale routing do not need to
+change for local library delivery.
 
 ## What qualification checks
 

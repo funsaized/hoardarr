@@ -21,6 +21,12 @@ A newer Swamp may change CLI or datastore behavior, so update commissioned image
 APIs use the patched control-plane/durable datastore build. Demo and Compose use the official,
 unmodified binary.
 
+Native examples use the pinned `devvm` CLI on the host with Hoardarr's isolated XDG directories.
+`devvm ls` lists that inventory, and `devvm` opens the guest belonging to the current project
+folder. Guest application commands use `sudo hoardarr-operator`. See the
+[DevVM CLI guide](../how-to/devvm-cli.md) for paths, shell access and lifecycle commands. A DevVM
+executable update is a separate pinned-input change from rebuilding the Hoardarr image.
+
 ## Accounts
 
 Swamp requires authentication for fixtures and public extension pulls. Its account, plan and

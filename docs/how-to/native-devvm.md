@@ -13,8 +13,19 @@ separate credentials. There is no preconfigured VM disk. Allow time for the
 Use the exact revisions in [`pins.json`](../../deploy/devvm/pins.json). Install DevVM from its
 [pinned source](https://github.com/devvmhq/devvm/tree/e9bd270398730bf0f7ffe44e8f78f5da323daeb7),
 Lima 2.3.0, Node 22.21.1 and Deno 2.9.8. Keep DevVM's config/data directories separate from other
-VMs. Its Ubuntu base must match the pinned release and the base package versions in
-`deploy/devvm/base-dependencies.json`.
+VMs. From the source checkout on the physical host, select that isolated inventory:
+
+```sh
+export XDG_CONFIG_HOME="$HOME/.hoardarr-host/config"
+export XDG_DATA_HOME="$HOME/.hoardarr-host/data"
+devvm --version
+devvm doctor
+devvm ls
+```
+
+Keep these exports in the host terminal used for the build. The [DevVM CLI guide](devvm-cli.md)
+explains inventory and project selection. Its Ubuntu base must match the pinned release and the base
+package versions in `deploy/devvm/base-dependencies.json`.
 
 ## 2. Acquire the runtime files
 
@@ -58,18 +69,43 @@ packages and caches; review it before redistribution. Keep the work directory pr
 
 `prepare-layer.py` produces `runtime.tar.gz`, `hoardarr.sh` and `hoardarr.policy`.
 
-Register the generated script/policy under DevVM's isolated `devvm/layers` configuration directory,
-and select `hoardarr` as the layer when creating a new project VM. DevVM's
-[image and layer guide](https://github.com/devvmhq/devvm/blob/v0.1.0/docs/content/docs/using/images.md)
-describes the storage layout. Serve only `runtime.tar.gz` at the pinned URL while building. The host
-lifecycle helper later serves that one checked archive on loopback for remakes. Keep the archive and
-DevVM image/package caches with the recovery kit.
+Register the generated script/policy in the selected DevVM inventory:
+
+```sh
+install -d -m 700 "$XDG_CONFIG_HOME/devvm/layers"
+install -m 700 /private/build/layer/hoardarr.sh "$XDG_CONFIG_HOME/devvm/layers/hoardarr.sh"
+install -m 600 /private/build/layer/hoardarr.policy "$XDG_CONFIG_HOME/devvm/layers/hoardarr.policy"
+```
+
+Serve only `runtime.tar.gz` at the pinned URL while building, then use the CLI:
+
+```sh
+devvm build hoardarr
+devvm images
+```
+
+DevVM's [image guide](https://devvm.dev/docs/using/images/) describes the image chain. For a changed
+layer, `devvm rebuild hoardarr` rebuilds the image; existing VMs keep their installed runtime until
+an explicit update. The enrolled host lifecycle helper serves the one checked archive on loopback
+for remakes. Keep the archive and DevVM image/package caches with the recovery kit.
 
 ## 5. Provision a qualification guest
 
-Create a mode-700 persistent project owned by the unprivileged operator, shared through 9p at the
-same absolute path in the guest. Use a separate project for qualification. Generate an RSA recovery
-key on the physical host; the private key stays there. Transfer only its public key to the guest.
+Create a new mode-700 persistent project owned by the unprivileged operator. Use a separate project
+for qualification. On the physical host, replace the absolute path below with that new directory:
+
+```sh
+mkdir -m 700 /ABSOLUTE/SHARED/QUALIFICATION
+cd /ABSOLUTE/SHARED/QUALIFICATION
+export XDG_CONFIG_HOME="$HOME/.hoardarr-host/config"
+export XDG_DATA_HOME="$HOME/.hoardarr-host/data"
+devvm --layers hoardarr --tools none --agents none --network open --ports none --no-git-protect --no-input
+```
+
+DevVM creates the guest, shares this project through 9p at the same absolute path and opens its
+management shell. All following provisioning and application commands run inside that shell.
+Generate an RSA recovery key on the physical host; the private key stays there. Transfer only its
+public key to the guest, for example through the shared project.
 
 In the guest management shell:
 
@@ -93,14 +129,19 @@ layer scripts. The generated profile expects OpenVPN TCP and `nordtun`, with the
 switch and autoconnect enabled.
 
 Run the disposable network matrix and the synthetic acquisition, backup, remake and restore checks.
-Then repeat fresh provisioning in a different project with `--purpose production`, a fresh identity
-and its own credentials. Commission only with evidence for that exact runtime manifest.
+Then exit to the host, create a different persistent production project, and run the same `devvm`
+creation command from that folder with the same inventory exports. The examples in the operations
+guide use `$HOME/.local/share/hoardarr-devvm` for this project. Repeat fresh provisioning in its
+guest shell with `--purpose production`, a fresh identity and its own credentials. Commission only
+with evidence for that exact runtime manifest.
 
 ## 7. Enroll the production host
 
-After production provisioning, record the actual VM name, paths and recovery assets:
+After production provisioning, exit the guest and return to the source checkout on the host.
+`devvm ls` shows the actual VM name and persistent folder to record with the recovery assets:
 
 ```sh
+devvm ls
 python3 deploy/devvm/enroll-host.py \
   --devvm /ABSOLUTE/PATH/TO/devvm \
   --project "$HOME/.local/share/hoardarr-devvm" \
@@ -128,10 +169,11 @@ cat "$HOME/.hoardarr-host/reviewed/hoardarr-devvm.service"
 sudo python3 deploy/devvm/install-host.py --operator-uid "$(id -u)"
 ```
 
-The unit starts one VM as the operator and checks its readiness. Physical host VPN/Tailscale
-settings stay as they are, and media scheduling stays off.
+The unit starts one VM through the enrolled DevVM lifecycle helper as the operator and checks its
+readiness. Physical host VPN/Tailscale settings stay as they are, and media scheduling stays off.
 
 Complete G6 and production commissioning before opening admissions. Verify a manual run before
-enabling the first production schedule.
+enabling the first production schedule. Continue with the [DevVM CLI](devvm-cli.md) and
+[native operations](operate-native.md) guides for routine use.
 
 [Back to the README](../../README.md#reference)
