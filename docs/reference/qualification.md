@@ -2,7 +2,7 @@
 
 Qualification belongs to an exact runtime manifest and installation. A branch name or a passing unit
 suite is not enough. Use a disposable guest with `purpose: qualification` for fault tests; the
-commission tool will not treat it as production.
+commission tool does not treat it as production.
 
 Use the [DevVM CLI guide](../how-to/devvm-cli.md) to select Hoardarr's isolated inventory.
 `devvm ls` must show the qualification VM's separate project folder. Enter that folder and run
@@ -10,35 +10,35 @@ Use the [DevVM CLI guide](../how-to/devvm-cli.md) to select Hoardarr's isolated 
 [native build guide](../how-to/native-devvm.md) covers creating that guest and a separate production
 VM. Run guest application commands through `sudo hoardarr-operator`.
 
-## G1: Rebuild the runtime
+## G1: rebuild the runtime
 
 Retain the pins and licenses. Check that public inputs contain no private data and rebuild from
 those retained inputs. Verify root ownership of immutable code, and check the application's
 environment and proxy isolation.
 
-## G2: Check the network boundary
+## G2: check the network boundary
 
 Test with real Torlink traffic. Cover tunnel loss and recovery, an administrative disconnect, daemon
 failure and an unauthenticated VPN. Attempt to bypass the tunnel through the host proxy and relay.
 Keep packet and counter evidence for IPv4, IPv6 and DNS.
 
-## G3: Check storage and recovery
+## G3: check storage and recovery
 
 Verify directory identities and refusal of missing or replaced mounts. Check durable publication,
 large-payload hashes, abrupt process loss and overlap refusal. Take and restore a complete backup,
 including credential recovery.
 
-## G4: Exercise the workflows
+## G4: exercise the workflows
 
 Load the extensions and validate the workflows. Run authenticated manual and scheduled synthetic
 acquisition through seeding, detachment, verified delivery and cleanup. Inspect the reports.
 
-## G5: Rehearse migration
+## G5: rehearse migration
 
 Use semantic inventories and typed path mappings. Rehearse on copies, verify catalog, behavior and
 workflow identities, and check that a pending relocation resumes safely.
 
-## G6: Test the production lifecycle
+## G6: test the production lifecycle
 
 Fence previous writers before a cold cutover. Run a production canary, an unattended physical
 reboot, a VM remake and a full restore. Verify key escrow as part of the restore.

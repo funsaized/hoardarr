@@ -38,10 +38,10 @@ checksums. Check the action and actual registry digest; a tag push alone does no
 The default CI needs no account credentials. Authenticated fixture smoke tests use an isolated local
 installation. Do not add a production API key to a public CI workflow.
 
-Native Swamp derivative binaries must be accompanied by their complete corresponding source,
-license/exception notices and checksums. Publish only the pinned binary/source pair after verifying
-it. Native OS package exports are acquired locally. Never attach an operator VM disk, project
-archive, recovery key, token file or qualification capture to a public release.
+Publish native Swamp derivative binaries with their complete corresponding source, license/exception
+notices and checksums. Verify the pinned binary/source pair before publishing it. Acquire native OS
+package exports locally. Never attach an operator VM disk, project archive, recovery key, token file
+or qualification capture to a public release.
 
 Changing source or dependency inputs changes the native bundle hash. Build a fresh manifest and
 repeat the required gates; do not copy an older production commissioning record into the release.

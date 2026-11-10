@@ -45,8 +45,8 @@ sudo systemctl is-active hoardarr-swamp.service hoardarr-torlink.service
 sudo hoardarr-operator status
 ```
 
-Use `exit` to return to the host; the VM keeps running. `hoardarr-operator` is installed inside the
-guest. For application commands, see [native operations](operate-native.md).
+Use `exit` to return to the host; the VM keeps running. The guest includes `hoardarr-operator` for
+application commands; see [native operations](operate-native.md).
 
 ## Manage the VM
 

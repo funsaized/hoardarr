@@ -68,15 +68,14 @@ docker compose exec hoardarr /opt/hoardarr/bin/hoardarr plan --refresh --dir /in
 docker compose exec hoardarr /opt/hoardarr/bin/hoardarr run --dir /instance
 ```
 
-To schedule runs, set `schedule.enabled: true` in the host configuration and apply it. That file is
-read at startup, so a `schedule enable` change made only inside the container would be overwritten
-on restart.
+To schedule runs, set `schedule.enabled: true` in the host configuration and apply it. Startup reads
+that file, replacing any `schedule enable` change made only inside the container.
 
 ## Network access
 
-Torlink's daemon and local search share Gluetun's network namespace. No application or control ports
-are exposed to the host. If the tunnel fails, network work is blocked but `docker compose exec`
-still gives you access to logs, configuration and saved state.
+Torlink's daemon and local search share Gluetun's network namespace. Compose exposes no application
+or control ports to the host. If the tunnel fails, the firewall blocks network work;
+`docker compose exec` still gives you access to logs, configuration and saved state.
 
 Keep Gluetun's firewall enabled and avoid broad outbound subnet exemptions. Readiness checks help
 detect problems; the firewall enforces the boundary.

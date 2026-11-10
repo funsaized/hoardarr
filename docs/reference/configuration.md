@@ -1,7 +1,7 @@
 # Configuration reference
 
-Edit `hoardarr.yaml` to configure an installation. Unknown settings are rejected. The full schema is
-in [`src/config.ts`](../../src/config.ts), and provider contracts are in
+Edit `hoardarr.yaml` to configure an installation. Hoardarr rejects unknown settings. The full
+schema is in [`src/config.ts`](../../src/config.ts), and provider contracts are in
 [`contracts.ts`](../../extensions/models/_lib/contracts.ts).
 
 ## Installation
@@ -43,11 +43,11 @@ in [`src/config.ts`](../../src/config.ts), and provider contracts are in
 
 | Field              | Default / accepted values                                       |
 | ------------------ | --------------------------------------------------------------- |
-| `schedule.enabled` | `false`; native effective activation is preserved separately    |
+| `schedule.enabled` | `false`; native effective activation persists separately        |
 | `schedule.cron`    | `0 2,8,14,22 * * *`; five fields, serve process local time zone |
 
-Native schedule intent is saved in `P/state/maintenance/activation.json`. Use `status` to see the
-effective schedule. Changing only the YAML flag does not describe native activation.
+Hoardarr saves native schedule intent in `P/state/maintenance/activation.json`. Use `status` to see
+the effective schedule. Changing only the YAML flag does not describe native activation.
 
 ## Torlink
 
@@ -79,7 +79,7 @@ identity with mode 600. Provisioning creates the root-owned guest identity and r
 
 ## Applying changes
 
-`apply` can replace generated definitions. Native apply requires Swamp, Torlink and manual writers
-to be stopped, and it closes admissions until verification.
+`apply` can replace generated definitions. Stop Swamp, Torlink and manual writers before native
+apply. It closes admissions until verification.
 
 [Back to the README](../../README.md#reference)

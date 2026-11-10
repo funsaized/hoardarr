@@ -38,8 +38,8 @@ You'll see a scheduled run even if everything was already delivered. The trigger
 `dryRun: false`, so it authorizes real work on a real installation. This demo still uses fixtures.
 
 Cron uses the Swamp server process's local time zone. Check its environment when interpreting a
-time. The native launcher removes inherited `TZ`, so the guest's OS time zone applies there. Missed
-slots are skipped (`catchUp.policy: none`). The host boot service only starts the VM.
+time. The native launcher removes inherited `TZ`, so the guest's OS time zone applies there. Swamp
+skips missed slots (`catchUp.policy: none`). The host boot service only starts the VM.
 
 ## Turn it off
 

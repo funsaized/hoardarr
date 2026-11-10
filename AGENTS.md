@@ -63,7 +63,8 @@ replacement. Preserve the user's chosen backup and qualification scope.
 # Documentation
 
 Run `deno task docs:lint:changed` after editing reader-facing prose. For committed branch changes,
-add `--base origin/master`. Run `deno task docs:setup` once to install the pinned tools. See
+add `--base origin/master`; use `--base HEAD^` for the last commit after pushing. Run
+`deno task docs:setup` once to install the pinned tools. See
 [the documentation style guide](docs/how-to/documentation-style.md) for scope and rule choices.
 
 Address actionable Vale findings and use Humanizer for the editorial pass when available. Preserve

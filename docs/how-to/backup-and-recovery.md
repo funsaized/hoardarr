@@ -23,7 +23,7 @@ It drives the inventoried VM through DevVM, exports an encrypted root credential
 complete guest snapshot, copies it to private host storage and checks its hashes. The snapshot
 includes application state and credentials that `devvm history` does not capture.
 
-The recovery private key is saved separately under the backup root. Review the result before
+The helper saves the recovery private key separately under the backup root. Review the result before
 reopening admissions. Backups contain credentials, configuration and catalog history, even when the
 payloads themselves are public.
 
@@ -57,7 +57,7 @@ DevVM preserves project and home directories during `devvm update`; root-owned g
 the control checkout need recovery. Keep the matching recovery private key on the host.
 
 After [pausing work](operate-native.md#pause-for-maintenance), export the root credential capsule
-inside the old guest. This additionally stops NordVPN's credential writers:
+inside the old guest. First stop NordVPN's credential writers:
 
 ```sh
 sudo systemctl stop nordvpnd.service nordvpnd.socket

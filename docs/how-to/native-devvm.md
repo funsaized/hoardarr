@@ -119,7 +119,7 @@ sudo /usr/local/sbin/hoardarr-provision fresh \
 ```
 
 Provisioning creates the root identity, storage markers, ext4 control checkout and read-only
-observation sockets. Media services are disabled and admissions stay closed.
+observation sockets. It leaves media services disabled and admissions closed.
 
 ## 6. Add credentials and qualify
 
@@ -157,8 +157,8 @@ python3 deploy/devvm/enroll-host.py \
 ```
 
 Enrollment checks the guest, storage and recovery-key identities, then writes a private deployment
-record and persistent host helpers. It refuses to replace an existing enrollment. Admissions stay
-closed and no service is installed yet.
+record and persistent host helpers. It refuses to replace an existing enrollment, leaves admissions
+closed and does not install a service.
 
 ## 8. Review the boot service
 

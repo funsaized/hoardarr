@@ -93,13 +93,13 @@ sudo hoardarr-operator native-check
 sudo hoardarr-operator status
 ```
 
-Enabling the services makes them start on subsequent VM boots. The existing schedule activation is
-preserved; Swamp resumes an enabled schedule when admissions are open.
+Enabling the services makes them start on subsequent VM boots and preserves schedule activation.
+Swamp resumes an enabled schedule when admissions are open.
 
 ## Change the native schedule
 
-Fresh schedules are disabled. Enabling requires production commissioning and open admissions at the
-start. In the guest, wait for `lease: null`, then:
+New installations start with scheduling disabled. To enable it, first complete production
+commissioning and open admissions. In the guest, wait for `lease: null`, then:
 
 ```sh
 sudo hoardarr-operator status

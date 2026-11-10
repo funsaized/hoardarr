@@ -1,8 +1,8 @@
 # Migrate an existing systemd installation
 
-This guide imports the older host VPN/SSH setup into version-1 configuration. Model and workflow
-IDs, catalog resource names and Swamp state are preserved. The old `movies` command uses the shared
-lease; discovery and bootstrap helpers remain available.
+The migration imports the older host VPN/SSH setup into version-1 configuration. It preserves
+behavior and workflow IDs, catalog resource names and Swamp state. The old `movies` command uses the
+shared lease; discovery and bootstrap helpers remain available.
 
 ## 1. Preview the import
 
@@ -49,7 +49,7 @@ systemd. Recheck catalog identity and activation state. Backups contain credenti
 privately.
 
 After new downloads or transfers, keep the current state and reconcile through `recover` and `run`;
-blindly restoring a pre-run archive can repeat external work. A held lease must be recovered, never
-force-expired. Scheduling remains disabled if commissioning cannot finish.
+restoring a pre-run archive without reconciling can repeat external work. Recover a held lease;
+never force it to expire. Scheduling remains disabled if commissioning cannot finish.
 
 [Back to the README](../README.md#reference)

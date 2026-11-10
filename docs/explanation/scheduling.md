@@ -31,13 +31,13 @@ time alone cannot prove it is safe to start again.
 | Admission           | An operator permits new runs after maintenance checks |
 | Schedule activation | Swamp may start runs at the configured times          |
 
-A commissioned VM can serve diagnostics while admissions are closed. Manual runs can be allowed
-while scheduling is off. New installations start with scheduling disabled; native provisioning also
-closes admissions.
+A commissioned VM can serve diagnostics while admissions are closed. Operators can allow manual runs
+while scheduling stays off. New installations start with scheduling disabled; native provisioning
+also closes admissions.
 
 ## Where the schedule lives
 
-Native activation is saved in `P/state/maintenance/activation.json`, outside the rebuildable
+Hoardarr saves native activation in `P/state/maintenance/activation.json`, outside the rebuildable
 checkout. Applying configuration preserves that choice, so `schedule.enabled` in YAML alone does not
 tell you whether a native schedule is active.
 
@@ -46,8 +46,7 @@ reopen them. Enter the guest with the host's `devvm` CLI, then use `sudo hoardar
 and the guest service commands in
 [native operations](../how-to/operate-native.md#change-the-native-schedule).
 
-Cron uses the serve process's local time zone. Missed slots are skipped rather than replayed after
-downtime.
+Cron uses the serve process's local time zone. Swamp skips missed slots after downtime.
 
 ## Delivery and recovery
 
