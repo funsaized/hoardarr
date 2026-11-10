@@ -31,3 +31,9 @@ __pycache__/
 *.py[cod]
 /deploy/devvm/qualification/results/
 *.pcap
+
+# Pinned documentation tools and downloaded styles (docs:setup)
+/.vale/bin/
+/.vale/installed.json
+/.vale/styles/Google/
+/.vale/styles/ai-tells/

@@ -5,6 +5,16 @@ on:
 permissions:
   contents: read
 jobs:
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Vale and styles
+        run: python3 tools/docs_lint.py setup
+      - name: Verify documentation lint tooling
+        run: python3 -m unittest discover -s tests -p 'docs_lint_test.py'
+      - name: Scan reader-facing prose (advisory)
+        run: python3 tools/docs_lint.py all --output line
   test:
     runs-on: ubuntu-latest
     steps:

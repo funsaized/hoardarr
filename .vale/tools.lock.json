@@ -1,0 +1,30 @@
+{
+  "vale": {
+    "version": "3.26.0",
+    "url": "https://github.com/vale-cli/vale/releases/download/v3.26.0/vale_3.26.0_",
+    "assets": {
+      "Linux_64-bit.tar.gz": "22aa69a556558e4a9dfc63c17030777383d8d3c48dcdfad655fa98e839d666ed",
+      "Linux_arm64.tar.gz": "3154179f4611140c9af54a8b3bc6a90bc02b73fe6c1f635369604dde0490406d",
+      "macOS_64-bit.tar.gz": "df42b317be6ece6a6a70d06b952deec581d047046eb93ea4632f58da56a86ff9",
+      "macOS_arm64.tar.gz": "a6c3370f53bad93086c6b85f3163676e44e08049d69743afdcc13f3aab5b7482",
+      "Windows_64-bit.zip": "c42f4b413aa29b6b36fa4e3ac0c18322588a54ac860db4c84b8255997f7d1ec2",
+      "Windows_arm64.zip": "673b27eea6e70ad25f99c5687b63c987a72a5ceadc6c9e730da50df6ba1fb022"
+    }
+  },
+  "packages": [
+    {
+      "name": "Google",
+      "version": "0.7.1",
+      "url": "https://github.com/vale-cli/Google/releases/download/v0.7.1/Google.zip",
+      "sha256": "4b67fca1f2a88595b2a578ab98bbf3017a23af677b04f93e862843f3ea1a9a0b",
+      "prefix": "Google/"
+    },
+    {
+      "name": "ai-tells",
+      "version": "1.37.0",
+      "url": "https://github.com/tbhb/vale-ai-tells/releases/download/v1.37.0/ai-tells.zip",
+      "sha256": "f8d1e981abbfbac1aa092d1623a1ac9bc935f0b15e8071e7a072915abddf0570",
+      "prefix": "ai-tells/styles/ai-tells/"
+    }
+  ]
+}

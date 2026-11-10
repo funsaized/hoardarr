@@ -1,0 +1,13 @@
+extends: substitution
+message: "Use '%s' instead of '%s' for the product name."
+level: warning
+ignorecase: false
+action:
+  name: replace
+swap:
+  '(?:HoardArr|HoardARR|hoardarr)': Hoardarr
+  '(?:DevVm|Devvm|devvm)': DevVM
+  '(?:TorLink|torlink)': Torlink
+  '(?:NordVpn|Nordvpn|nordvpn)': NordVPN
+  '(?:GlueTun|gluetun)': Gluetun
+  '(?:TailScale|tailscale)': Tailscale

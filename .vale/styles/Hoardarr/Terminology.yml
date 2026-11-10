@@ -1,0 +1,9 @@
+extends: substitution
+message: "Use '%s' instead of '%s' in prose; keep literal legacy CLI spellings in code."
+level: warning
+ignorecase: true
+action:
+  name: replace
+swap:
+  'swamp model': Swamp behavior
+  'swamp models': Swamp behaviors

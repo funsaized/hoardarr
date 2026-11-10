@@ -59,3 +59,14 @@ files into `/opt/hoardarr` or patching installed runtimes in place. Provisioning
 installation identity and credentials, generate the control checkout/service units, and start the
 services. Keep media, catalog state and configuration in the persistent project across image
 replacement. Preserve the user's chosen backup and qualification scope.
+
+# Documentation
+
+Run `deno task docs:lint:changed` after editing reader-facing prose. For committed branch changes,
+add `--base origin/master`. Run `deno task docs:setup` once to install the pinned tools. See
+[the documentation style guide](docs/how-to/documentation-style.md) for scope and rule choices.
+
+Address actionable Vale findings and use Humanizer for the editorial pass when available. Preserve
+technical meaning when a suggestion does not fit. Findings are advisory in v1; neither tool verifies
+facts, runnable examples or agreement with the implementation. Deno remains responsible for
+formatting. Agent instructions, prompts and skills are outside the reader-facing lint profile.

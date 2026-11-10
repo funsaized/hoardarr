@@ -26,6 +26,11 @@ deno fmt --check extensions src cli tests docs README.md
 Tests use temporary fixture directories. Run `tests/network_isolation.sh` separately with Docker; it
 creates an ephemeral WireGuard gateway and needs no commercial VPN credentials.
 
+For documentation changes, install the pinned Vale tools with `deno task docs:setup`, then run
+`deno task docs:lint:changed`. Use `deno task docs:lint` for a full scan. These checks are advisory
+and separate from `deno task check`; they require Python 3.10 or later. The
+[documentation style guide](docs/how-to/documentation-style.md) covers setup, scope and feedback.
+
 Native fault tests need a disposable qualification guest. Do not run them on production. Select its
 isolated inventory with the [DevVM CLI](docs/how-to/devvm-cli.md), verify the project folder in
 `devvm ls`, and use `devvm` from that folder to open the qualification guest shell.

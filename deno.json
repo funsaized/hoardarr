@@ -3,7 +3,10 @@
     "test": "deno test --allow-all extensions tests",
     "check": "deno check cli/main.ts extensions/models/*.ts extensions/reports/*.ts",
     "fmt": "deno fmt",
-    "hoardarr": "deno run --allow-all cli/main.ts"
+    "hoardarr": "deno run --allow-all cli/main.ts",
+    "docs:setup": "python3 tools/docs_lint.py setup",
+    "docs:lint": "python3 tools/docs_lint.py all",
+    "docs:lint:changed": "python3 tools/docs_lint.py changed"
   },
   "fmt": {
     "lineWidth": 100
@@ -14,6 +17,7 @@
     "node_modules",
     ".hoardarr",
     "hoardarr.yaml",
-    "tests/fixtures/legacy"
+    "tests/fixtures/legacy",
+    ".vale"
   ]
 }
