@@ -152,6 +152,13 @@ Deno.test("explicit release years must match the series, including upgraded cata
     testing.evaluateRelease(episode, release("Time.S01E05.1080p.WEB")).ok,
     "yearless release still eligible",
   );
+  assert(
+    testing.evaluateRelease(
+      { ...episode, showName: "Space 1999", showYear: 1975 },
+      release("Space.1999.S01E05.1080p.WEB"),
+    ).ok,
+    "a year within the actual title is not a premiere-year label",
+  );
   const { context, store } = makeContext({
     "catalog-episode-1": baseEpisode({ showName: "Time" }),
   });
