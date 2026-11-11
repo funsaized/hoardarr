@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: "@funsaized/hoardarr"
-version: 2026.11.11.2
+version: 2026.11.11.3
 description: Recoverable movie and TV automation with configurable Swamp providers
 license: MIT
 repository: https://github.com/funsaized/hoardarr

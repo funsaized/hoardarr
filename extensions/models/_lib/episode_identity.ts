@@ -1,6 +1,12 @@
 /** Match the series prefix, never an episode title or a substring of another series. */
 export function episodeIdentityMatches(
-  episode: { showName: string; seasonNumber: number; episodeNumber: number; category: string },
+  episode: {
+    showName: string;
+    showYear?: number;
+    seasonNumber: number;
+    episodeNumber: number;
+    category: string;
+  },
   name: string,
 ): boolean {
   const token = episode.category === "anime"
@@ -20,9 +26,13 @@ export function episodeIdentityMatches(
   const normalize = (s: string) =>
     s.normalize("NFKD").replace(/\p{M}/gu, "")
       .toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
-  const prefix = name.slice(0, match.index).trim()
-    .replace(/^(?:\[[^\]]+\][ ._-]*)+/, "")
-    .replace(/(?:[ ._-]+|\s*\()(?:19|20)\d{2}\)?[ ._-]*$/, "");
+  let prefix = name.slice(0, match.index).trim()
+    .replace(/^(?:\[[^\]]+\][ ._-]*)+/, "");
+  const year = /(?:[ ._-]+|\s*[\[(])((?:19|20)\d{2})[\])]?([ ._-]*)$/.exec(prefix);
+  if (year) {
+    if (episode.showYear !== undefined && Number(year[1]) !== episode.showYear) return false;
+    prefix = prefix.slice(0, year.index);
+  }
   const expected = normalize(episode.showName);
   return expected.length > 0 && normalize(prefix) === expected;
 }

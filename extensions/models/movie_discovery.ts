@@ -103,6 +103,7 @@ const AiredEpisodeSchema = z.object({
   tmdbEpisodeId: z.number().int().positive(),
   showTmdbId: z.number().int().positive(),
   showName: z.string().min(1).max(500),
+  showYear: z.number().int().min(1800).max(3000).optional(),
   seasonNumber: z.number().int().positive(),
   episodeNumber: z.number().int().positive(),
   episodeTitle: z.string().min(1).max(500).nullable(),
@@ -446,6 +447,9 @@ async function executeAiredEpisodes(
           tmdbEpisodeId: raw.id,
           showTmdbId: details.id,
           showName: details.name,
+          ...(details.first_air_date
+            ? { showYear: Number(details.first_air_date.slice(0, 4)) }
+            : {}),
           seasonNumber: raw.season_number,
           episodeNumber: raw.episode_number,
           episodeTitle: raw.name?.trim() || null,

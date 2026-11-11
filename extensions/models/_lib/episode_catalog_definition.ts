@@ -10,7 +10,7 @@ import {
   PolicySchema,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.11.2";
+const MODEL_VERSION = "2026.11.11.3";
 const SPEC_EPISODE = "episode";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -40,6 +40,7 @@ const CategorySchema = z.enum(["tv", "anime"]);
 const ShowConfigSchema = z.object({
   tmdbId: z.number().int().positive(),
   name: z.string().min(1).max(500),
+  year: z.number().int().min(1800).max(3000).optional(),
   category: CategorySchema.default("tv"),
 });
 const GlobalArgumentsSchema = z.object({
@@ -55,6 +56,7 @@ const DiscoveryRecordSchema = z.object({
   tmdbEpisodeId: z.number().int().positive(),
   showTmdbId: z.number().int().positive(),
   showName: z.string().min(1).max(500),
+  showYear: z.number().int().min(1800).max(3000).optional(),
   seasonNumber: z.number().int().nonnegative(),
   episodeNumber: z.number().int().positive(),
   episodeTitle: z.string().max(500).nullable(),
@@ -125,6 +127,7 @@ const EpisodeSchema = z.object({
   tmdbEpisodeId: z.number().int().positive(),
   showTmdbId: z.number().int().positive(),
   showName: z.string().min(1).max(500),
+  showYear: z.number().int().min(1800).max(3000).optional(),
   seasonNumber: z.number().int().nonnegative(),
   episodeNumber: z.number().int().positive(),
   episodeTitle: z.string().max(500).nullable(),
@@ -300,7 +303,13 @@ function rejectReasons(
 }
 
 function evaluateRelease(
-  episode: { showName: string; seasonNumber: number; episodeNumber: number; category: Category },
+  episode: {
+    showName: string;
+    showYear?: number;
+    seasonNumber: number;
+    episodeNumber: number;
+    category: Category;
+  },
   release: Release,
   policy: Policy = episodePolicy,
 ): { ok: boolean; reasons: string[] } {
@@ -323,7 +332,13 @@ function evaluateRelease(
 }
 
 function pickBest(
-  episode: { showName: string; seasonNumber: number; episodeNumber: number; category: Category },
+  episode: {
+    showName: string;
+    showYear?: number;
+    seasonNumber: number;
+    episodeNumber: number;
+    category: Category;
+  },
   releases: ReadonlyArray<Release>,
   policy: Policy = episodePolicy,
 ): { release: Release | null; reasons: string[] } {
@@ -347,7 +362,13 @@ function pickBest(
 }
 
 function summarizeNoMatch(
-  episode: { showName: string; seasonNumber: number; episodeNumber: number; category: Category },
+  episode: {
+    showName: string;
+    showYear?: number;
+    seasonNumber: number;
+    episodeNumber: number;
+    category: Category;
+  },
   releases: ReadonlyArray<Release>,
   policy: Policy = episodePolicy,
 ): string {
@@ -379,6 +400,7 @@ function createEpisodeFromDiscovery(discovery: DiscoveryRecord): Episode {
     tmdbEpisodeId: discovery.tmdbEpisodeId,
     showTmdbId: discovery.showTmdbId,
     showName: discovery.showName,
+    showYear: discovery.showYear,
     seasonNumber: discovery.seasonNumber,
     episodeNumber: discovery.episodeNumber,
     episodeTitle: discovery.episodeTitle,
@@ -410,6 +432,7 @@ function mergeDiscovery(existing: Episode, discovery: DiscoveryRecord): Episode 
   return {
     ...existing,
     showName: discovery.showName || existing.showName,
+    showYear: discovery.showYear ?? existing.showYear,
     seasonNumber: newer ? discovery.seasonNumber : existing.seasonNumber,
     episodeNumber: newer ? discovery.episodeNumber : existing.episodeNumber,
     episodeTitle: discovery.episodeTitle ?? existing.episodeTitle,
@@ -753,6 +776,12 @@ async function executeIngest(
   return { dataHandles: handles };
 }
 
+function withShowYear(episode: Episode, context: Context): Episode {
+  const year = episode.showYear ??
+    context.globalArgs.shows.find((s) => s.tmdbId === episode.showTmdbId)?.year;
+  return year === undefined ? episode : { ...episode, showYear: year };
+}
+
 async function executeSelect(
   args: { items: SelectItem[] },
   context: Context,
@@ -762,7 +791,8 @@ async function executeSelect(
   let missing = 0;
   let ineligible = 0;
   for (const item of args.items) {
-    const existing = await loadEpisode(context, item.tmdbEpisodeId);
+    const loaded = await loadEpisode(context, item.tmdbEpisodeId);
+    const existing = loaded && withShowYear(loaded, context);
     if (!existing) {
       missing++;
       continue;
@@ -854,7 +884,7 @@ async function executeReconcile(
   for (const episode of allEpisodes) {
     if (!episode.infoHash) continue;
     const snapshot = byHash.get(episode.infoHash.toLowerCase());
-    const next = advanceFromSnapshot(episode, snapshot, now);
+    const next = advanceFromSnapshot(withShowYear(episode, context), snapshot, now);
     if (!next) continue;
     handles.push(await writeEpisode(context, next));
   }
@@ -927,6 +957,10 @@ export const definition = {
   }, {
     toVersion: "2026.11.11.2",
     description: "Validate TV series identity and retain rejected release hashes",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.11.3",
+    description: "Retain series premiere years for release identity checks",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: GlobalArgumentsSchema,

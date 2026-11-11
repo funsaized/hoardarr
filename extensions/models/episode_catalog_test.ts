@@ -132,6 +132,54 @@ Deno.test("TV title identity rejects substring collisions and episode-title bait
   }
 });
 
+Deno.test("explicit release years must match the series, including upgraded catalog rows", async () => {
+  const episode = { ...baseEpisode({ showName: "Time" }), showYear: 2021 };
+  const release = (name: string, infoHash = "bad") => ({
+    name,
+    infoHash,
+    seeders: 50,
+    sizeBytes: 1000,
+  });
+  assert(
+    !testing.evaluateRelease(episode, release("Time.2018.S01E05.1080p.WEB")).ok,
+    "different series year",
+  );
+  assert(
+    testing.evaluateRelease(episode, release("Time.[2021].S01E05.1080p.WEB")).ok,
+    "matching explicit year",
+  );
+  assert(
+    testing.evaluateRelease(episode, release("Time.S01E05.1080p.WEB")).ok,
+    "yearless release still eligible",
+  );
+  const { context, store } = makeContext({
+    "catalog-episode-1": baseEpisode({ showName: "Time" }),
+  });
+  context.globalArgs.shows = [{ tmdbId: 100, name: "Time", year: 2021, category: "tv" }];
+  await testing.executeSelect({
+    items: [{
+      tmdbEpisodeId: 1,
+      releases: [
+        release("Time.2018.S01E05.1080p.WEB"),
+        release("Time.2021.S01E05.1080p.WEB", "good"),
+      ],
+    }],
+  }, context);
+  assertEquals(
+    store.resources.get("catalog-episode-1")?.infoHash,
+    "good",
+    "upgrade uses configured premiere year",
+  );
+  await testing.executeReconcile({
+    snapshots: [{ infoHash: "good", name: "Time.2018.S01E05.mkv", kind: "seed", status: "paused" }],
+  }, context);
+  assertEquals(
+    store.resources.get("catalog-episode-1")?.error,
+    "identity-mismatch",
+    "downloader year checked too",
+  );
+});
+
 Deno.test("wrong downloaded identity is fenced until absent, persisted and never selected again", async () => {
   const initial = baseEpisode({
     showName: "Time",
@@ -280,7 +328,7 @@ Deno.test("identity: tmdbEpisodeId must be a positive integer and instance name 
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/episode-catalog", "model type");
-  assertEquals(model.version, "2026.11.11.2", "model version");
+  assertEquals(model.version, "2026.11.11.3", "model version");
   assert("episode" in model.resources, "episode spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
