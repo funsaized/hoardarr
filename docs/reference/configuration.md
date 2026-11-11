@@ -23,12 +23,23 @@ schema is in [`src/config.ts`](../../src/config.ts), and provider contracts are 
 
 ## Interests and selection
 
-| Field                                     | Default / accepted values                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------ |
-| `interests.movies`                        | `true`                                                                   |
-| `interests.region`, `.language`, `.limit` | `US`, `en-US`, `10` (1 to 100)                                           |
-| `interests.shows`                         | `[]`; entries contain `tmdbId`, `name`, and `category` (`tv` or `anime`) |
-| `policies.movie`, `.episode`              | Eligibility/ranking rules; see `extensions/models/_lib/policy.ts`        |
+| Field                                     | Default / accepted values                                                                    |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `interests.movies`                        | `true`                                                                                       |
+| `interests.region`, `.language`, `.limit` | `US`, `en-US`, `20` (1 to 50, movies per ISO week)                                           |
+| `interests.shows`                         | `[]`; entries contain `name`, optional `tmdbId` and `year`, and `category` (`tv` or `anime`) |
+| `policies.movie`, `.episode`              | Eligibility/ranking rules; see `extensions/models/_lib/policy.ts`                            |
+
+## TV backlog
+
+| Field                        | Default                                         |
+| ---------------------------- | ----------------------------------------------- |
+| `television.searchesPerRun`  | 20 episode searches per run                     |
+| `television.downloadsPerRun` | 8 new episode submissions per run               |
+| `television.retryHours`      | 24 hours between unavailable or failed searches |
+
+Native runs reconcile downloads on later ticks. `download.timeoutSeconds` applies to profiles that
+wait for downloads.
 
 ## Downloads
 

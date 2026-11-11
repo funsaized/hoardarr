@@ -109,6 +109,97 @@ function makeContext(initial: Record<string, Record<string, unknown>> = {}): {
   return { context, store };
 }
 
+Deno.test("TV title identity rejects substring collisions and episode-title bait", () => {
+  const episode = baseEpisode({ showName: "Time", seasonNumber: 3, episodeNumber: 2 });
+  const release = (name: string) => ({ name, infoHash: "bad", seeders: 50, sizeBytes: 1000 });
+  for (
+    const name of [
+      "Adventure Time Side Quests S03E02 1080p WEB",
+      "Jujutsu Kaisen S03E02 One More Time REPACK 1080p WEB-DL",
+      "Time Travel S03E02 1080p WEB",
+      "Sometimes S03E02 1080p WEB",
+      "Time S03E02-E03 1080p WEB",
+    ]
+  ) assert(!testing.evaluateRelease(episode, release(name)).ok, name);
+  for (
+    const name of [
+      "Time.S03E02.1080p.WEB",
+      "Time (2021) S03E02 1080p WEB-DL",
+      "[GROUP] Time S03E02 1080p WEBRip",
+    ]
+  ) {
+    assert(testing.evaluateRelease(episode, release(name)).ok, name);
+  }
+});
+
+Deno.test("wrong downloaded identity is fenced until absent, persisted and never selected again", async () => {
+  const initial = baseEpisode({
+    showName: "Time",
+    seasonNumber: 3,
+    episodeNumber: 2,
+    status: "downloading",
+    infoHash: "bad",
+    releaseName: "Time S03E02 1080p WEB",
+  });
+  const { context, store } = makeContext({ "catalog-episode-1": initial });
+  const snapshots = [{
+    infoHash: "bad",
+    name: "Jujutsu Kaisen S03E02 One More Time 1080p WEB",
+    kind: "seed" as const,
+    status: "paused",
+  }];
+  await testing.executeReconcile({ snapshots }, context);
+  const fenced = store.resources.get("catalog-episode-1") as Episode;
+  assertEquals(fenced.status, "failed", "wrong payload cannot become transfer ready");
+  assert(!testing.isSelectable(fenced), "cannot add a replacement before detachment");
+  assertEquals(testing.computePlan([fenced]).retryable, [], "quarantine is not a search retry");
+  // Restart with only serialized durable state; repeat the interrupted cleanup.
+  const restarted = makeContext(JSON.parse(JSON.stringify(Object.fromEntries(store.resources))));
+  await testing.executeReconcile({ snapshots }, restarted.context);
+  assertEquals(
+    (restarted.store.resources.get("catalog-episode-1") as Episode).rejectedReleases.length,
+    1,
+    "idempotent rejection",
+  );
+  await testing.executeReconcile({ snapshots: [] }, restarted.context);
+  const reset = restarted.store.resources.get("catalog-episode-1") as Episode;
+  assertEquals(reset.status, "wanted", "absence permits retry");
+  assertEquals(reset.infoHash, null, "no stale locator");
+  await testing.executeSelect({
+    items: [{
+      tmdbEpisodeId: 1,
+      releases: [
+        { infoHash: "BAD", name: "Time S03E02 1080p WEB", seeders: 100, sizeBytes: 1000 },
+        { infoHash: "good", name: "Time S03E02 1080p WEB", seeders: 5, sizeBytes: 1000 },
+      ],
+    }],
+  }, restarted.context);
+  assertEquals(
+    restarted.store.resources.get("catalog-episode-1")?.infoHash,
+    "good",
+    "blacklist survives restart and renamed search result",
+  );
+});
+
+Deno.test("reconciliation audits old selections and detached checkpoints without changing completed records", async () => {
+  for (const status of ["selected", "seed-stopped", "transfer-ready", "transferred"] as const) {
+    const { context, store } = makeContext({
+      "catalog-episode-1": baseEpisode({
+        showName: "Time",
+        status,
+        infoHash: "bad",
+        releaseName: "Adventure Time S01E05 1080p WEB",
+      }),
+    });
+    await testing.executeReconcile({ snapshots: [] }, context);
+    assertEquals(
+      store.resources.get("catalog-episode-1")?.status,
+      status === "transferred" ? "transferred" : "wanted",
+      "audit old catalog",
+    );
+  }
+});
+
 const baseEpisode = (
   overrides: Partial<{
     tmdbEpisodeId: number;
@@ -147,6 +238,7 @@ const baseEpisode = (
   bytes: null,
   sha256: null,
   status: "wanted",
+  rejectedReleases: [],
   attempts: 0,
   noMatchReason: null,
   discoveredAt: "2026-08-14T09:00:00.000Z",
@@ -188,7 +280,7 @@ Deno.test("identity: tmdbEpisodeId must be a positive integer and instance name 
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/episode-catalog", "model type");
-  assertEquals(model.version, "2026.11.09.1", "model version");
+  assertEquals(model.version, "2026.11.11.2", "model version");
   assert("episode" in model.resources, "episode spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
@@ -582,7 +674,7 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
     {
       snapshots: [
         { infoHash: "h1", kind: "download", status: "completed" },
-        { infoHash: "h2", name: "Canonical Episode Payload", kind: "seed", status: "paused" },
+        { infoHash: "h2", name: "Example.Show.S01E05.mkv", kind: "seed", status: "paused" },
         { infoHash: "h3", kind: "seed", status: "missing" },
       ],
     },
@@ -600,7 +692,7 @@ Deno.test("reconcile advances downloading to seeding and seeding to seed-stopped
   );
   assertEquals(
     (store.resources.get("catalog-episode-2") as Episode).releaseName,
-    "Canonical Episode Payload",
+    "Example.Show.S01E05.mkv",
     "episode payload name updated from snapshot",
   );
   assertEquals(
@@ -752,4 +844,41 @@ Deno.test("episode add outcomes preserve partial success, ambiguous retries, and
     "selected",
     "mismatched response cannot advance another item",
   );
+});
+
+Deno.test("restart reconciliation adopts queued or paused submissions before another add", async () => {
+  for (const status of ["queued", "paused", "downloading"]) {
+    const { context, store } = makeContext({
+      "catalog-episode-1": baseEpisode({ tmdbEpisodeId: 1, status: "selected", infoHash: "abc" }),
+    });
+    await testing.executeReconcile({
+      snapshots: [{ infoHash: "abc", kind: "download", status, progress: 0 }],
+    }, context);
+    assertEquals(
+      store.resources.get("catalog-episode-1")?.status,
+      "downloading",
+      "existing submission must be adopted",
+    );
+  }
+});
+
+Deno.test("episode bare WEB eligibility retains resolution, source and pack restrictions", () => {
+  const episode = baseEpisode({ showName: "Example Show", seasonNumber: 2, episodeNumber: 7 });
+  for (
+    const [suffix, expected] of [
+      ["S02E07.1080p.WEB.x264", true],
+      ["S02E07.720p.WEB", false],
+      ["S02E07.1080p.BluRay", false],
+      ["S02E07.1080p.WebBrowser", false],
+      ["S02.Complete.1080p.WEB", false],
+    ] as const
+  ) {
+    const result = testing.evaluateRelease(episode, {
+      infoHash: "h",
+      name: `Example.Show.${suffix}`,
+      sizeBytes: 2 * 1024 ** 3,
+      seeders: 50,
+    });
+    assertEquals(result.ok, expected, suffix);
+  }
 });

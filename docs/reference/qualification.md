@@ -80,3 +80,11 @@ admissions. The evidence is the root operator's attestation, not cryptographic p
 happened. Do not reuse another installation's proof or mark missing or failed checks as passed.
 
 [Back to the README](../../README.md#reference)
+
+For an upgrade of an already commissioned installation, an operator may explicitly waive disruptive
+network fault tests, full backup/restore tests and physical reboot checks. Record those decisions
+under G2, G3 and G6 with `passed: false`, `waived: true` and a specific `reason`. Include
+`operatorAuthorization` and `previousRuntimeManifestSha256` in the evidence. The commission command
+requires `--allow-waived-upgrade-checks` to accept these waivers and records them in the
+commissioning receipt. G1, G4 and G5 still require passing evidence. Fresh installations cannot use
+this exception.

@@ -1348,7 +1348,7 @@ Deno.test("malformed catalog records block planning instead of becoming empty wo
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.11.09.1", "model version");
+  assertEquals(model.version, "2026.11.11.1", "model version");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
@@ -1471,4 +1471,24 @@ Deno.test("movie add outcomes preserve partial success, ambiguous retries, and i
     "selected",
     "mismatched response cannot advance another item",
   );
+});
+
+Deno.test("plain WEB qualifies while unrelated source and low quality remain rejected", () => {
+  const movie = { title: "Example", year: 2026 };
+  const release = {
+    name: "Example (2026) [1080p web]",
+    infoHash: "a",
+    seeders: 100,
+    sizeBytes: 2000000000,
+  };
+  assert(testing.evaluateRelease(movie, release).ok, "plain WEB is accepted");
+  for (
+    const name of [
+      "Example (2026) 720p web",
+      "Example (2026) 1080p BluRay",
+      "Example (2026) 1080p webbrowser",
+    ]
+  ) {
+    assert(!testing.evaluateRelease(movie, { ...release, name }).ok, `reject ${name}`);
+  }
 });

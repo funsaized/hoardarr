@@ -87,14 +87,16 @@ const NowPlayingResponseSchema = z.object({
 });
 
 const ShowConfigSchema = z.object({
-  tmdbId: z.number().int().positive(),
+  name: z.string().min(1).max(500).optional(),
+  year: z.number().int().min(1900).max(2200).optional(),
+  tmdbId: z.number().int().positive().optional(),
   category: z.enum(["tv", "anime"]).default("tv"),
 });
 
 const AiredEpisodesArgsSchema = z.object({
   shows: z.array(ShowConfigSchema).min(1).max(100),
   excludeIds: z.array(z.number().int().positive()).max(20_000).default([]),
-  limit: z.number().int().min(1).max(50).default(10),
+  limit: z.number().int().min(1).max(20000).default(20000),
 });
 
 const AiredEpisodeSchema = z.object({
@@ -119,6 +121,7 @@ const AiredEpisodeRunSchema = z.object({
 });
 
 const ShowDetailsResponseSchema = z.object({
+  first_air_date: z.string().nullable().optional(),
   id: z.number().int().positive(),
   name: z.string().min(1),
   seasons: z
@@ -349,18 +352,84 @@ async function executeAiredEpisodes(
   const eligible: AiredEpisode[] = [];
   let excludedCount = 0;
 
+  const resolutionHandles: Array<{ name: string }> = [];
   for (const show of args.shows) {
+    const resolutionKey = `resolved-show-${
+      Array.from(
+        new Uint8Array(
+          await crypto.subtle.digest(
+            "SHA-256",
+            new TextEncoder().encode(JSON.stringify([show.name, show.year, show.tmdbId])),
+          ),
+        ),
+      ).map((b) => b.toString(16).padStart(2, "0")).join("")
+    }`;
+    const prior = await context.readResource(resolutionKey);
+    let id = show.tmdbId ?? (prior?.tmdbId as number | null);
+    if (!id && show.name) {
+      const candidates = await tmdbGet(
+        `/search/tv?query=${encodeURIComponent(show.name)}`,
+        apiKey,
+        z.object({
+          results: z.array(
+            z.object({
+              id: z.number().int().positive(),
+              name: z.string(),
+              original_name: z.string().optional(),
+              first_air_date: z.string().optional(),
+              popularity: z.number().optional(),
+            }),
+          ),
+        }),
+        context.signal,
+        deps,
+      );
+      const normalize = (name: string) =>
+        name.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+      const matches = candidates.results.filter((c) =>
+        (normalize(c.name) === normalize(show.name!) ||
+          normalize(c.original_name ?? "") === normalize(show.name!)) &&
+        (!show.year || c.first_air_date?.startsWith(String(show.year)))
+      );
+      matches.sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0) || a.id - b.id);
+      id = matches[0]?.id;
+    }
+    if (!id) {
+      resolutionHandles.push(
+        await context.writeResource("resolvedShow", resolutionKey, {
+          requestedName: show.name ?? "",
+          tmdbId: null,
+          title: null,
+          year: null,
+          url: null,
+          status: "pending",
+          checkedAt: polledAt,
+        }),
+      );
+      continue;
+    }
     const details = await tmdbGet(
-      `/tv/${show.tmdbId}`,
+      `/tv/${id}`,
       apiKey,
       ShowDetailsResponseSchema,
       context.signal,
       deps,
     );
+    resolutionHandles.push(
+      await context.writeResource("resolvedShow", resolutionKey, {
+        requestedName: show.name ?? details.name,
+        tmdbId: id,
+        title: details.name,
+        year: details.first_air_date ? Number(details.first_air_date.slice(0, 4)) : null,
+        url: `https://www.themoviedb.org/tv/${id}`,
+        status: "resolved",
+        checkedAt: polledAt,
+      }),
+    );
     for (const season of details.seasons) {
       if (season.season_number === 0) continue;
       const seasonData = await tmdbGet(
-        `/tv/${show.tmdbId}/season/${season.season_number}`,
+        `/tv/${id}/season/${season.season_number}`,
         apiKey,
         SeasonResponseSchema,
         context.signal,
@@ -396,7 +465,7 @@ async function executeAiredEpisodes(
       a.tmdbEpisodeId - b.tmdbEpisodeId,
   );
   const selected = eligible.slice(0, args.limit);
-  const handles: Array<{ name: string }> = [];
+  const handles: Array<{ name: string }> = [...resolutionHandles];
   for (const episode of selected) {
     handles.push(
       await context.writeResource(
@@ -558,6 +627,20 @@ async function executeNowPlaying(
 export const extension = {
   type: "@keeb/tmdb-lookup",
   resources: {
+    resolvedShow: {
+      description: "Persisted automatic series identity or pending lookup",
+      schema: z.object({
+        requestedName: z.string(),
+        tmdbId: z.number().nullable(),
+        title: z.string().nullable(),
+        year: z.number().nullable(),
+        url: z.string().nullable(),
+        status: z.enum(["pending", "resolved"]),
+        checkedAt: z.iso.datetime(),
+      }),
+      lifetime: "infinite" as const,
+      garbageCollection: 100,
+    },
     [SPEC_MOVIE]: {
       description:
         "One movie from the current US digital-release list; instance name is digital-release-movie-<tmdbId>.",

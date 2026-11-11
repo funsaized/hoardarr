@@ -83,8 +83,8 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   discovery.push(
     skip(
       call("episodes", "discovery-provider", "episodes", {
-        shows: config.interests.shows.map((s) => ({ tmdbId: s.tmdbId, category: s.category })),
-        limit: config.interests.limit,
+        shows: config.interests.shows,
+        limit: 20000,
         excludeIds: expr("steps.plan.outputs.episodeIds"),
       }, "ingest-movies"),
       String(config.interests.shows.length === 0),
@@ -153,7 +153,28 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       records: records("snapshot-before"),
     }, "snapshot-before"),
   );
-  acquisition.push(plan("search-plan", "reconcile-before"));
+  acquisition.push(plan("rejection-plan", "reconcile-before"));
+  acquisition.push(skip(
+    call(
+      "discard-rejected",
+      "download-provider",
+      "control",
+      {
+        ids: expr('steps["rejection-plan"].outputs.rejectedIds'),
+        action: "delete",
+        confirmDeleteFiles: true,
+      },
+      "rejection-plan",
+      true,
+    ),
+    'size(steps["rejection-plan"].outputs.rejectedIds) == 0',
+  ));
+  acquisition.push(call("snapshot-audited", "download-provider", "sync", {}, "discard-rejected"));
+  acquisition.push(method("reconcile-audited", "pipeline", "reconcile", {
+    ...owned,
+    records: records("snapshot-audited"),
+  }, "snapshot-audited"));
+  acquisition.push(plan("search-plan", "reconcile-audited"));
   const noSearch = 'size(steps["search-plan"].outputs.queries) == 0';
   acquisition.push(
     skip(
@@ -173,7 +194,11 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   );
   acquisition.push(
     skip(
-      method("select", "pipeline", "select", { ...owned, records: records("search") }, "search"),
+      method("select", "pipeline", "select", {
+        ...owned,
+        records: records("search"),
+        searchOk: expr("steps.search.outputs.ok"),
+      }, "search"),
       noSearch,
     ),
   );
@@ -220,7 +245,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
         "wait-plan",
         true,
       ),
-      'size(steps["wait-plan"].outputs.activeIds) == 0',
+      native ? "true" : 'size(steps["wait-plan"].outputs.activeIds) == 0',
     ),
   );
   acquisition.push(call("snapshot-finished", "download-provider", "sync", {}, "wait"));

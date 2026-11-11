@@ -29,6 +29,9 @@ Exiting the shell leaves them running. Application commands run inside this gues
 | Refresh discovery and preview | `sudo hoardarr-operator plan --refresh` |
 | Run a reconciliation now      | `sudo hoardarr-operator run`            |
 
+`plan` writes workflow history and reports. For a read-only inspection, use `status` and saved Swamp
+data or reports. `status` labels downloader observations with their saved snapshot timestamp.
+
 A reconciliation delivers all ready movies, then all ready TV episodes, sequentially. Manual runs
 use the same admission and ownership checks as scheduled runs.
 
@@ -136,3 +139,60 @@ names, paths and acquisition locators before sharing reports or journals. For in
 or a restore, follow [backup and recovery](backup-and-recovery.md).
 
 [Back to the README](../../README.md#reference)
+
+## Track series and manage the backlog
+
+Add shows under `interests.shows` with a `name`, optional release `year`, and category `tv`. A
+`tmdbId` pins a known series. Without an ID, discovery selects an exact title match, uses the
+optional year, and ranks remaining matches by popularity then ID. It saves the chosen ID. An
+unmatched name stays pending without blocking other shows.
+
+Discovery catalogs missing aired episodes from regular seasons. Specials and future episodes stay
+out of the queue. New episodes from the last seven days take priority; within each priority group,
+work rotates among shows and proceeds from newer episodes to older ones. The following settings
+control TV work independently of `interests.limit`, which controls weekly movie discovery:
+
+```yaml
+television:
+  searchesPerRun: 20
+  downloadsPerRun: 8
+  retryHours: 24
+```
+
+A search with no eligible release records a no-match result. A failed provider call records a
+provider error. Both wait for the retry interval while other episodes remain eligible. Selection
+accepts 1080p WEB, WEB-DL and WEBRip labels, with the existing title, episode, size and seeder
+checks. The series title before the episode token must match; a title appearing inside another
+series or episode name does not qualify. Season packs remain excluded.
+
+Reconciliation checks downloader names again before delivery. It blocks a mismatched torrent,
+removes its local payload on a later reconciliation, and records the hash so that episode cannot
+select it again. Retry starts only after a fresh snapshot confirms removal. A hash shared with
+another valid catalog item stays blocked for operator inspection.
+
+Native runs submit bounded work and reconcile downloads on later scheduled runs. They do not wait
+for every download to finish. Torlink continues downloads and seeding between runs. The installation
+lease still protects each reconciliation. Recover an interrupted run before admitting another.
+
+`sudo hoardarr-operator status` shows resolved series, backlog counts and retry timing. It separates
+selected releases awaiting submission from downloads, seeds and transfer-ready episodes. A
+transferred episode counts as complete; an unavailable release remains in the backlog. Raising the
+weekly movie limit does not reset an existing weekly discovery marker.
+
+## Open the operator agent
+
+Run `hoardarr-agent` in the DevVM management shell. Pi uses the pinned runtime in the image and
+stores its private authentication and sessions under `P/runtime-home/pi-agent`. On first use, enter
+`/login` and select OpenAI's ChatGPT subscription login. Complete the browser flow; if the remote
+callback cannot reach the VM, follow Pi's prompt to paste the redirect URL. Keep that URL private.
+
+The image ships project settings for OpenAI `gpt-6-luna` with `xhigh` reasoning, codemode and
+automatic compaction. These settings take precedence over saved global defaults; explicit Pi command
+options can override the model for a session. Authentication stays in the persistent private
+directory. The settings adapt
+[this reference](https://github.com/funsaized/dotbento/blob/main/pi/settings.json) and include only
+the configured operator model.
+
+The agent uses `sudo hoardarr-operator` and the documented maintenance procedures. It can inspect
+progress and errors and perform operator actions you request. Scheduled media work continues through
+the Swamp workflow without an agent session. Application updates still require image replacement.

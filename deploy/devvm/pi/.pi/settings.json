@@ -1,0 +1,14 @@
+{
+  "defaultTools": ["+codemode"],
+  "defaultProvider": "openai",
+  "defaultModel": "gpt-6-luna",
+  "defaultThinkingLevel": "xhigh",
+  "modelThinkingLevels": { "openai/gpt-6-luna": "xhigh" },
+  "showCacheMissNotices": true,
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 32768,
+    "keepRecentTokens": 32000,
+    "modelOverrides": { "openai/gpt-6-luna": { "reserveTokens": 72000 } }
+  }
+}

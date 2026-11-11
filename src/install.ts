@@ -309,7 +309,7 @@ async function installUnlocked(
     downloadProvider: config.providers.downloader,
   });
   await define("episode-catalog", "hoardarr/episode-catalog", {
-    shows: config.interests.shows,
+    shows: config.interests.shows.filter((s) => s.tmdbId),
     policy: config.policies.episode,
     downloadProvider: config.providers.downloader,
   });
@@ -334,6 +334,9 @@ async function installUnlocked(
   await define("pipeline", "@funsaized/hoardarr/pipeline", {
     seedTime: config.download.seedTime,
     movieEnabled: config.interests.movies,
+    episodeSearchLimit: config.television.searchesPerRun,
+    episodeDownloadLimit: config.television.downloadsPerRun,
+    episodeRetryHours: config.television.retryHours,
     downloadProvider: config.providers.downloader,
     ...(config.guest ? { expectedInterface: config.guest.vpnInterface } : {}),
   });

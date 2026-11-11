@@ -28,7 +28,7 @@ with tarfile.open(args.public_export) as archive:
             raise RuntimeError("Unsafe public export member")
     archive.extractall(runtime, filter="data")
 # The export's root is an explicit allowlist. Catalogs, homes, sessions and vaults cannot enter it.
-if {p.name for p in runtime.iterdir()} != {"torlink", "deno-cache", "packages", "public-extensions", "package-versions.json", "base-dependencies.json", "package-checks.json"}:
+if {p.name for p in runtime.iterdir()} != {"pi", "torlink", "deno-cache", "packages", "public-extensions", "package-versions.json", "base-dependencies.json", "package-checks.json"}:
     raise RuntimeError("Unexpected runtime export roots")
 with (runtime / "torlink/dist/index.js").open("rb") as entrypoint:
     if hashlib.file_digest(entrypoint, "sha256").hexdigest() != pins["torlink"]["runtimeEntrypointSha256"]:

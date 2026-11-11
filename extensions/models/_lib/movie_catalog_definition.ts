@@ -9,7 +9,7 @@ import {
   PolicySchema,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.09.1";
+const MODEL_VERSION = "2026.11.11.1";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -205,7 +205,7 @@ function yearMatches(releaseName: string, year: number | null): boolean {
 
 function is1080pWebDl(lower: string, policy: Policy = moviePolicy): boolean {
   if (!new RegExp(`\\b${policy.resolution}\\b`, "i").test(lower)) return false;
-  return /\bweb[\s.-]?(dl|rip)\b/i.test(lower);
+  return /\bweb(?:[\s.-]?(?:dl|rip))?\b/i.test(lower);
 }
 
 function rejectReasons(
@@ -474,7 +474,9 @@ function advanceFromSnapshot(
         return { ...current, status: "seeding" };
       }
     }
-    if (movie.status === "selected" && snapshot.status === "downloading") {
+    if (
+      movie.status === "selected" && ["downloading", "queued", "paused"].includes(snapshot.status)
+    ) {
       return { ...current, status: "downloading" };
     }
     if (snapshot.status === "failed") {
@@ -777,7 +779,7 @@ async function executeRecordAdd(args: z.infer<typeof AddResultsSchema>, context:
 export const definition = {
   version: MODEL_VERSION,
   upgrades: [{
-    toVersion: "2026.11.09.1",
+    toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],

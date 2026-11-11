@@ -48,14 +48,16 @@ sudo install -d -m 755 /usr/share/hoardarr
 sudo cp -a "$hoardarr_layer_tmp/runtime/licenses" /usr/share/hoardarr/licenses
 sudo chown -R root:root /usr/share/hoardarr/licenses
 sudo chmod -R a+rX,go-w /usr/share/hoardarr/licenses
+sudo cp -a "$hoardarr_layer_tmp/runtime/pi" /opt/hoardarr-pi
 sudo cp -a "$hoardarr_layer_tmp/runtime/torlink" /opt/torlink
 sudo cp -a "$hoardarr_layer_tmp/runtime/hoardarr" /opt/hoardarr
 sudo cp -a "$hoardarr_layer_tmp/runtime/public-extensions" /opt/hoardarr-public-extensions
 sudo cp -a "$hoardarr_layer_tmp/runtime/deno-cache" /opt/hoardarr-cache
 # The public archive is extracted by the image builder's unprivileged user.
 # cp -a preserves that owner, so explicitly seal every runtime tree before use.
-sudo chown -R --no-dereference root:root /opt/torlink /opt/hoardarr /opt/hoardarr-public-extensions /opt/hoardarr-cache
-sudo chmod -R a+rX,go-w /opt/torlink /opt/hoardarr /opt/hoardarr-public-extensions /opt/hoardarr-cache
+sudo chown -R --no-dereference root:root /opt/hoardarr-pi /opt/torlink /opt/hoardarr /opt/hoardarr-public-extensions /opt/hoardarr-cache
+sudo chmod -R a+rX,go-w /opt/hoardarr-pi /opt/torlink /opt/hoardarr /opt/hoardarr-public-extensions /opt/hoardarr-cache
+sudo install -m 755 /opt/hoardarr/deploy/devvm/pi/launch.py /usr/local/bin/hoardarr-agent
 sudo install -m 755 /opt/hoardarr/deploy/devvm/exec.py /usr/local/libexec/hoardarr-exec
 sudo install -m 755 /opt/hoardarr/deploy/devvm/vpn-status.py /usr/local/libexec/hoardarr-vpn-status
 sudo install -m 755 /opt/hoardarr/deploy/devvm/maintenance-status.py /usr/local/libexec/hoardarr-maintenance-status

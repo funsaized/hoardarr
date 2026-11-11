@@ -2,6 +2,8 @@
 import { z } from "npm:zod@4.5.1";
 import { assertLease, invoke, type RecordData, type Runtime } from "./_lib/runtime.ts";
 import { ReceiptSchema, TransferSchema } from "./_lib/contracts.ts";
+import { type EpisodeWork, prioritizeEpisodes, type SearchState } from "./_lib/tv_backlog.ts";
+import { tvProgress } from "./_lib/tv_progress.ts";
 const Globals = z.object({
   movies: z.string().default("movie-catalog"),
   episodes: z.string().default("episode-catalog"),
@@ -9,6 +11,9 @@ const Globals = z.object({
   seedTime: z.string().default("5m"),
   movieEnabled: z.boolean().default(true),
   downloadProvider: z.string().default("torlink"),
+  episodeSearchLimit: z.number().int().min(1).max(100).default(20),
+  episodeDownloadLimit: z.number().int().min(1).max(100).default(8),
+  episodeRetryHours: z.number().int().min(1).max(720).default(24),
   batchLimit: z.number().int().min(1).max(100).default(100),
   expectedInterface: z.string().optional(),
 });
@@ -37,11 +42,13 @@ function deliveryBatch(items: Item[]): Item[] {
   ];
 }
 const WorkSchema = z.object({
+  television: z.array(z.record(z.string(), z.unknown())).default([]),
   truncated: z.boolean(),
   items: z.array(WorkItem),
   queries: z.array(z.object({ key: z.string(), query: z.string(), category: z.string() })),
   additions: z.array(z.object({ key: z.string(), input: z.string(), seedTime: z.string() })),
   activeIds: z.array(z.string()),
+  rejectedIds: z.array(z.string()).default([]),
   stoppedIds: z.array(z.string()),
   deliveries: z.array(WorkItem),
   movieIds: z.array(z.number()),
@@ -92,14 +99,39 @@ async function write(ctx: Context, spec: string, data: Row) {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.09.1",
+  version: "2026.11.11.2",
   upgrades: [{
-    toVersion: "2026.11.09.1",
+    toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.11.2",
+    description: "Validate TV series identity and retain rejected release hashes",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
   resources: {
+    submissionState: {
+      schema: z.object({ shows: z.record(z.string(), z.string()) }),
+      description: "Last episode submission per show for cross-run fairness",
+      lifetime: "infinite",
+      garbageCollection: 100,
+    },
+    searchState: {
+      schema: z.object({
+        attempts: z.record(
+          z.string(),
+          z.object({
+            searchedAt: z.iso.datetime(),
+            nextSearchAt: z.iso.datetime(),
+            outcome: z.enum(["no-match", "provider-error", "selected"]),
+          }),
+        ),
+      }),
+      description: "Durable TV search history and retry timing",
+      lifetime: "infinite",
+      garbageCollection: 100,
+    },
     work: resource(WorkSchema, "Current durable catalog work"),
     summary: resource(
       z.object({ ok: z.boolean(), count: z.number().optional() }),
@@ -168,14 +200,51 @@ export const model = {
             );
           }
         }
-        const searchable = all.filter((r) =>
-          eligible.has(r.key) && r.status !== "selected" &&
-          (r.mediaKind !== "movie" || ctx.globalArgs.movieEnabled)
-        ).slice(0, ctx.globalArgs.batchLimit);
-        const selected = all.filter((r) => r.status === "selected" && r.input).slice(
-          0,
-          ctx.globalArgs.batchLimit,
+        const state =
+          ((await ctx.readModelData("pipeline", "searchState"))[0]?.attributes.attempts ??
+            {}) as SearchState;
+        const ordered = prioritizeEpisodes(
+          episodeRows as unknown as EpisodeWork[],
+          state,
+          episodeRows.length,
+          new Date(),
         );
+        const searchEpisodes = new Set(
+          ordered.filter((r) =>
+            eligible.has(`e-${r.tmdbEpisodeId}`) &&
+            !episodeRows.some((row) =>
+              row.tmdbEpisodeId === r.tmdbEpisodeId && row.status === "selected"
+            )
+          ).slice(0, ctx.globalArgs.episodeSearchLimit ?? 20).map((r) => r.tmdbEpisodeId),
+        );
+        const tvSearch = [...searchEpisodes].map((id) => all.find((r) => r.key === `e-${id}`)!)
+          .slice(0, ctx.globalArgs.batchLimit);
+        const searchable = [
+          ...all.filter((r) =>
+            r.mediaKind === "movie" && ctx.globalArgs.movieEnabled && eligible.has(r.key) &&
+            r.status !== "selected"
+          ).slice(0, Math.max(0, ctx.globalArgs.batchLimit - tvSearch.length)),
+          ...tvSearch,
+        ];
+        const selectedEpisodes = new Set(
+          prioritizeEpisodes(
+            episodeRows.filter((r) => r.status === "selected") as unknown as EpisodeWork[],
+            {},
+            ctx.globalArgs.episodeDownloadLimit ?? 8,
+            new Date(),
+            ((await ctx.readModelData("pipeline", "submissionState"))[0]?.attributes.shows ??
+              {}) as Record<string, string>,
+          ).map((r) => r.tmdbEpisodeId),
+        );
+        const tvSelected = [...selectedEpisodes].map((id) => all.find((r) => r.key === `e-${id}`)!)
+          .filter((r) => r.input).slice(0, ctx.globalArgs.batchLimit);
+        const selected = [
+          ...all.filter((r) => r.mediaKind === "movie" && r.status === "selected" && r.input).slice(
+            0,
+            Math.max(0, ctx.globalArgs.batchLimit - tvSelected.length),
+          ),
+          ...tvSelected,
+        ];
         const active = all.filter((r) =>
           ["downloading", "seeding"].includes(r.status) && r.infoHash
         );
@@ -188,6 +257,7 @@ export const model = {
             )?.localCleanedAt
         );
         return write(ctx, "work", {
+          television: tvProgress(episodeRows, state),
           items: all,
           truncated: all.filter((r) =>
                 eligible.has(r.key) && r.status !== "selected" &&
@@ -202,6 +272,17 @@ export const model = {
             input: r.input!,
             seedTime: ctx.globalArgs.seedTime,
           })),
+          rejectedIds: [
+            ...new Set(
+              episodeRows.filter((r) =>
+                r.status === "failed" && r.error === "identity-mismatch" && r.infoHash &&
+                ![...movieRows, ...episodeRows].some((other) =>
+                  other !== r && other.infoHash === r.infoHash &&
+                  other.error !== "identity-mismatch"
+                )
+              ).map((r) => String(r.infoHash)),
+            ),
+          ].slice(0, 100),
           activeIds: [...new Set(active.map((r) => r.infoHash!))].slice(0, 100),
           stoppedIds: [...new Set(stopped.map((r) => r.infoHash!))].slice(0, 100),
           deliveries: deliveryBatch(delivery),
@@ -234,8 +315,8 @@ export const model = {
     select: {
       description:
         "Apply media eligibility and configured deterministic ranking to successful searches.",
-      arguments: Records,
-      execute: async (args: z.infer<typeof Records>, ctx: Context) => {
+      arguments: Records.extend({ searchOk: z.boolean().default(true) }),
+      execute: async (args: z.infer<typeof Records> & { searchOk?: boolean }, ctx: Context) => {
         await assertLease(ctx.repoDir, args.owner);
         const queries = (getRecord(args.records, "search-current")?.queries ?? []) as {
           key: string;
@@ -250,6 +331,31 @@ export const model = {
           }));
           if (items.length) await invoke(ctx, catalog(ctx, kind), "select", { items });
         }
+        const attempts =
+          ((await ctx.readModelData("pipeline", "searchState"))[0]?.attributes.attempts ??
+            {}) as SearchState;
+        const work = (await ctx.readModelData("pipeline", "work"))[0]?.attributes;
+        const planned = (work?.queries ?? []) as { key: string }[];
+        const currentEpisodes = await rows(ctx, "episode");
+        const now = new Date();
+        for (const { key } of planned.filter((q) => q.key.startsWith("e-"))) {
+          const id = key.slice(2), query = queries.find((q) => q.key === key);
+          const selected = currentEpisodes.some((r) =>
+            String(r.tmdbEpisodeId) === id && r.status === "selected"
+          );
+          attempts[id] = {
+            searchedAt: now.toISOString(),
+            nextSearchAt: new Date(
+              now.getTime() + (ctx.globalArgs.episodeRetryHours ?? 24) * 3600000,
+            ).toISOString(),
+            outcome: selected
+              ? "selected"
+              : (args.searchOk === false || !query?.ok)
+              ? "provider-error"
+              : "no-match",
+          };
+        }
+        await ctx.writeResource("searchState", "searchState-current", { attempts });
         return write(ctx, "summary", { ok: true });
       },
     },
@@ -269,6 +375,15 @@ export const model = {
               { results },
             );
           }
+          const shows =
+            ((await ctx.readModelData("pipeline", "submissionState"))[0]?.attributes.shows ??
+              {}) as Record<string, string>;
+          const episodes = await rows(ctx, "episode");
+          for (const result of results as { key: string; ok: boolean }[]) {
+            const row = episodes.find((e) => result.key === `e-${e.tmdbEpisodeId}`);
+            if (row && result.ok) shows[String(row.showTmdbId)] = new Date().toISOString();
+          }
+          await ctx.writeResource("submissionState", "submissionState-current", { shows });
         }
         return write(ctx, "summary", { ok: true });
       },

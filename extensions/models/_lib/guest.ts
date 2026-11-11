@@ -22,6 +22,7 @@ export const CommissionSchema = z.object({
   machineId: z.string().min(1),
   qualificationSha256: z.string().regex(/^[a-f0-9]{64}$/),
   runtimeManifestSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  waivedGates: z.array(z.enum(["G2", "G3", "G6"])).optional(),
   phase: z.enum(["commissioning", "production"]),
 }).strict();
 export const GuestIdentity = z.object({

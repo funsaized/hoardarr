@@ -41,15 +41,21 @@ export const ConfigSchema = z.object({
     movies: z.boolean().default(true),
     region: z.string().regex(/^[A-Z]{2}$/).default("US"),
     language: z.string().regex(/^[a-z]{2}(?:-[A-Z]{2})?$/).default("en-US"),
-    limit: z.number().int().min(1).max(100).default(10),
+    limit: z.number().int().min(1).max(50).default(20),
     shows: z.array(
       z.object({
-        tmdbId: z.number().int().positive(),
+        tmdbId: z.number().int().positive().optional(),
+        year: z.number().int().min(1900).max(2200).optional(),
         name: z.string().min(1),
         category: z.enum(["tv", "anime"]).default("tv"),
       }),
     ).max(100).default([]),
-  }).strict().default({ movies: true, region: "US", language: "en-US", limit: 10, shows: [] }),
+  }).strict().default({ movies: true, region: "US", language: "en-US", limit: 20, shows: [] }),
+  television: z.object({
+    searchesPerRun: z.number().int().min(1).max(100).default(20),
+    downloadsPerRun: z.number().int().min(1).max(100).default(8),
+    retryHours: z.number().int().min(1).max(720).default(24),
+  }).strict().default({ searchesPerRun: 20, downloadsPerRun: 8, retryHours: 24 }),
   policies: z.object({
     movie: PolicySchema.default(moviePolicy),
     episode: PolicySchema.default(episodePolicy),

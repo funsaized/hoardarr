@@ -43,6 +43,10 @@ def main():
         raise RuntimeError('Use the pinned Deno version')
     if subprocess.check_output(['node', '--version'], text=True).strip() != 'v' + pins['node']['version']:
         raise RuntimeError('Use the pinned Node version')
+    pi = public / 'pi'; pi.mkdir()
+    for name in ['package.json', 'package-lock.json']:
+        shutil.copyfile(source / 'deploy/devvm/pi' / name, pi / name)
+    run(['npm', 'ci', '--omit=dev', '--ignore-scripts'], pi)
     torlink = public / 'torlink'
     run(['git', 'init', torlink]); run(['git', 'remote', 'add', 'origin', 'https://github.com/baairon/torlink.git'], torlink)
     run(['git', 'fetch', '--depth', '1', 'origin', pins['torlink']['source']], torlink)
@@ -73,9 +77,14 @@ def main():
                 if not path.is_relative_to(repo.resolve()): raise RuntimeError('Unsafe extension additional file')
                 files.add(path)
     for path in files:
-        if path.is_file():
-            target = extensions / 'additional-files' / path.relative_to(repo)
-            target.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(path, target)
+        target = extensions / 'additional-files' / path.relative_to(repo)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_dir():
+            shutil.copytree(path, target, dirs_exist_ok=True)
+        elif path.is_file():
+            shutil.copyfile(path, target)
+        else:
+            raise RuntimeError('Missing public extension additional file: ' + str(path.relative_to(repo)))
     imports = [*source.glob('cli/*.ts'), *source.glob('extensions/models/*.ts'), *source.glob('extensions/reports/*.ts')]
     run(['deno', 'cache', '--frozen', *[p for p in imports if not p.name.endswith('_test.ts')]], source)
     run(['deno', 'cache', '--no-lock', *[p for p in extensions.rglob('*.ts') if not p.name.endswith('_test.ts')]], work)

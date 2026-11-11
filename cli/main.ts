@@ -1,5 +1,7 @@
 #!/usr/bin/env -S deno run --allow-all
 /** Hoardarr operator CLI. All scheduled execution remains a Swamp workflow. */
+import { tvProgress } from "../extensions/models/_lib/tv_progress.ts";
+import type { SearchState } from "../extensions/models/_lib/tv_backlog.ts";
 import { dirname, join, resolve } from "node:path";
 import { ConfigSchema, defaultConfig, encodeConfig, readConfig } from "../src/config.ts";
 import { effectiveConfiguration, ensureIdle, exists, install } from "../src/install.ts";
@@ -323,7 +325,54 @@ async function mainUnlocked(argv: string[]): Promise<void> {
       "--select",
       '{"name": name, "status": attributes.status, "error": attributes.error}',
     ], repo);
+    const episodes = await jsonCommand<{ results: Record<string, unknown>[] }>([
+      "data",
+      "query",
+      'modelName == "episode-catalog" && specName == "episode"',
+      "--select",
+      "content",
+    ], repo);
+    const attempts = await jsonCommand<{ results: { attempts: SearchState }[] }>([
+      "data",
+      "query",
+      'modelName == "pipeline" && name == "searchState-current"',
+      "--select",
+      "content",
+    ], repo);
+    const identities = await jsonCommand([
+      "data",
+      "query",
+      'specName == "resolvedShow"',
+      "--select",
+      "content",
+    ], repo);
+    const snapshots = await jsonCommand<{ results: Record<string, unknown>[] }>([
+      "data",
+      "query",
+      'name == "snapshot-current" && specName == "snapshot"',
+      "--select",
+      "content",
+    ], repo);
+    const searches = await jsonCommand<{ results: Record<string, unknown>[] }>([
+      "data",
+      "query",
+      'name == "search-current" && specName == "search"',
+      "--select",
+      "content",
+    ], repo);
     output({
+      downloader: { source: "saved-snapshot", snapshots: snapshots.results },
+      searchHealth: searches.results.map((s) => ({
+        searchedAt: s.searchedAt,
+        errors: (s.queries as Record<string, unknown>[] ?? []).flatMap((q) =>
+          Object.entries(q.sources as Record<string, { ok: boolean; error?: string }> ?? {})
+            .filter(([, source]) => !source.ok)
+            .map(([source, result]) => ({ query: q.key, source, error: result.error }))
+        ),
+      })),
+      shows: identities,
+      television: tvProgress(episodes.results, attempts.results[0]?.attempts ?? {}),
+      limits: { movieWeekly: config.interests.limit, television: config.television },
       catalog: result,
       schedule: (await effectiveConfiguration(config)).schedule,
       lease: await readLease(join(await ownershipDirectory(repo), "lease.json")),

@@ -161,3 +161,30 @@ Deno.test("admission inhibition serializes with acquisition and retains held own
     await coordinator.methods.assert.execute({ owner }, ctx);
     assert((await readLease(`${root}/.hoardarr/lease.json`))?.owner === owner);
   }));
+
+Deno.test("native acquisition reconciles without a 24-hour download wait", () => {
+  const config = nativeConfig("/tmp/hoardarr-native-bounded");
+  const workflows = workflowDefinitions(config, {});
+  const acquisition = workflows.find((w) => w.name === "hoardarr-acquisition")!;
+  const serialized = JSON.stringify(acquisition);
+  assert(serialized.includes("snapshot-before") && serialized.includes("snapshot-finished"));
+  const wait = (acquisition.jobs as { steps: { name: string; guard?: string }[] }[])
+    .flatMap((job) => job.steps).find((step) => step.name === "wait")!;
+  assert(wait.guard === "${{ true }}", "native wait must be unconditionally skipped");
+});
+
+Deno.test("commissioning receipts accept recorded upgrade waivers without relaxing other fields", async () => {
+  const { CommissionSchema } = await import("../extensions/models/_lib/guest.ts");
+  const receipt = {
+    schemaVersion: 1,
+    installationId: crypto.randomUUID(),
+    machineId: "a".repeat(32),
+    qualificationSha256: "b".repeat(64),
+    runtimeManifestSha256: "c".repeat(64),
+    phase: "production",
+  };
+  assert(CommissionSchema.safeParse(receipt).success);
+  assert(CommissionSchema.safeParse({ ...receipt, waivedGates: ["G2", "G3", "G6"] }).success);
+  assert(!CommissionSchema.safeParse({ ...receipt, waivedGates: ["G4"] }).success);
+  assert(!CommissionSchema.safeParse({ ...receipt, unreviewed: true }).success);
+});

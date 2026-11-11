@@ -97,15 +97,16 @@ Deno.test("airedEpisodes writes newest missing aired episodes and skips specials
     ctx.value,
     { fetchImpl: tmdbFetch as typeof fetch, now: () => new Date("2026-08-30T12:00:00Z") },
   );
+  const episodeWrites = ctx.writes.filter((write) => !write.name.startsWith("resolved-show-"));
   assertEquals(
-    ctx.writes.map((write) => write.name),
+    episodeWrites.map((write) => write.name),
     ["aired-episode-201", "aired-episode-101", "aired-episode-run-current"],
     "newest episodes are capped and marker is last",
   );
-  assertEquals(ctx.writes[0]?.data.showName, "The Pitt", "show details retained");
-  assertEquals(ctx.writes[2]?.data.excludedCount, 1, "catalog exclusions counted");
+  assertEquals(episodeWrites[0]?.data.showName, "The Pitt", "show details retained");
+  assertEquals(episodeWrites[2]?.data.excludedCount, 1, "catalog exclusions counted");
   assertEquals(
-    ctx.writes[2]?.data.truncated,
+    episodeWrites[2]?.data.truncated,
     false,
     "future and excluded episodes do not truncate",
   );
@@ -119,4 +120,74 @@ Deno.test("airedEpisodes declares typed resources and method", () => {
     "airedEpisodes method missing",
   );
   assertEquals(testing.episodeInstanceName(55), "aired-episode-55", "episode identity");
+});
+
+Deno.test("automatic series resolution excludes unrelated popular titles and persists identity", async () => {
+  const ctx = context();
+  const saved = new Map<string, Record<string, unknown>>();
+  ctx.value.readResource =
+    ((name: string) => Promise.resolve(saved.get(name) ?? null)) as typeof ctx.value.readResource;
+  const originalWrite = ctx.value.writeResource;
+  ctx.value.writeResource = (spec, name, data) => {
+    saved.set(name, data);
+    return originalWrite(spec, name, data);
+  };
+  let searches = 0;
+  const fetchImpl = ((input: RequestInfo | URL) => {
+    const url = new URL(input.toString());
+    if (url.pathname === "/3/search/tv") {
+      searches++;
+      return Promise.resolve(Response.json({
+        results: [
+          { id: 10, name: "Adventure Time", popularity: 999, first_air_date: "2010-01-01" },
+          { id: 1, name: "Time", popularity: 1, first_air_date: "2021-06-06" },
+          { id: 20, name: "Time", popularity: 100, first_air_date: "2018-01-01" },
+        ],
+      }));
+    }
+    return tmdbFetch(input);
+  }) as typeof fetch;
+  const args = {
+    shows: [{ name: "Time", year: 2021, category: "tv" as const }],
+    excludeIds: [],
+    limit: 20000,
+  };
+  await testing.executeAiredEpisodes(args, ctx.value, {
+    fetchImpl,
+    now: () => new Date("2026-08-30T12:00:00Z"),
+  });
+  await testing.executeAiredEpisodes(args, ctx.value, {
+    fetchImpl,
+    now: () => new Date("2026-08-30T12:00:00Z"),
+  });
+  assertEquals(searches, 1, "saved identity reused");
+  assertEquals(
+    ctx.writes.find((w) => w.spec === "resolvedShow")?.data.tmdbId,
+    1,
+    "year disambiguates exact name",
+  );
+});
+
+Deno.test("unmatched series remain pending without unrelated downloads", async () => {
+  const ctx = context();
+  await testing.executeAiredEpisodes(
+    { shows: [{ name: "Unknown", category: "tv" }], excludeIds: [], limit: 20000 },
+    ctx.value,
+    {
+      fetchImpl:
+        (() =>
+          Promise.resolve(Response.json({ results: [{ id: 1, name: "Other" }] }))) as typeof fetch,
+      now: () => new Date("2026-08-30T12:00:00Z"),
+    },
+  );
+  assertEquals(
+    ctx.writes.find((w) => w.spec === "resolvedShow")?.data.status,
+    "pending",
+    "unmatched remains pending",
+  );
+  assertEquals(
+    ctx.writes.filter((w) => w.spec === "airedEpisode").length,
+    0,
+    "no unrelated episode",
+  );
 });

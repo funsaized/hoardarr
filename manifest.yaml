@@ -1,6 +1,6 @@
 manifestVersion: 1
-name: '@funsaized/hoardarr'
-version: 2026.11.09.1
+name: "@funsaized/hoardarr"
+version: 2026.11.11.2
 description: Recoverable movie and TV automation with configurable Swamp providers
 license: MIT
 repository: https://github.com/funsaized/hoardarr
@@ -22,6 +22,9 @@ reports:
   - portable_run_summary.ts
   - migration_comparison.ts
 include:
+  - _lib/episode_identity.ts
+  - _lib/tv_backlog.ts
+  - _lib/tv_progress.ts
   - _lib/network_session_definition.ts
   - _lib/movie_catalog_definition.ts
   - _lib/episode_catalog_definition.ts
@@ -43,12 +46,12 @@ additionalFiles:
   - README.md
   - LICENSE
 dependencies:
-  - '@funsaized/torlink'
-  - '@swamp/ssh'
-  - '@keeb/mms'
-  - '@kitquiet/gluetun'
-  - '@aaronge/systemd-panel'
-  - '@whyvez/disk-usage'
+  - "@funsaized/torlink"
+  - "@swamp/ssh"
+  - "@keeb/mms"
+  - "@kitquiet/gluetun"
+  - "@aaronge/systemd-panel"
+  - "@whyvez/disk-usage"
 labels:
   - media
   - automation

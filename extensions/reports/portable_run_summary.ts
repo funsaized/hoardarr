@@ -31,6 +31,7 @@ export const report = {
       runId: context.workflowRunId,
       status: context.workflowStatus,
       items: items.map((i) => ({ key: i.key, kind: i.mediaKind, status: i.status })),
+      television: work?.television ?? [],
       failed,
     };
     const escape = (v: string) => v.replaceAll("|", "\\|").replaceAll("\n", " ");

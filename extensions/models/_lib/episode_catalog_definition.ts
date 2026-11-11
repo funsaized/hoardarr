@@ -1,5 +1,6 @@
 /** Hoardarr local episode catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4.5.1";
+import { episodeIdentityMatches } from "./episode_identity.ts";
 import { catalogRelocationMethod } from "./migration_actions.ts";
 import {
   AddResultsSchema,
@@ -9,7 +10,7 @@ import {
   PolicySchema,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.09.1";
+const MODEL_VERSION = "2026.11.11.2";
 const SPEC_EPISODE = "episode";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -84,7 +85,7 @@ const SelectArgsSchema = z.object({
 });
 
 const IngestArgsSchema = z.object({
-  discoveries: z.array(DiscoveryRecordSchema).min(1).max(500),
+  discoveries: z.array(DiscoveryRecordSchema).min(1).max(20000),
 });
 
 const TransitionSchema = z.object({
@@ -136,6 +137,9 @@ const EpisodeSchema = z.object({
   acquisitionLocator: z.string().max(32000).nullable().optional(),
   downloadProvider: z.string().optional(),
   policyVersion: z.number().int().optional(),
+  rejectedReleases: z.array(
+    z.object({ infoHash: z.string(), name: z.string(), rejectedAt: z.string() }),
+  ).default([]),
   releaseName: z.string().nullable(),
   localPath: z.string().nullable(),
   remotePath: z.string().nullable(),
@@ -259,7 +263,7 @@ function episodeTokenMatches(
 
 function is1080pWebDl(lower: string, policy: Policy = episodePolicy): boolean {
   if (!new RegExp(`\\b${policy.resolution}\\b`, "i").test(lower)) return false;
-  return /\bweb[\s.-]?(dl|rip)\b/i.test(lower);
+  return /\bweb(?:[\s.-]?(?:dl|rip))?\b/i.test(lower);
 }
 
 function isPackRelease(releaseName: string): boolean {
@@ -301,9 +305,7 @@ function evaluateRelease(
   policy: Policy = episodePolicy,
 ): { ok: boolean; reasons: string[] } {
   const reasons: string[] = [];
-  const releaseNormalized = normalize(release.name);
-  const showNormalized = normalize(episode.showName);
-  if (showNormalized.length > 0 && !releaseNormalized.includes(showNormalized)) {
+  if (!episodeIdentityMatches(episode, release.name)) {
     reasons.push("title-mismatch");
   }
   reasons.push(
@@ -364,6 +366,7 @@ function summarizeNoMatch(
 }
 
 function isSelectable(episode: Episode, policy: Policy = episodePolicy): boolean {
+  if (episode.error === "identity-mismatch" && episode.infoHash) return false;
   if (episode.status === "wanted") return true;
   if (episode.status === "failed" && episode.attempts < policy.maxAttempts) {
     return true;
@@ -388,6 +391,7 @@ function createEpisodeFromDiscovery(discovery: DiscoveryRecord): Episode {
     bytes: null,
     sha256: null,
     status: "wanted",
+    rejectedReleases: [],
     attempts: 0,
     noMatchReason: null,
     discoveredAt: discovery.discoveredAt,
@@ -546,8 +550,47 @@ function advanceFromSnapshot(
 ): Episode | null {
   if (TERMINAL_STATUSES.has(episode.status)) return null;
   if (!episode.infoHash) return null;
-  const current = snapshot?.name !== undefined && snapshot.name !== episode.releaseName
-    ? { ...episode, releaseName: snapshot.name }
+  const observedName =
+    snapshot?.name && snapshot.name.toLowerCase() !== episode.infoHash.toLowerCase()
+      ? snapshot.name
+      : undefined;
+  const invalidName = observedName && !episodeIdentityMatches(episode, observedName)
+    ? observedName
+    : episode.releaseName && !episodeIdentityMatches(episode, episode.releaseName)
+    ? episode.releaseName
+    : undefined;
+  if (invalidName || episode.error === "identity-mismatch") {
+    const rejectedReleases = [...(episode.rejectedReleases ?? [])];
+    if (
+      !rejectedReleases.some((r) => r.infoHash.toLowerCase() === episode.infoHash!.toLowerCase())
+    ) {
+      rejectedReleases.push({
+        infoHash: episode.infoHash,
+        name: invalidName ?? episode.releaseName ?? "",
+        rejectedAt: now,
+      });
+    }
+    if (snapshot) {
+      return { ...episode, rejectedReleases, status: "failed", error: "identity-mismatch" };
+    }
+    // Only release the episode for retry after a fresh snapshot confirms detachment.
+    return {
+      ...episode,
+      rejectedReleases,
+      status: "wanted",
+      infoHash: null,
+      acquisitionLocator: null,
+      releaseName: null,
+      localPath: null,
+      bytes: null,
+      sha256: null,
+      completedAt: null,
+      error: null,
+      noMatchReason: "identity-mismatch-rejected",
+    };
+  }
+  const current = observedName && observedName !== episode.releaseName
+    ? { ...episode, releaseName: observedName }
     : episode;
   // seed-stopped and transfer-ready are durable workflow checkpoints. Torrent
   // metadata may be absent while removal or transfer resumes in a later run,
@@ -567,7 +610,9 @@ function advanceFromSnapshot(
         return { ...current, status: "seeding" };
       }
     }
-    if (episode.status === "selected" && snapshot.status === "downloading") {
+    if (
+      episode.status === "selected" && ["downloading", "queued", "paused"].includes(snapshot.status)
+    ) {
       return { ...current, status: "downloading" };
     }
     if (snapshot.status === "failed") {
@@ -619,7 +664,7 @@ function computePlan(episodes: ReadonlyArray<Episode>, policy: Policy = episodeP
   for (const episode of episodes) {
     if (episode.status === "wanted" || episode.status === "selected") {
       wanted.push(episode.tmdbEpisodeId);
-    } else if (episode.status === "failed" && episode.attempts < policy.maxAttempts) {
+    } else if (episode.status === "failed" && isSelectable(episode, policy)) {
       retryable.push(episode.tmdbEpisodeId);
     } else if (episode.status === "downloading") {
       downloading.push(episode.tmdbEpisodeId);
@@ -726,7 +771,9 @@ async function executeSelect(
       ineligible++;
       continue;
     }
-    const result = pickBest(existing, item.releases, context.globalArgs?.policy ?? episodePolicy);
+    const rejected = new Set(existing.rejectedReleases.map((r) => r.infoHash.toLowerCase()));
+    const candidates = item.releases.filter((r) => !rejected.has(r.infoHash.toLowerCase()));
+    const result = pickBest(existing, candidates, context.globalArgs?.policy ?? episodePolicy);
     let next: Episode;
     if (result.release) {
       next = {
@@ -874,8 +921,12 @@ async function executeRecordAdd(args: z.infer<typeof AddResultsSchema>, context:
 export const definition = {
   version: MODEL_VERSION,
   upgrades: [{
-    toVersion: "2026.11.09.1",
+    toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.11.2",
+    description: "Validate TV series identity and retain rejected release hashes",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: GlobalArgumentsSchema,

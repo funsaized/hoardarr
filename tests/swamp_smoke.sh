@@ -3,7 +3,7 @@
 set -euo pipefail
 smoke_repo="$(mktemp -d)"
 smoke_source="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-trap 'rm -rf -- "$smoke_repo"' EXIT
+trap 'code=$?; if [ "$code" = 0 ]; then rm -rf -- "$smoke_repo"; else echo "Failed smoke artifacts: $smoke_repo" >&2; fi' EXIT
 "$smoke_source/bin/hoardarr" init --profile demo --dir "$smoke_repo" --json
 "$smoke_source/bin/hoardarr" plan --dir "$smoke_repo" --json > "$smoke_repo/plan.json"
 "$smoke_source/bin/hoardarr" run --dir "$smoke_repo" --json > "$smoke_repo/first.json"

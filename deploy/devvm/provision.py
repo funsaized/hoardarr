@@ -118,6 +118,8 @@ recovery_dropin=Path("/etc/systemd/system/nordvpnd.service.d/hoardarr-recovery.c
 recovery_dropin.parent.mkdir(parents=True,exist_ok=True)
 recovery_dropin.write_text("[Service]\nExecStartPre=/usr/bin/rm -f /run/hoardarr/recovery.expected.json\n")
 recovery_dropin.chmod(0o644)
+# NordVPN's CLI requires an existing home even for isolated read-only observation.
+run(["install", "-d", "-m", "700", "-o", "root", "-g", "root", "/var/lib/hoardarr-vpn-status"])
 # Bootstrap only the read-only observation sockets, so native-init can prove that writers are stopped.
 for label, helper in [("maintenance-status", "maintenance-status"), ("vpn-status", "vpn-status")]:
     socket = f"[Unit]\nDescription=Hoardarr read-only {label}\n[Socket]\nListenStream=/run/hoardarr/{label}.sock\nAccept=yes\nSocketUser={owner.pw_name}\nSocketMode=0600\nDirectoryMode=0755\n[Install]\nWantedBy=sockets.target\n"
@@ -126,7 +128,14 @@ for label, helper in [("maintenance-status", "maintenance-status"), ("vpn-status
     Path(f"/etc/systemd/system/hoardarr-{label}@.service").write_text(service)
 run(["systemctl", "daemon-reload"])
 run(["systemctl", "enable", "--now", "hoardarr-maintenance-status.socket", "hoardarr-vpn-status.socket", "hoardarr-egress-guard.service"])
-base = ["runuser", "-u", owner.pw_name, "--", "/usr/local/libexec/hoardarr-exec"]
+# Bootstrap extensions under the same direct DNS and privilege boundary as
+# hoardarr-operator. A login shell's loopback resolver is blocked by the UID guard.
+base = ["systemd-run", "--wait", "--pipe", "--collect", "--quiet", "--expand-environment=no",
+        "-p", "User=" + owner.pw_name, "-p", "Group=" + str(owner.pw_gid),
+        "-p", "NoNewPrivileges=yes", "-p", "UMask=0077", "-p", "KillMode=control-group",
+        "-p", "WorkingDirectory=" + str(repo),
+        "-p", "BindReadOnlyPaths=/etc/hoardarr/resolv.conf:/etc/resolv.conf",
+        "/usr/local/libexec/hoardarr-exec"]
 if args.mode == "fresh":
     run(base + ["/usr/local/bin/deno", "run", "--cached-only", "--allow-all", "/opt/hoardarr/cli/main.ts", "native-init", "--dir", str(repo), "--no-pull"])
 elif args.mode == "rebuild":

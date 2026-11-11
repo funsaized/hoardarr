@@ -8,10 +8,14 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import sys
+sys.path.insert(0, '/opt/hoardarr/deploy/devvm')
+from qualification_evidence import validate_evidence
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('phase',choices=['commissioning','production'])
 parser.add_argument('--evidence',required=True)
+parser.add_argument('--allow-waived-upgrade-checks',action='store_true',help='Honor recorded operator waivers for disruptive checks on a previously commissioned installation')
 args=parser.parse_args()
 if os.geteuid()!=0:raise RuntimeError('Root must authorize the qualified installation')
 identity_path=Path('/etc/hoardarr/instance.json')
@@ -26,11 +30,11 @@ manifest_bytes=manifest_path.read_bytes()
 manifest_sha=hashlib.sha256(manifest_bytes).hexdigest()
 proof_bytes=Path(args.evidence).read_bytes()
 proof=json.loads(proof_bytes)
-required=['G1','G2','G3','G4','G5']+(['G6'] if args.phase=='production' else [])
-if proof.get('schemaVersion')!=1 or proof.get('runtimeManifestSha256')!=manifest_sha or any(proof.get('gates',{}).get(gate,{}).get('passed') is not True for gate in required):
-    raise RuntimeError('The exact installed runtime has not passed every required gate')
+previous_path=Path(identity['projectRoot'])/'state/maintenance/commissioned.json'
+previous=json.loads(previous_path.read_text()) if previous_path.exists() else {}
+waived=validate_evidence(proof,manifest_sha,identity,previous,args.phase,args.allow_waived_upgrade_checks)
 # Verify installed executable/code assets against the immutable layer manifest.
-prefixes={'bin/':Path('/usr/local/bin'),'torlink/':Path('/opt/torlink'),'hoardarr/':Path('/opt/hoardarr'),
+prefixes={'pi/':Path('/opt/hoardarr-pi'),'bin/':Path('/usr/local/bin'),'torlink/':Path('/opt/torlink'),'hoardarr/':Path('/opt/hoardarr'),
           'public-extensions/':Path('/opt/hoardarr-public-extensions'),'deno-cache/':Path('/opt/hoardarr-cache')}
 for entry in json.loads(manifest_bytes)['entries']:
     name=entry['path']
@@ -58,7 +62,7 @@ if json.loads((maintenance/'ownership/admission.json').read_text()).get('inhibit
 value={'schemaVersion':1,'installationId':identity['installationId'],
        'machineId':Path('/etc/machine-id').read_text().strip(),
        'qualificationSha256':hashlib.sha256(proof_bytes).hexdigest(),
-       'runtimeManifestSha256':manifest_sha,'phase':args.phase}
+       'runtimeManifestSha256':manifest_sha,'phase':args.phase,'waivedGates':waived}
 def publish(path,data,mode):
     temporary=path.with_name(path.name+'.'+str(uuid.uuid4())+'.pending')
     fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,mode)
@@ -70,4 +74,4 @@ def publish(path,data,mode):
     finally:os.close(fd)
 publish(maintenance/'commissioned.json',value,0o600)
 publish(Path('/etc/hoardarr/commissioned.json'),value,0o644)
-print(json.dumps({'authorizedPhase':args.phase,'installationId':identity['installationId'],'admissions':'remain inhibited'}))
+print(json.dumps({'authorizedPhase':args.phase,'installationId':identity['installationId'],'admissions':'remain inhibited','waivedGates':waived}))

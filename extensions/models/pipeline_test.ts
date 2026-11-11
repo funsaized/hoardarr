@@ -119,3 +119,137 @@ Deno.test("pipeline plans every ready delivery and pending cleanup beyond the ac
     ]);
     assert(!plan.truncated, "Multiple ready episodes must not mark the plan truncated");
   }));
+
+Deno.test("TV search budgets persist no-match and provider failure independently", () =>
+  temporary(async (root) => {
+    const owner = crypto.randomUUID();
+    const episodes = Array.from(
+      { length: 30 },
+      (_, i) => ({
+        tmdbEpisodeId: i + 1,
+        showTmdbId: i % 4 + 1,
+        showName: "Example",
+        airDate: "2026-11-01",
+        seasonNumber: 1,
+        episodeNumber: i + 1,
+        category: "tv",
+        status: "wanted",
+        infoHash: null,
+        releaseName: null,
+      }),
+    );
+    const saved = new Map<string, { name: string; attributes: Record<string, unknown> }>();
+    const ctx: Runtime & { globalArgs: ReturnType<typeof model.globalArguments.parse> } = {
+      repoDir: root,
+      signal: new AbortController().signal,
+      globalArgs: model.globalArguments.parse({ episodeSearchLimit: 20 }),
+      readModelData: async (name, spec) =>
+        name === "episode-catalog"
+          ? episodes.map((e) => ({ name: `catalog-episode-${e.tmdbEpisodeId}`, attributes: e }))
+          : name === "pipeline"
+          ? [...saved.values()].filter((r) => r.name === `${spec}-current`)
+          : [],
+      writeResource: async (_spec, name, attributes) => {
+        saved.set(name, { name, attributes });
+        return { name };
+      },
+      runModel: async ({ definition, method }) => ({
+        ok: true,
+        resources: method === "plan"
+          ? [{
+            name: "plan-current",
+            attributes: {
+              wanted: definition === "episode-catalog" ? episodes.map((e) => e.tmdbEpisodeId) : [],
+              retryable: [],
+            },
+          }]
+          : [],
+      }),
+    };
+    await coordinator.methods.acquire.execute({ owner }, ctx);
+    await model.methods.plan.execute({ owner }, ctx);
+    const queries = saved.get("work-current")!.attributes.queries as { key: string }[];
+    assert(queries.length === 20);
+    await model.methods.select.execute({
+      owner,
+      searchOk: true,
+      records: [{
+        name: "search-current",
+        attributes: { queries: queries.map((q, i) => ({ ...q, ok: i !== 0, results: [] })) },
+      }],
+    }, ctx);
+    const state = saved.get("searchState-current")!.attributes.attempts as Record<
+      string,
+      { outcome: string }
+    >;
+    assert(state[queries[0].key.slice(2)].outcome === "provider-error");
+    assert(state[queries[1].key.slice(2)].outcome === "no-match");
+    await model.methods.plan.execute({ owner }, ctx);
+    assert(
+      (saved.get("work-current")!.attributes.queries as unknown[]).length === 10,
+      "cooldowns leave other backlog eligible",
+    );
+  }));
+
+Deno.test("TV submissions cap at eight, rotate persistently, and exclude in-flight work independently of movies", () =>
+  temporary(async (root) => {
+    const owner = crypto.randomUUID();
+    const episodes = Array.from({ length: 24 }, (_, i) => ({
+      tmdbEpisodeId: i + 1,
+      showTmdbId: i % 4 + 1,
+      showName: "Fixture",
+      seasonNumber: 1,
+      episodeNumber: i + 1,
+      airDate: "2026-01-01",
+      category: "tv",
+      status: i === 0 ? "downloading" : "selected",
+      infoHash: `hash-${i}`,
+      releaseName: "Fixture",
+    }));
+    const saved = new Map<string, { name: string; attributes: Record<string, unknown> }>();
+    const ctx: Runtime & { globalArgs: ReturnType<typeof model.globalArguments.parse> } = {
+      repoDir: root,
+      signal: new AbortController().signal,
+      globalArgs: model.globalArguments.parse({ movieEnabled: false }),
+      readModelData: async (name, spec) =>
+        name === "episode-catalog"
+          ? episodes.map((attributes) => ({
+            name: `catalog-${attributes.tmdbEpisodeId}`,
+            attributes,
+          }))
+          : name === "pipeline"
+          ? [...saved.values()].filter((r) => r.name === `${spec}-current`)
+          : [],
+      writeResource: async (_spec, name, attributes) => {
+        saved.set(name, { name, attributes });
+        return { name };
+      },
+      runModel: async () => ({ ok: true, resources: [] }),
+    };
+    await coordinator.methods.acquire.execute({ owner }, ctx);
+    await model.methods.plan.execute({ owner }, ctx);
+    const additions = saved.get("work-current")!.attributes.additions as { key: string }[];
+    assert(additions.length === 8);
+    assert(!additions.some((r) => r.key === "e-1"));
+    const counts = new Map<number, number>();
+    for (const item of additions) {
+      const show = episodes.find((e) => `e-${e.tmdbEpisodeId}` === item.key)!.showTmdbId;
+      counts.set(show, (counts.get(show) ?? 0) + 1);
+    }
+    deepStrictEqual([...counts.values()], [2, 2, 2, 2]);
+    ctx.globalArgs.episodeDownloadLimit = 1;
+    await model.methods.plan.execute({ owner }, ctx);
+    const first = (saved.get("work-current")!.attributes.additions as { key: string }[])[0];
+    await model.methods.recordAdd.execute({
+      owner,
+      records: [{ name: "operation-add", attributes: { results: [{ ...first, ok: true }] } }],
+    }, ctx);
+    // Reload through the resource boundary as a subsequent process would.
+    for (const [key, value] of saved) saved.set(key, JSON.parse(JSON.stringify(value)));
+    await model.methods.plan.execute({ owner }, ctx);
+    const next = (saved.get("work-current")!.attributes.additions as { key: string }[])[0];
+    assert(
+      episodes.find((e) => `e-${e.tmdbEpisodeId}` === first.key)!.showTmdbId !==
+        episodes.find((e) => `e-${e.tmdbEpisodeId}` === next.key)!.showTmdbId,
+    );
+  }));

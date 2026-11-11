@@ -4,6 +4,6 @@ import { definition } from "./_lib/episode_catalog_definition.ts";
 export const model = {
   ...definition,
   type: "@funsaized/hoardarr/episode-catalog",
-  version: "2026.11.09.1",
+  version: "2026.11.11.2",
   upgrades: definition.upgrades,
 };

@@ -34,8 +34,10 @@ credential handoff. Application commands below run inside the guest shell.
 | Refresh discovery and preview | `sudo hoardarr-operator plan --refresh` |
 | Manual reconciliation         | `sudo hoardarr-operator run`            |
 
-`plan --refresh` can contact discovery services. `run` does real acquisition and cleanup. A run can
-deliver all ready movies in sequence, followed by all ready episodes in sequence.
+`plan` writes workflow history and reports. Use `status` and saved Swamp queries for read-only
+inspection. `plan --refresh` can contact discovery services and update the catalog. `run` does real
+acquisition and cleanup. A run can deliver all ready movies in sequence, followed by all ready
+episodes in sequence.
 
 ## Guest: maintenance
 
