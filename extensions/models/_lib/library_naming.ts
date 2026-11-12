@@ -80,21 +80,25 @@ export function fileNames(paths: string[], stem: string): { from: string; to: st
     }
     const base = basename(from), oldStem = base.slice(0, base.lastIndexOf("."));
     let suffix = oldStem.startsWith(mainStem) ? oldStem.slice(mainStem.length) : "";
-    if (!suffix) {
-      const tags = oldStem.match(
-        /(?:^|[ ._-])((?:[a-z]{2,3}|English|Japanese|Spanish|French|German)(?:[ ._-](?:forced|default|sdh|cc))*)$/i,
-      );
-      suffix = tags ? "." + tags[1] : "";
-    }
+    if (!suffix && oldStem !== mainStem) suffix = oldStem;
     suffix = suffix.replace(/^[ ._-]+/, "").replace(/[ _]+/g, ".").toLowerCase();
     if (!suffix && ++subtitleIndex > 1) suffix = `subtitle-${subtitleIndex}`;
     return { from, to: `${stem}${suffix ? "." + namePart(suffix, "subtitles", 40) : ""}.${ext}` };
   });
-  if (new Set(mappings.map((m) => m.to.toLowerCase())).size !== mappings.length) {
-    throw new LibraryItemError(
-      "filename-collision",
-      "Two files would receive the same library name",
-    );
+  // Releases can contain several subtitle tracks with the same language label.
+  // Keep every track, reserving explicit names before allocating stable suffixes.
+  const reserved = new Set(mappings.map((m) => m.to.toLowerCase()));
+  const used = new Set<string>();
+  for (const mapping of mappings) {
+    if (used.has(mapping.to.toLowerCase())) {
+      const dot = mapping.to.lastIndexOf(".");
+      const base = mapping.to.slice(0, dot), ext = mapping.to.slice(dot);
+      let index = 2, candidate: string;
+      do candidate = `${base}.${index++}${ext}`; while (reserved.has(candidate.toLowerCase()));
+      mapping.to = candidate;
+      reserved.add(candidate.toLowerCase());
+    }
+    used.add(mapping.to.toLowerCase());
   }
   return mappings;
 }

@@ -24,8 +24,9 @@ not discover or submit new downloads.
 
 A movie becomes `Movies/Title (Year)/Title (Year).mkv`. A TV episode becomes
 `TV/Show (Year)/Season 01/Show - S01E01 - Episode Title.mkv`. Hoardarr keeps the actual extension
-and subtitle language suffixes and omits an unknown year. Folder names stay attached to the movie or
-series ID even if later discovery returns a different title.
+and subtitle labels, including regional variants and accessibility flags, and omits an unknown year.
+Repeated subtitle names get numbered suffixes so every track survives. Folder names stay attached to
+the movie or series ID even if later discovery returns a different title.
 
 Reorganization copies the old item through staging, verifies the named destination and commits the
 new catalog location before removing the old files. Allow temporary space for another copy of each

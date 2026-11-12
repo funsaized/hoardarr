@@ -25,11 +25,46 @@ Deno.test("canonical names retain title, year, season and subtitle language", ()
   assert(new TextEncoder().encode(namePart("界".repeat(200))).length <= 180);
 });
 
-Deno.test("ambiguous main videos and subtitle name collisions require an explicit resolution", async () => {
+Deno.test("ambiguous main videos require an explicit resolution", async () => {
   await rejects(() => fileNames(["Part1.mkv", "Part2.mkv"], "Movie"));
-  await rejects(() => fileNames(["Release.mkv", "Subs/en.srt", "Other/en.srt"], "Movie"));
   deepStrictEqual(fileNames(["Release.mkv", "Sample/sample.mkv"], "Movie"), [
     { from: "Release.mkv", to: "Movie.mkv" },
     { from: "Sample/sample.mkv", to: "Movie - sample-1.mkv" },
   ]);
+});
+
+Deno.test("duplicate subtitle languages retain every track with stable available suffixes", () => {
+  const paths = [
+    "Release.mkv",
+    "Subs/B/English.srt",
+    "Subs/A/English.srt",
+    "Release.english.2.srt",
+    "Subs/C/english.srt",
+  ];
+  const expected = [
+    { from: "Release.english.2.srt", to: "Movie.english.2.srt" },
+    { from: "Release.mkv", to: "Movie.mkv" },
+    { from: "Subs/A/English.srt", to: "Movie.english.srt" },
+    { from: "Subs/B/English.srt", to: "Movie.english.3.srt" },
+    { from: "Subs/C/english.srt", to: "Movie.english.4.srt" },
+  ];
+  deepStrictEqual(fileNames(paths, "Movie"), expected);
+  deepStrictEqual(fileNames(paths.toReversed(), "Movie"), expected);
+});
+
+Deno.test("subtitle labels retain regional variants and accessibility flags", () => {
+  deepStrictEqual(
+    fileNames([
+      "Release.mp4",
+      "Subs/Brazilian.por.srt",
+      "Subs/European.por.srt",
+      "Subs/SDH.eng.HI.srt",
+    ], "Movie"),
+    [
+      { from: "Release.mp4", to: "Movie.mp4" },
+      { from: "Subs/Brazilian.por.srt", to: "Movie.brazilian.por.srt" },
+      { from: "Subs/European.por.srt", to: "Movie.european.por.srt" },
+      { from: "Subs/SDH.eng.HI.srt", to: "Movie.sdh.eng.hi.srt" },
+    ],
+  );
 });

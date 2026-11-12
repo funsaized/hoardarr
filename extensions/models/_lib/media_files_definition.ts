@@ -23,7 +23,7 @@ import {
 import { fileNames } from "./library_naming.ts";
 import { dirname, join } from "node:path";
 
-const VERSION = "2026.11.12.1";
+const VERSION = "2026.11.12.2";
 
 const CONFIG = {
   stagingRoot: `${Deno.env.get("HOME") ?? "/nonexistent"}/Downloads/hoardarr/movies`,
@@ -1733,6 +1733,10 @@ export const definition = {
   }, {
     toVersion: "2026.11.12.1",
     description: "Preserve existing records and add optional canonical library paths",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.12.2",
+    description: "Preserve arguments while retaining distinct subtitle tracks",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: z.object({
