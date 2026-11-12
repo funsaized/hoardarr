@@ -120,15 +120,11 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
     call(
       "network",
       "network-provider",
-      native ? "assertReady" : "enterDownload",
+      "assertReady",
       {},
       config.profile === "demo" ? undefined : "capacity-ready",
     ),
   );
-  if (config.profile === "systemd-nordvpn-ssh") {
-    acquisition.push(method("start", "torlink-unit", "startUser", {}, "network"));
-    acquisition.push(method("ready", "torlink", "waitHealthy", {}, "start"));
-  }
   const started = String(acquisition.at(-1)!.name);
   acquisition.push(call("health", "download-provider", "health", {}, started));
   if (native) acquisition.push(call("binding", "download-provider", "network", {}, "health"));
@@ -230,32 +226,8 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       records: records("snapshot-added"),
     }, "snapshot-added"),
   );
-  acquisition.push(plan("wait-plan", "reconcile-added"));
-  acquisition.push(
-    skip(
-      call(
-        "wait",
-        "download-provider",
-        "wait",
-        {
-          ids: expr('steps["wait-plan"].outputs.activeIds'),
-          until: "seed-stopped",
-          timeoutSeconds: config.download.timeoutSeconds,
-        },
-        "wait-plan",
-        true,
-      ),
-      native ? "true" : 'size(steps["wait-plan"].outputs.activeIds) == 0',
-    ),
-  );
-  acquisition.push(call("snapshot-finished", "download-provider", "sync", {}, "wait"));
-  acquisition.push(
-    method("reconcile-finished", "pipeline", "reconcile", {
-      ...owned,
-      records: records("snapshot-finished"),
-    }, "snapshot-finished"),
-  );
-  acquisition.push(plan("detach-plan", "reconcile-finished"));
+  // Each tick observes durable downloader state and returns; downloads continue in the daemon.
+  acquisition.push(plan("detach-plan", "reconcile-added"));
   const noDetach = 'size(steps["detach-plan"].outputs.stoppedIds) == 0';
   acquisition.push(
     skip(
@@ -282,21 +254,6 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       noDetach,
     ),
   );
-  if (config.profile === "systemd-nordvpn-ssh") {
-    acquisition.push(method("stop", "torlink-unit", "stopUser", {}, "transfer-ready"));
-  }
-  if (!native) {
-    acquisition.push(
-      call(
-        "transfer-network",
-        "network-provider",
-        "enterTransfer",
-        {},
-        String(acquisition.at(-1)!.name),
-      ),
-    );
-  }
-
   const item = expr("inputs.item");
   const noDelivery = 'inputs.item.status != "transfer-ready"';
   const fileInputs = { tmdbId: expr("inputs.item.id"), mediaKind: expr("inputs.item.mediaKind") };
@@ -362,38 +319,13 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
     ),
   );
   const recovery: Node[] = [method("ownership", "coordinator", "assert", owned)];
-  if (config.profile === "systemd-nordvpn-ssh") {
-    recovery.push(method("stop", "torlink-unit", "stopUser", {}, "ownership"));
-    recovery.push(method("close", "mac", "close", { hosts: `name:${config.ssh!.host}` }, "stop"));
-  }
-  if (!native) {
-    recovery.push(
-      call("restore", "network-provider", "restore", {}, String(recovery.at(-1)!.name)),
-    );
-  }
-  // Native recovery needs a fresh downloader snapshot, even when the tunnel is down.
-  // Loopback remains direct; an unavailable daemon retains ownership for investigation.
-  if (native) {
-    recovery.push(call("snapshot", "download-provider", "sync", {}, "ownership"));
-    recovery.push(
-      method(
-        "reconcile",
-        "pipeline",
-        "reconcile",
-        { ...owned, records: records("snapshot") },
-        "snapshot",
-      ),
-    );
-  }
-  // A container's firewall owns the fail-closed boundary; a down VPN must not prevent lease release.
-  if (config.profile === "compose-vpn-local") {
-    (recovery.at(-1)!.task as Node).inputs = {
-      ...owned,
-      operation: "restore",
-      inputs: {},
-      tolerateFailure: true,
-    };
-  }
+  // Recovery reconciles local daemon state even when its VPN is unavailable.
+  // A failed snapshot retains ownership rather than admitting duplicate work.
+  recovery.push(call("snapshot", "download-provider", "sync", {}, "ownership"));
+  recovery.push(method("reconcile", "pipeline", "reconcile", {
+    ...owned,
+    records: records("snapshot"),
+  }, "snapshot"));
 
   const mainInputs = {
     type: "object",
@@ -404,20 +336,16 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   };
   const owner = expr("run.id");
   const rootSteps: Node[] = [
-    ...(native
-      ? [
-        skip(
-          method("readiness", "network-provider", "invoke", {
-            owner,
-            operation: "assertReady",
-            inputs: {},
-          }),
-          "inputs.dryRun && !inputs.refresh",
-        ),
-      ]
-      : []),
     skip(
-      child("discover", "hoardarr-discovery", { owner }, native ? "readiness" : undefined),
+      method("readiness", "network-provider", "invoke", {
+        owner,
+        operation: "assertReady",
+        inputs: {},
+      }),
+      "inputs.dryRun && !inputs.refresh",
+    ),
+    skip(
+      child("discover", "hoardarr-discovery", { owner }, "readiness"),
       "inputs.dryRun && !inputs.refresh",
     ),
     method("plan", "pipeline", "plan", { owner }, "discover"),

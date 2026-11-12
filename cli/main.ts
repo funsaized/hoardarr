@@ -5,7 +5,7 @@ import type { SearchState } from "../extensions/models/_lib/tv_backlog.ts";
 import { dirname, join, resolve } from "node:path";
 import { ConfigSchema, defaultConfig, encodeConfig, readConfig } from "../src/config.ts";
 import { effectiveConfiguration, ensureIdle, exists, install } from "../src/install.ts";
-import { backup, importDeployment, removePinnedSourceOverrides } from "../src/migrate.ts";
+import { backup } from "../src/backup.ts";
 import { command, jsonCommand, swamp } from "../src/swamp.ts";
 import { prepareCompose } from "../src/compose.ts";
 import { doctor } from "../src/doctor.ts";
@@ -51,8 +51,6 @@ recover    Restore the environment and release an interrupted run's ownership.
 recover-apply Roll back an interrupted native configuration transaction (--journal PATH).
 recover-maintenance Verify and release a restored snapshot's own maintenance owner (--snapshot, --owner).
 schedule   enable|disable the generated schedule.
-migrate    Import an existing systemd deployment; --apply backs up and migrates it.
-upgrade    Back up and apply the selected configuration with current code.
 backup     Archive installation definitions and state outside the installation.
 native-init Initialize a fresh, root-identified guest installation; admissions stay inhibited.
 native-check Assert commissioning, storage, admission, downloader state and guest readiness.
@@ -158,11 +156,11 @@ async function mainUnlocked(argv: string[]): Promise<void> {
   }
   if (action === "init") {
     if (await exists(configPath)) {
-      throw new Error("Configuration already exists; use apply or upgrade");
+      throw new Error("Configuration already exists; use apply");
     }
     const profile = option("--profile", "compose-vpn-local") as "demo" | "compose-vpn-local";
     if (!["demo", "compose-vpn-local"].includes(profile)) {
-      throw new Error("Use migrate to import the systemd profile");
+      throw new Error("Use demo or compose-vpn-local; native images use protected provisioning");
     }
     if (profile === "compose-vpn-local") {
       await prepareCompose(repo);
@@ -180,22 +178,6 @@ async function mainUnlocked(argv: string[]): Promise<void> {
         ? "hoardarr run"
         : "Configure VPN, credentials and mounts, then run doctor",
     });
-    return;
-  }
-  if (action === "migrate") {
-    const config = argv.includes("--config")
-      ? await readConfig(configPath)
-      : await importDeployment(repo);
-    if (!argv.includes("--apply")) {
-      output(encodeConfig(config));
-      return;
-    }
-    const archive = await backup(repo, option("--backup-dir", `${repo}-backups`)!);
-    await install(config, repo, {
-      pull: !argv.includes("--no-pull"),
-      beforeApply: () => removePinnedSourceOverrides(repo),
-    });
-    output({ migrated: repo, backup: archive, scheduleEnabled: config.schedule.enabled });
     return;
   }
   if (action === "backup") {
@@ -282,12 +264,9 @@ async function mainUnlocked(argv: string[]): Promise<void> {
     output({ ready: true });
     return;
   }
-  if (action === "apply" || action === "upgrade") {
-    const archive = action === "upgrade"
-      ? await backup(repo, option("--backup-dir", `${repo}-backups`)!)
-      : null;
+  if (action === "apply") {
     await install(config, repo, { pull: !argv.includes("--no-pull") });
-    output({ applied: repo, backup: archive });
+    output({ applied: repo });
     return;
   }
   if (action === "schedule") {
@@ -471,9 +450,7 @@ export async function main(argv: string[]): Promise<void> {
   if (["init", "restore", "inhibit"].includes(action)) return await mainUnlocked(argv);
   const exclusive = [
     "apply",
-    "upgrade",
     "backup",
-    "migrate",
     "migration",
     "schedule",
     "recover",

@@ -201,7 +201,7 @@ export async function assertGuestContext(config: Config, repo: string): Promise<
   }
 }
 
-/** Root identity determines the durable native config location; legacy config stays repo-local. */
+/** Root identity determines the durable native config location; demo and Compose configuration stays repo-local. */
 export async function configurationPath(repo: string): Promise<string> {
   try {
     const value = await readGuestIdentity();

@@ -17,7 +17,6 @@
     "node_modules",
     ".hoardarr",
     "hoardarr.yaml",
-    "tests/fixtures/legacy",
     ".vale"
   ]
 }

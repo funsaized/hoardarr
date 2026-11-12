@@ -25,19 +25,14 @@ export const pins = {
   "@swamp/ssh": "2026.07.28.1",
   "@keeb/mms": "2026.07.18.1",
   "@kitquiet/gluetun": "2026.07.23.1",
-  "@aaronge/systemd-panel": "2026.08.27.2",
   "@whyvez/disk-usage": "2026.05.28.1",
 };
 export function profilePins(config: Config): Record<string, string> {
   if (config.profile === "demo") return {};
-  if (config.profile === "devvm-nordvpn-local") {
-    return Object.fromEntries(
-      Object.entries(pins).filter(([name]) =>
-        ["@funsaized/torlink", "@keeb/mms", "@whyvez/disk-usage"].includes(name)
-      ),
-    );
-  }
-  return pins;
+  const required = new Set(["@funsaized/torlink", "@keeb/mms", "@whyvez/disk-usage"]);
+  if (config.profile === "compose-vpn-local") required.add("@kitquiet/gluetun");
+  if (config.providers.destination === "ssh") required.add("@swamp/ssh");
+  return Object.fromEntries(Object.entries(pins).filter(([name]) => required.has(name)));
 }
 export async function exists(path: string): Promise<boolean> {
   try {
@@ -92,7 +87,7 @@ export async function ensureIdle(repo: string): Promise<void> {
 export async function install(
   config: Config,
   repo: string,
-  options: { pull?: boolean; beforeApply?: () => Promise<unknown> } = {},
+  options: { pull?: boolean } = {},
 ): Promise<void> {
   if (config.guest) {
     await assertGuestContext(config, repo);
@@ -121,7 +116,6 @@ export async function install(
     await applyTransaction(
       repo,
       async () => {
-        await options.beforeApply?.();
         await installUnlocked(config, repo, options);
       },
       config.guest
@@ -200,7 +194,6 @@ async function installUnlocked(
         "cli",
         "bin",
         "deploy",
-        "docs",
         "examples",
         "licenses",
       ]
@@ -348,7 +341,7 @@ async function installUnlocked(
       ? "torlink"
       : id === "tmdb"
       ? "movie-discovery"
-      : id === "nordvpn" || id === "guest-nordvpn"
+      : id === "guest-nordvpn"
       ? "network-session"
       : id === "fixture"
       ? "fixture"
@@ -374,22 +367,7 @@ async function installUnlocked(
           ...(config.guest ? { storage: config.guest.storage } : {}),
         };
       }
-      if (id === "ssh") {
-        settings = {
-          sshModel: "mac",
-          host: config.ssh!.host,
-          stagingRoot: config.paths.staging,
-          movies: config.ssh!.movies,
-          episodes: config.ssh!.episodes,
-        };
-      }
-      if (id === "nordvpn") {
-        settings = {
-          vpnCountry: config.host!.vpnCountry,
-          vpnCity: config.host!.vpnCity,
-          macHost: config.ssh!.host,
-        };
-      }
+      if (id === "ssh") settings = { ...settings, stagingRoot: config.paths.staging };
       if (id === "gluetun") settings = { gluetunModel: "gluetun" };
       if (id === "guest-nordvpn") {
         settings = {
@@ -434,44 +412,6 @@ async function installUnlocked(
   if (config.profile !== "demo") {
     await define("staging-disk", "@whyvez/disk-usage", { path: config.paths.staging });
   }
-  if (config.host) {
-    for (
-      const [name, unit] of [["torlink-unit", "torlink.service"], [
-        "hoardarr-swamp-unit",
-        "hoardarr-swamp.service",
-      ]]
-    ) await define(name, "@aaronge/systemd-panel", { unit, kind: "service", useSudo: false });
-    const ssh = config.ssh!;
-    await define("mac", "@swamp/ssh", {
-      name: "hoardarr-destination",
-      transport: {
-        kind: "ssh",
-        user: ssh.user,
-        port: 22,
-        auth: { kind: "key" },
-        identityFile: ssh.identityFile,
-        identitiesOnly: true,
-        knownHostsFile: ssh.knownHostsFile,
-        strictHostKeyChecking: "yes",
-        connectTimeoutSec: 10,
-        extraOptions: [],
-        controlMaster: { enabled: true, persistSec: 600 },
-      },
-      hosts: [{ name: ssh.host, address: ssh.host, tags: ["media"], attrs: {} }],
-    });
-    await systemdAssets(config, repo);
-    await define("host-bootstrap", "hoardarr/host-bootstrap", {
-      assetsDir: join(repo, "assets/systemd"),
-      unitDir: join(config.host.home, ".config/systemd/user"),
-      stateDir: config.paths.state,
-      stagingDir: config.paths.staging,
-      torlinkDir: config.host.torlinkDir,
-      operatorUser: config.host.user,
-      swampBinary: config.host.swamp,
-      nodeBinary: config.host.node,
-      torlinkBinary: config.torlink.binary,
-    });
-  }
   const ids: Record<string, string> = {}, paths: Record<string, string> = {};
   for (
     const name of [
@@ -492,37 +432,6 @@ async function installUnlocked(
   const effectiveConfig = await effectiveConfiguration(config);
   for (const workflow of workflowDefinitions(effectiveConfig, ids)) {
     await Deno.writeTextFile(paths[String(workflow.name)], stringify(workflow));
-  }
-  // Retain the old manual name and UUID, but route it through the same exclusion boundary.
-  const oldMovies = await swamp(["workflow", "get", "movies", "--json"], repo);
-  if (oldMovies.code === 0) {
-    const old = JSON.parse(oldMovies.stdout);
-    await Deno.writeTextFile(
-      old.path,
-      stringify({
-        id: old.id,
-        name: "movies",
-        version: old.version ?? 1,
-        description: "Compatibility entry point for the unified media workflow",
-        inputs: { type: "object", properties: { dryRun: { type: "boolean", default: true } } },
-        jobs: [{
-          name: "main",
-          steps: [{
-            name: "media",
-            task: {
-              type: "workflow",
-              workflowIdOrName: "media",
-              inputs: { dryRun: "${{ inputs.dryRun }}" },
-            },
-            dependsOn: [],
-            weight: 0,
-            allowFailure: false,
-          }],
-          dependsOn: [],
-          weight: 0,
-        }],
-      }),
-    );
   }
   const vaults = await jsonCommand<{ vaults?: { name: string }[]; results?: { name: string }[] }>([
     "vault",
@@ -555,45 +464,6 @@ async function installUnlocked(
       parse(await Deno.readTextFile(join(repo, ".swamp.yaml"))),
     );
   }
-}
-
-export async function systemdAssets(c: Config, repo: string): Promise<void> {
-  const h = c.host!;
-  const quote = (s: string) =>
-    `"${s.replaceAll("%", "%%").replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-  const argument = (s: string) => quote(s.replaceAll("$", () => "$$"));
-  const directoryValue = (s: string) => {
-    if (/[\\\x00-\x1f\x7f]/.test(s) || s.trim() !== s) {
-      throw new Error(
-        "Systemd paths cannot contain backslashes, control characters or surrounding whitespace",
-      );
-    }
-    return s.replaceAll("%", "%%");
-  };
-  const path = join(repo, "assets/systemd");
-  await Deno.mkdir(path, { recursive: true });
-  await Deno.writeTextFile(
-    join(path, "torlink.service"),
-    `[Unit]\nDescription=Hoardarr Torlink\nAfter=network-online.target\n[Service]\nType=simple\nEnvironment=${
-      quote(`HOME=${h.home}`)
-    }\nEnvironment=${quote(`PATH=${dirname(h.node)}:/usr/local/bin:/usr/bin`)}\nEnvironment=${
-      quote(`TORLINK_STATE_DIR=${c.paths.state}`)
-    }\nWorkingDirectory=${directoryValue(h.torlinkDir)}\nExecStart=${argument(h.node)} ${
-      argument(c.torlink.binary)
-    } serve --host 127.0.0.1 --port 9161 --to ${
-      argument(c.paths.staging)
-    } --seed-time ${c.download.seedTime}\nRestart=no\n[Install]\nWantedBy=default.target\n`,
-  );
-  await Deno.writeTextFile(
-    join(path, "hoardarr-swamp.service"),
-    `[Unit]\nDescription=Hoardarr Swamp\nAfter=network-online.target\n[Service]\nType=simple\nEnvironment=${
-      quote(`HOME=${h.home}`)
-    }\nEnvironment=${
-      quote(`PATH=${dirname(h.swamp)}:${dirname(h.node)}:/usr/local/bin:/usr/bin`)
-    }\nWorkingDirectory=${directoryValue(repo)}\nExecStart=${argument(h.swamp)} serve --repo-dir ${
-      argument(repo)
-    } --host 127.0.0.1 --port 9090\nRestart=on-failure\nRestartSec=5\n[Install]\nWantedBy=default.target\n`,
-  );
 }
 
 /** Resolve native activation from preserved state, including for operator status. */

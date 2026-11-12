@@ -8,7 +8,7 @@ import { assertCommissioned } from "./native.ts";
 import { readTorlinkState } from "./torlink_state.ts";
 import runtimePins from "../deploy/devvm/pins.json" with { type: "json" };
 
-/** Read-only preflight. Live daemon checks are opt-in because systemd starts it inside the VPN window. */
+/** Preflight; behavior probes can write observations and reports. Downloader checks are opt-in. */
 export async function doctor(config: Config, repo: string, live = false) {
   const checks: { name: string; ok: boolean; detail: string }[] = [];
   const check = async (name: string, action: () => Promise<string>) => {
@@ -69,7 +69,6 @@ export async function doctor(config: Config, repo: string, live = false) {
   if (config.profile !== "demo") {
     const binaries = {
       torlink: config.torlink.binary,
-      ...(config.host ? { node: config.host.node, swamp: config.host.swamp } : {}),
     };
     for (const [name, path] of Object.entries(binaries)) {
       await check(`${name} binary`, async () => {
@@ -80,20 +79,8 @@ export async function doctor(config: Config, repo: string, live = false) {
         return path;
       });
     }
-    if (config.ssh) {
-      for (
-        const [name, path] of Object.entries({
-          identity: config.ssh.identityFile,
-          knownHosts: config.ssh.knownHostsFile,
-        })
-      ) {
-        await check(`SSH ${name}`, async () => {
-          if (!(await Deno.stat(path)).isFile) throw new Error(`Missing SSH file: ${path}`);
-          return path;
-        });
-      }
-    }
   }
+
   const references: string[][] = [
     ...JSON.stringify(config).matchAll(/vault\.get\(\\"([\w-]+)\\", \\"([\w-]+)\\"\)/g),
   ];
@@ -140,12 +127,6 @@ export async function doctor(config: Config, repo: string, live = false) {
     await check("Guest VPN and egress guard", async () => {
       await command(["model", "method", "run", "network-session", "assert-guest", "--json"], repo);
       return "Fresh protected guest observation verified";
-    });
-  }
-  if (config.profile === "systemd-nordvpn-ssh") {
-    await check("Systemd and VPN prerequisites", async () => {
-      await command(["model", "method", "run", "host-bootstrap", "inspect", "--json"], repo);
-      return "Service assets, NordVPN authentication and Tailscale prerequisites verified";
     });
   }
   if (live) {

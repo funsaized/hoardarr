@@ -12,8 +12,8 @@ const binding = z.string().regex(/^[a-z][a-z0-9-]*$/);
 const credential = z.string().regex(/^\$\{\{ vault\.get\("[\w-]+", "[\w-]+"\) \}\}$/);
 
 export const ConfigSchema = z.object({
-  schemaVersion: z.union([z.literal(1), z.literal(2)]),
-  profile: z.enum(["systemd-nordvpn-ssh", "compose-vpn-local", "demo", "devvm-nordvpn-local"]),
+  schemaVersion: z.literal(2),
+  profile: z.enum(["compose-vpn-local", "demo", "devvm-nordvpn-local"]),
   guest: z.object({
     installationId: z.uuid(),
     projectRoot: absolutePath,
@@ -33,7 +33,7 @@ export const ConfigSchema = z.object({
     search: binding.default("torlink"),
     downloader: binding.default("torlink"),
     destination: binding.default("local"),
-    network: binding.default("nordvpn"),
+    network: binding.default("gluetun"),
   }).strict(),
   providerFiles: z.array(absolutePath).default([]),
   providerSettings: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
@@ -48,7 +48,7 @@ export const ConfigSchema = z.object({
         year: z.number().int().min(1900).max(2200).optional(),
         name: z.string().min(1),
         category: z.enum(["tv", "anime"]).default("tv"),
-      }),
+      }).strict(),
     ).max(100).default([]),
   }).strict().default({ movies: true, region: "US", language: "en-US", limit: 20, shows: [] }),
   television: z.object({
@@ -59,22 +59,20 @@ export const ConfigSchema = z.object({
   policies: z.object({
     movie: PolicySchema.default(moviePolicy),
     episode: PolicySchema.default(episodePolicy),
-  }).default({ movie: moviePolicy, episode: episodePolicy }),
+  }).strict().default({ movie: moviePolicy, episode: episodePolicy }),
   download: z.object({
     seedTime: z.string().regex(/^\d+[smhd]?$/).default("5m"),
     concurrency: z.number().int().min(1).max(16).default(4),
-    timeoutSeconds: z.number().int().min(30).max(604800).default(86400),
     minFreeBytes: z.number().int().nonnegative().default(20 * 1024 ** 3),
-  }).default({
+  }).strict().default({
     seedTime: "5m",
     concurrency: 4,
-    timeoutSeconds: 86400,
     minFreeBytes: 20 * 1024 ** 3,
   }),
   schedule: z.object({
     enabled: z.boolean().default(false),
     cron: z.string().regex(/^\S+ \S+ \S+ \S+ \S+$/).default("0 2,8,14,22 * * *"),
-  }).default({ enabled: false, cron: "0 2,8,14,22 * * *" }),
+  }).strict().default({ enabled: false, cron: "0 2,8,14,22 * * *" }),
   torlink: z.object({
     binary: absolutePath,
     baseUrl: z.url().default("http://127.0.0.1:9161"),
@@ -83,32 +81,12 @@ export const ConfigSchema = z.object({
     interface: z.string().regex(/^[a-zA-Z0-9_.:-]+$/).optional(),
   }).strict(),
   tmdbKey: credential.default('${{ vault.get("hoardarr", "TMDB_API_KEY") }}'),
-  host: z.object({
-    user: z.string().regex(/^[a-z_][a-z0-9_-]*$/),
-    home: absolutePath,
-    swamp: absolutePath,
-    node: absolutePath,
-    torlinkDir: absolutePath,
-    vpnCountry: z.string().regex(/^[A-Za-z_ ]+$/).default("Netherlands"),
-    vpnCity: z.string().regex(/^[A-Za-z_ ]+$/).default("Amsterdam"),
-  }).strict().optional(),
-  ssh: z.object({
-    host: z.string().regex(/^[a-zA-Z0-9_.-]+$/),
-    user: z.string().regex(/^[a-z_][a-z0-9_-]*$/),
-    identityFile: absolutePath,
-    knownHostsFile: absolutePath,
-    movies: absolutePath,
-    episodes: absolutePath,
-  }).strict().optional(),
 }).strict().superRefine((c, ctx) => {
   const native = c.profile === "devvm-nordvpn-local";
-  if (
-    (native && (c.schemaVersion !== 2 || !c.guest)) ||
-    (!native && (c.schemaVersion !== 1 || c.guest))
-  ) {
+  if (native !== Boolean(c.guest)) {
     ctx.addIssue({
       code: "custom",
-      message: "Native profile requires explicit schema v2 guest settings; v1 profiles remain v1",
+      message: "Only the native profile requires protected guest settings",
     });
   }
   if (native && c.guest) {
@@ -121,7 +99,7 @@ export const ConfigSchema = z.object({
       });
     }
     if (
-      c.host || c.ssh || c.providers.network !== "guest-nordvpn" ||
+      c.providers.network !== "guest-nordvpn" ||
       c.providers.destination !== "local" ||
       c.providers.downloader !== "torlink" || c.torlink.interface !== g.vpnInterface ||
       c.torlink.binary !== "/opt/torlink/dist/cli.cjs" ||
@@ -169,12 +147,6 @@ export const ConfigSchema = z.object({
     });
   }
 
-  if (c.profile === "systemd-nordvpn-ssh" && (!c.host || !c.ssh)) {
-    ctx.addIssue({
-      code: "custom",
-      message: "The systemd profile needs host and ssh configuration",
-    });
-  }
   const roots = Object.values(c.paths).map((p) => p.replace(/\/+$/, ""));
   for (let a = 0; a < roots.length; a++) {
     for (let b = a + 1; b < roots.length; b++) {
@@ -208,7 +180,7 @@ export function defaultConfig(
   profile: Config["profile"] = "compose-vpn-local",
 ): Config {
   return ConfigSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     profile,
     paths: { staging: `${root}/downloads`, state: `${root}/state`, library: `${root}/library` },
     providers: {

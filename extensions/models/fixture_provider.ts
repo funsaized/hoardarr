@@ -24,7 +24,7 @@ const save = (ctx: Context, items: Torrent[]) =>
 /** Swamp behavior implementing fixture provider operations. */
 export const model = {
   type: "@funsaized/hoardarr/fixture",
-  version: "2026.11.09.1",
+  version: "2026.11.11.4",
   upgrades: [{
     toVersion: "2026.11.09.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -144,7 +144,7 @@ export const model = {
               infoHash: input.input,
               name,
               kind: "seed",
-              status: "seeding",
+              status: "seed-stopped",
               progress: 100,
             });
           }
@@ -165,27 +165,6 @@ export const model = {
       arguments: z.object({}),
       execute: async (_args: Record<string, never>, ctx: Context) =>
         emit(ctx, "snapshot-current", { torrents: await torrents(ctx) }),
-    },
-    wait: {
-      kind: "read",
-      description: "Advance fixture seed timers without waiting.",
-      arguments: z.object({
-        ids: z.array(z.string()),
-        until: z.string(),
-        timeoutSeconds: z.number(),
-      }),
-      execute: async (args: { ids: string[] }, ctx: Context) => {
-        const items = await torrents(ctx);
-        for (const item of items) {
-          if (args.ids.includes(item.infoHash)) {
-            item.status = "seed-stopped";
-          }
-        }
-        await save(ctx, items);
-        return emit(ctx, "operation-wait", {
-          results: args.ids.map((id) => ({ id, ok: true, outcome: "reached" })),
-        });
-      },
     },
     control: {
       description: "Detach synthetic torrent metadata without deleting payloads.",

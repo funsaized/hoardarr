@@ -17,8 +17,6 @@ payload
 /vaults
 /assets
 
-!tests/fixtures/legacy/**
-
 **/__pycache__
 **/*.pyc
 deploy/devvm/qualification/results

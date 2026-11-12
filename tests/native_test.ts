@@ -1,4 +1,4 @@
-import { ConfigSchema, defaultConfig } from "../src/config.ts";
+import { ConfigSchema } from "../src/config.ts";
 import { workflowDefinitions } from "../src/workflows.ts";
 import { assertDirectEnvironment, assertGuestReady } from "../extensions/models/guest_network.ts";
 import { assertStorage, enrollStorage } from "../extensions/models/_lib/storage.ts";
@@ -7,57 +7,7 @@ import { readLease } from "../extensions/models/_lib/runtime.ts";
 import { model as coordinator } from "../extensions/models/coordinator.ts";
 import { assert, rejects, temporary } from "./helpers.ts";
 
-export function nativeConfig(root: string) {
-  const c = defaultConfig(root, "demo"), installationId = crypto.randomUUID();
-  return ConfigSchema.parse({
-    ...c,
-    schemaVersion: 2,
-    profile: "devvm-nordvpn-local",
-    providers: {
-      discovery: "tmdb",
-      search: "torlink",
-      downloader: "torlink",
-      destination: "local",
-      network: "guest-nordvpn",
-    },
-    paths: {
-      staging: `${root}/downloads`,
-      library: `${root}/library`,
-      state: `${root}/state/torlink`,
-    },
-    torlink: { ...c.torlink, interface: "nordlynx" },
-    guest: {
-      installationId,
-      projectRoot: root,
-      repoRoot: "/var/lib/hoardarr/control",
-      purpose: "qualification",
-      user: "media",
-      uid: 1001,
-      gid: 1001,
-      home: `${root}/runtime-home`,
-      vpnInterface: "nordlynx",
-      vpnProtocol: "NORDLYNX",
-      storage: {
-        installationId,
-        roots: [
-          "instance",
-          "downloads",
-          "state/torlink",
-          "library",
-          "runtime-home",
-          "state/maintenance",
-          "secrets",
-        ].map((p) => ({
-          path: `${root}/${p}`,
-          storageId: crypto.randomUUID(),
-          mountPoint: root,
-          fsType: "9p",
-          source: "project",
-        })),
-      },
-    },
-  });
-}
+import { nativeConfig } from "./native_config.ts";
 
 Deno.test("native profile requires explicit migration, local providers and complete durable layout", async () => {
   const c = nativeConfig("/srv/media");
@@ -161,17 +111,6 @@ Deno.test("admission inhibition serializes with acquisition and retains held own
     await coordinator.methods.assert.execute({ owner }, ctx);
     assert((await readLease(`${root}/.hoardarr/lease.json`))?.owner === owner);
   }));
-
-Deno.test("native acquisition reconciles without a 24-hour download wait", () => {
-  const config = nativeConfig("/tmp/hoardarr-native-bounded");
-  const workflows = workflowDefinitions(config, {});
-  const acquisition = workflows.find((w) => w.name === "hoardarr-acquisition")!;
-  const serialized = JSON.stringify(acquisition);
-  assert(serialized.includes("snapshot-before") && serialized.includes("snapshot-finished"));
-  const wait = (acquisition.jobs as { steps: { name: string; guard?: string }[] }[])
-    .flatMap((job) => job.steps).find((step) => step.name === "wait")!;
-  assert(wait.guard === "${{ true }}", "native wait must be unconditionally skipped");
-});
 
 Deno.test("commissioning receipts accept recorded upgrade waivers without relaxing other fields", async () => {
   const { CommissionSchema } = await import("../extensions/models/_lib/guest.ts");

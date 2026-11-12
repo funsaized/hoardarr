@@ -47,17 +47,15 @@ export type Receipt = z.infer<typeof ReceiptSchema>;
 export const requiredMethods: Record<Descriptor["roles"][number], string[]> = {
   discovery: ["movies", "episodes"],
   search: ["search"],
-  downloader: ["health", "add", "sync", "wait", "control"],
+  downloader: ["health", "add", "sync", "control"],
   destination: ["deliver"],
-  network: ["inspect", "enterDownload", "enterTransfer", "restore"],
+  network: ["inspect", "assertReady"],
 };
 export function validateBinding(descriptor: Descriptor, role: Descriptor["roles"][number]): void {
   if (!descriptor.roles.includes(role)) {
     throw new Error(`${descriptor.id} does not support ${role}`);
   }
-  const methods = role === "network" && descriptor.capabilities.includes("guest-readiness")
-    ? ["inspect", "assertReady"]
-    : requiredMethods[role];
+  const methods = requiredMethods[role];
   for (const name of methods) {
     if (!descriptor.methods[name]) throw new Error(`${descriptor.id} lacks ${role}.${name}`);
   }

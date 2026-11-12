@@ -32,7 +32,7 @@ Deno.test("fixture provider covers movie and episode discovery and idempotent ac
     assert(
       (data.get("operation-add")!.results as { outcome: string }[])[0].outcome === "duplicate",
     );
-    await model.methods.wait.execute({ ids: [hash] }, ctx);
+    await model.methods.sync.execute({}, ctx);
     assert(
       (data.get("fixture-state")!.torrents as { status: string }[])[0].status === "seed-stopped",
     );
