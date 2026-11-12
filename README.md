@@ -25,18 +25,45 @@ provider contracts to extend it. This README is the canonical guide for the curr
 
 ## Why Hoardarr
 
-- Follow a show once. Keep a durable backlog of aired episodes and discover new ones as they air.
-- Bound new work independently: 20 movie discoveries per ISO week, up to 20 episode searches and
-  eight episode submissions per run by default.
-- Keep downloads moving between runs. Native and Compose both reconcile the downloader's saved work
-  without holding a workflow open until every torrent finishes.
-- Check the copy before deleting the source. Delivery verifies file sizes and SHA-256 hashes,
-  records a receipt, then authorizes staging cleanup.
-- Inspect decisions and failures. Catalogs, provider results, retry times, workflow reports and
-  ownership records explain what remains and why.
-- Keep the application replaceable. The native image contains code and runtimes; the persistent
-  project contains configuration, media, credentials and Swamp data.
-- Extend typed providers for discovery, search, downloading, delivery and network readiness.
+Hoardarr is for people who want to run their own media library and understand what it does. You
+choose the shows, acquisition limits, storage and schedule. The workflows handle the routine work
+and retain the evidence you need to inspect a decision or recover an interrupted run.
+
+The native deployment packages that system as a VM appliance. Giving the media stack its own Linux
+guest makes its network policy, runtime and lifecycle explicit:
+
+- Keep the media VPN inside the guest. Hoardarr and Torlink run behind the guest's VPN and
+  application egress guard, with Torlink bound to the tunnel interface. Your host keeps its own
+  networking, VPN and Tailscale routes. A separate management identity lets you diagnose the guest
+  when the media VPN fails.
+- Give the stack its own operating environment. The VM has its own kernel, services and runtime
+  dependencies. Hoardarr's application runs as an unprivileged user; administration uses a separate
+  identity. The persistent project share defines where application data lives on the host. See the
+  [trust boundaries](#trust-boundaries) for the scope of that separation.
+- Deploy a known system. The image contains pinned application code and runtimes. Updates replace
+  that image through DevVM, with checks against the exact runtime manifest. You can rebuild from
+  recorded inputs and test an image in a separate qualification VM before putting it into service.
+- Keep your library independent of the appliance. Media, catalogs, configuration and downloader
+  state live in the persistent project and survive image replacement. Storage identity checks reject
+  a missing or substituted mount. Explicit backup and recovery procedures preserve the state and
+  credentials needed to resume work.
+- Let it run without an open terminal or agent session. Host systemd starts the enrolled VM, guest
+  services supervise the application, and Swamp runs the schedule. Downloads continue between
+  workflow runs; each run reconciles saved progress and delivers what is ready. Pi is available
+  inside the VM when you want help operating it.
+- See what the automation does. Catalogs, provider results, retry times, reports and ownership
+  records explain what happened. Delivery checks file sizes and SHA-256 hashes and saves a receipt
+  before deleting staging files. You can pause new work, inspect an interruption and recover it
+  through explicit controls.
+
+Follow a show once and Hoardarr maintains its aired-episode backlog. Separate movie and TV budgets
+bound new work: by default, 20 movie discoveries per ISO week, 20 episode searches and eight episode
+submissions per run. Typed providers let you extend discovery, search, downloading, delivery and
+network readiness while keeping the same workflow contracts.
+
+Start with the fixture demo to see the full process. Choose the native VM for the appliance model,
+or use Compose with Gluetun for a container deployment. Both use the same media policy and verified
+delivery flow.
 
 ## Capability index
 
