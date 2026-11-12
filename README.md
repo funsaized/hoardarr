@@ -471,6 +471,10 @@ requests such as:
 Give me a read-only health summary. Include snapshot timestamps, backlog and source errors.
 Track Severance (2022), including its aired backlog and new episodes. Report the matched TMDB entry.
 Add Arrival (2016) to the movie catalog for the normal workflow to acquire. Preserve any existing progress.
+Download Severance (2022) season 1 episode 3.
+Download the entire series of The Good Place (2016), including only episodes aired so far.
+Get the latest aired episode of Severance (2022).
+Finish the remaining episodes of The Good Place (2016).
 Change the weekly movie discovery allowance to 10 and keep my TV search and download limits unchanged.
 Explain why this episode has not transferred, using the saved reports and catalog.
 Pause new work for maintenance, wait for the current owner, and report when it is safe to stop.
@@ -484,6 +488,19 @@ Pi is an operator with the management user's privileges, including authorized su
 instructions require Swamp commands, maintenance controls and image-based application updates.
 Closing Pi does not stop scheduled work. Its requests and model usage are separate from the
 scheduled deterministic media workflow.
+
+One-off requests use `hoardarr-operator request`: resolve a title, submit a finite scope, then read
+its status. Pi translates the conversation into those typed commands. A request records the selected
+TMDB identity and survives the agent session. The existing `media` workflow acquires it, preserving
+completed copies and downloads already in progress. An entire-series request covers regular episodes
+aired by its acceptance date; ongoing tracking remains an explicit configuration change.
+
+The request command attempts an immediate run when the installation is idle. Busy requests wait for
+the existing schedule; closed admissions reject new intake. Requests share the configured release
+policy, storage checks and acquisition budgets. Explicit movies remain eligible when automatic movie
+discovery is off and do not consume its weekly allowance. See
+[one-off requests](docs/how-to/operate-native.md#request-a-movie-or-episodes) for scopes and
+commands.
 
 ## Configuration
 

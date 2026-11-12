@@ -362,6 +362,27 @@ async function installUnlocked(
       { definition: name, descriptor },
     );
   }
+  const requestSupported = Boolean(
+    selected.discovery.methods.resolveTitle && selected.discovery.methods.requestTargets,
+  );
+  if (requestSupported) {
+    const metadataSettings = selected.discovery.id === "tmdb"
+      ? { apiKey: config.tmdbKey }
+      : selected.discovery.id === "fixture"
+      ? { stagingRoot: config.paths.staging }
+      : config.providerSettings[selected.discovery.id] ?? {};
+    await define("request-metadata", selected.discovery.type, metadataSettings);
+  }
+  await define("request-provider", "@funsaized/hoardarr/provider", {
+    definition: requestSupported ? "request-metadata" : actual.discovery,
+    descriptor: selected.discovery,
+  });
+  await define("requests", "@funsaized/hoardarr/requests", {
+    supported: requestSupported,
+    resolveMethod: selected.discovery.methods.resolveTitle ?? "resolveTitle",
+    retryHours: config.television.retryHours,
+    ...(config.guest ? { storage: config.guest.storage } : {}),
+  });
   await define("media-files", "hoardarr/media-files", {
     stagingRoot: config.paths.staging,
     catalogModelName: "movie-catalog",
@@ -379,6 +400,9 @@ async function installUnlocked(
       : {}),
   });
   await define("pipeline", "@funsaized/hoardarr/pipeline", {
+    requestModel: "requests",
+    maxMovieAttempts: config.policies.movie.maxAttempts,
+    maxEpisodeAttempts: config.policies.episode.maxAttempts,
     seedTime: config.download.seedTime,
     discoveryModel: actual.discovery,
     titleOverrides: config.library.titleOverrides,

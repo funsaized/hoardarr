@@ -11,7 +11,20 @@ import { ReceiptSchema, TransferSchema } from "./_lib/contracts.ts";
 import { type EpisodeWork, prioritizeEpisodes, type SearchState } from "./_lib/tv_backlog.ts";
 import { tvProgress } from "./_lib/tv_progress.ts";
 import { libraryNames, type MediaNames, namePart } from "./_lib/library_naming.ts";
+import {
+  type MediaRequest,
+  prioritizeRequests,
+  recordRequestService,
+  type RequestFairness,
+  RequestId,
+  requestProgress,
+  RequestSchema,
+  targetKey,
+} from "./_lib/requests.ts";
 const Globals = z.object({
+  requestModel: z.string().optional(),
+  maxMovieAttempts: z.number().int().positive().default(3),
+  maxEpisodeAttempts: z.number().int().positive().default(3),
   movies: z.string().default("movie-catalog"),
   episodes: z.string().default("episode-catalog"),
   files: z.string().default("media-files"),
@@ -30,6 +43,7 @@ type Context = Runtime & { globalArgs: z.infer<typeof Globals> };
 type Row = Record<string, unknown>;
 const Owned = z.object({ owner: z.uuid() });
 const PlanArgs = Owned.extend({
+  requestId: RequestId.or(z.literal("")).optional(),
   phase: z.enum(["all", "observe", "delivery", "acquisition", "submit", "summary"]).default("all"),
   reorganize: z.boolean().default(false),
 });
@@ -56,6 +70,7 @@ function deliveryBatch(items: Item[]): Item[] {
   ];
 }
 const WorkSchema = z.object({
+  requests: z.array(z.record(z.string(), z.unknown())).default([]),
   television: z.array(z.record(z.string(), z.unknown())).default([]),
   truncated: z.boolean(),
   items: z.array(WorkItem),
@@ -79,6 +94,17 @@ const catalog = (ctx: Context, kind: string) =>
 const idField = (kind: string) => kind === "movie" ? "tmdbId" : "tmdbEpisodeId";
 async function rows(ctx: Context, kind: string): Promise<Row[]> {
   return (await ctx.readModelData(catalog(ctx, kind), kind)).map((r) => r.attributes);
+}
+async function requests(ctx: Context): Promise<MediaRequest[]> {
+  return ctx.globalArgs.requestModel
+    ? (await ctx.readModelData(ctx.globalArgs.requestModel, "request")).map((r) =>
+      RequestSchema.parse(r.attributes)
+    )
+    : [];
+}
+async function fairness(ctx: Context): Promise<RequestFairness> {
+  return ((await ctx.readModelData("pipeline", "requestFairness"))[0]?.attributes ??
+    { search: {}, submit: {} }) as RequestFairness;
 }
 function workItem(row: Row, kind: "movie" | "episode"): Item {
   const id = Number(row[idField(kind)]),
@@ -173,7 +199,7 @@ async function itemRow(ctx: Context, item: Item): Promise<Row> {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.12.1",
+  version: "2026.11.12.2",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -186,9 +212,24 @@ export const model = {
     toVersion: "2026.11.12.1",
     description: "Preserve catalog state while enabling named imports and phase-specific planning",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.12.2",
+    description: "Accept scoped requests while retaining catalog progress and autonomous budgets",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
   resources: {
+    requestFairness: {
+      schema: z.object({
+        search: z.record(z.string(), z.string()),
+        submit: z.record(z.string(), z.string()),
+        searchLane: z.enum(["request", "automatic"]).optional(),
+        submitLane: z.enum(["request", "automatic"]).optional(),
+      }),
+      description: "Persistent request rotation and request/automatic budget fairness",
+      lifetime: "infinite",
+      garbageCollection: 100,
+    },
     layout: {
       schema: LayoutSchema,
       description: "Stable library folder keyed by movie or series identity",
@@ -263,6 +304,11 @@ export const model = {
         await assertLease(ctx.repoDir, args.owner);
         const all: Item[] = [], eligible = new Set<string>();
         const movieRows = await rows(ctx, "movie"), episodeRows = await rows(ctx, "episode");
+        const requestRows = await requests(ctx), requestState = await fairness(ctx);
+        if (args.requestId && !requestRows.some((r) => r.id === args.requestId)) {
+          throw new Error("Unknown request id");
+        }
+        const explicit = new Set(requestRows.flatMap((r) => (r.targets ?? []).map(targetKey)));
         for (const row of [...movieRows, ...episodeRows]) {
           if (
             ["downloading", "seeding", "seed-stopped"].includes(String(row.status)) &&
@@ -303,39 +349,64 @@ export const model = {
           episodeRows.length,
           new Date(),
         );
-        const searchEpisodes = new Set(
-          ordered.filter((r) =>
-            eligible.has(`e-${r.tmdbEpisodeId}`) &&
-            !episodeRows.some((row) =>
-              row.tmdbEpisodeId === r.tmdbEpisodeId && row.status === "selected"
-            )
-          ).slice(0, ctx.globalArgs.episodeSearchLimit ?? 20).map((r) => r.tmdbEpisodeId),
+        const searchableEpisodes = ordered.filter((r) =>
+          eligible.has(`e-${r.tmdbEpisodeId}`) &&
+          !episodeRows.some((row) =>
+            row.tmdbEpisodeId === r.tmdbEpisodeId && row.status === "selected"
+          )
+        ).map((row) => all.find((r) => r.key === `e-${row.tmdbEpisodeId}`)!);
+        const tvSearch = prioritizeRequests(
+          searchableEpisodes,
+          requestRows,
+          Math.min(ctx.globalArgs.episodeSearchLimit ?? 20, ctx.globalArgs.batchLimit),
+          requestState.search,
+          requestState.searchLane,
+          args.requestId,
         );
-        const tvSearch = [...searchEpisodes].map((id) => all.find((r) => r.key === `e-${id}`)!)
-          .slice(0, ctx.globalArgs.batchLimit);
         const searchable = [
-          ...all.filter((r) =>
-            r.mediaKind === "movie" && ctx.globalArgs.movieEnabled && eligible.has(r.key) &&
-            r.status !== "selected"
-          ).slice(0, Math.max(0, ctx.globalArgs.batchLimit - tvSearch.length)),
+          ...prioritizeRequests(
+            all.filter((r) =>
+              r.mediaKind === "movie" && (ctx.globalArgs.movieEnabled || explicit.has(r.key)) &&
+              eligible.has(r.key) &&
+              (!explicit.has(r.key) || !state[r.key] ||
+                state[r.key].nextSearchAt <= new Date().toISOString()) &&
+              r.status !== "selected"
+            ),
+            requestRows,
+            Math.max(0, ctx.globalArgs.batchLimit - tvSearch.length),
+            requestState.search,
+            requestState.searchLane,
+            args.requestId,
+          ),
           ...tvSearch,
         ];
         const selectedEpisodes = new Set(
           prioritizeEpisodes(
             episodeRows.filter((r) => r.status === "selected") as unknown as EpisodeWork[],
             {},
-            ctx.globalArgs.episodeDownloadLimit ?? 8,
+            episodeRows.length,
             new Date(),
             ((await ctx.readModelData("pipeline", "submissionState"))[0]?.attributes.shows ??
               {}) as Record<string, string>,
           ).map((r) => r.tmdbEpisodeId),
         );
-        const tvSelected = [...selectedEpisodes].map((id) => all.find((r) => r.key === `e-${id}`)!)
-          .filter((r) => r.input).slice(0, ctx.globalArgs.batchLimit);
+        const tvSelected = prioritizeRequests(
+          [...selectedEpisodes].map((id) => all.find((r) => r.key === `e-${id}`)!)
+            .filter((r) => r.input),
+          requestRows,
+          Math.min(ctx.globalArgs.episodeDownloadLimit ?? 8, ctx.globalArgs.batchLimit),
+          requestState.submit,
+          requestState.submitLane,
+          args.requestId,
+        );
         const selected = [
-          ...all.filter((r) => r.mediaKind === "movie" && r.status === "selected" && r.input).slice(
-            0,
+          ...prioritizeRequests(
+            all.filter((r) => r.mediaKind === "movie" && r.status === "selected" && r.input),
+            requestRows,
             Math.max(0, ctx.globalArgs.batchLimit - tvSelected.length),
+            requestState.submit,
+            requestState.submitLane,
+            args.requestId,
           ),
           ...tvSelected,
         ];
@@ -362,11 +433,17 @@ export const model = {
           }
         }
         return write(ctx, "work", {
+          requests: requestRows.map((r) =>
+            requestProgress(r, movieRows, episodeRows, state, new Date(), {
+              movie: ctx.globalArgs.maxMovieAttempts,
+              episode: ctx.globalArgs.maxEpisodeAttempts,
+            })
+          ),
           television: tvProgress(episodeRows, state),
           items: all,
           truncated: all.filter((r) =>
                 eligible.has(r.key) && r.status !== "selected" &&
-                (r.mediaKind !== "movie" || ctx.globalArgs.movieEnabled)
+                (r.mediaKind !== "movie" || ctx.globalArgs.movieEnabled || explicit.has(r.key))
               ).length > searchable.length ||
             all.filter((r) => r.status === "selected" && r.input).length > selected.length ||
             new Set(active.map((r) => r.infoHash)).size > 100 ||
@@ -455,12 +532,19 @@ export const model = {
         const planned = (work?.queries ?? []) as { key: string }[];
         const currentEpisodes = await rows(ctx, "episode");
         const now = new Date();
-        for (const { key } of planned.filter((q) => q.key.startsWith("e-"))) {
-          const id = key.slice(2), query = queries.find((q) => q.key === key);
-          const selected = currentEpisodes.some((r) =>
-            String(r.tmdbEpisodeId) === id && r.status === "selected"
+        const requestRows = await requests(ctx);
+        const requestedKeys = new Set(requestRows.flatMap((r) => (r.targets ?? []).map(targetKey)));
+        const currentMovies = await rows(ctx, "movie");
+        for (
+          const { key } of planned.filter((q) => q.key.startsWith("e-") || requestedKeys.has(q.key))
+        ) {
+          const id = key.slice(2),
+            query = queries.find((q) => q.key === key),
+            movie = key.startsWith("m-");
+          const selected = (movie ? currentMovies : currentEpisodes).some((r) =>
+            String(r[movie ? "tmdbId" : "tmdbEpisodeId"]) === id && r.status === "selected"
           );
-          attempts[id] = {
+          attempts[movie ? key : id] = {
             searchedAt: now.toISOString(),
             nextSearchAt: new Date(
               now.getTime() + (ctx.globalArgs.episodeRetryHours ?? 24) * 3600000,
@@ -473,6 +557,19 @@ export const model = {
           };
         }
         await ctx.writeResource("searchState", "searchState-current", { attempts });
+        if (ctx.globalArgs.requestModel) {
+          await ctx.writeResource(
+            "requestFairness",
+            "requestFairness-current",
+            recordRequestService(
+              await fairness(ctx),
+              "search",
+              planned.map((q) => q.key),
+              await requests(ctx),
+              now.toISOString(),
+            ),
+          );
+        }
         return write(ctx, "summary", { ok: true });
       },
     },
@@ -501,6 +598,19 @@ export const model = {
             if (row && result.ok) shows[String(row.showTmdbId)] = new Date().toISOString();
           }
           await ctx.writeResource("submissionState", "submissionState-current", { shows });
+          if (ctx.globalArgs.requestModel) {
+            await ctx.writeResource(
+              "requestFairness",
+              "requestFairness-current",
+              recordRequestService(
+                await fairness(ctx),
+                "submit",
+                (results as { key: string; ok: boolean }[]).filter((r) => r.ok).map((r) => r.key),
+                await requests(ctx),
+                new Date().toISOString(),
+              ),
+            );
+          }
         }
         return write(ctx, "summary", { ok: true });
       },

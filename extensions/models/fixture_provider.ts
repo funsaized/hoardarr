@@ -1,8 +1,11 @@
 /** Offline demonstration provider. Writes harmless text fixtures, never network traffic. */
 import { z } from "npm:zod@4.5.1";
 import { createHash } from "node:crypto";
+import { fixtureResolve, fixtureTargets } from "./_lib/fixture_request_metadata.ts";
+import { ResolutionSchema, ResolveArgs, TargetsArgs, TargetsResult } from "./_lib/requests.ts";
 const Global = z.object({ stagingRoot: z.string() });
 type Context = {
+  signal: AbortSignal;
   globalArgs: z.infer<typeof Global>;
   readResource(name: string): Promise<Record<string, unknown> | null>;
   writeResource(
@@ -24,14 +27,30 @@ const save = (ctx: Context, items: Torrent[]) =>
 /** Swamp behavior implementing fixture provider operations. */
 export const model = {
   type: "@funsaized/hoardarr/fixture",
-  version: "2026.11.11.4",
+  version: "2026.11.12.1",
   upgrades: [{
     toVersion: "2026.11.11.4",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.12.1",
+    description: "Add isolated request metadata without changing fixture acquisition state",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Global,
   resources: {
+    requestResolution: {
+      schema: ResolutionSchema,
+      description: "Offline title candidates",
+      lifetime: "30d",
+      garbageCollection: 20,
+    },
+    requestTargets: {
+      schema: TargetsResult,
+      description: "Offline scoped targets",
+      lifetime: "infinite",
+      garbageCollection: 20,
+    },
     evidence: {
       description: "Offline fixture evidence",
       schema: generic,
@@ -40,6 +59,18 @@ export const model = {
     },
   },
   methods: {
+    resolveTitle: {
+      description: "Resolve fixture movie or series identities",
+      arguments: ResolveArgs,
+      execute: (args: z.infer<typeof ResolveArgs>, ctx: Context) =>
+        fixtureResolve(args, { ...ctx, globalArgs: {} }),
+    },
+    requestTargets: {
+      description: "Expand fixture requests without creating discoveries",
+      arguments: TargetsArgs,
+      execute: (args: z.infer<typeof TargetsArgs>, ctx: Context) =>
+        fixtureTargets(args, { ...ctx, globalArgs: {} }),
+    },
     movies: {
       description: "Discover a synthetic demonstration movie.",
       arguments: generic,

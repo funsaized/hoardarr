@@ -35,7 +35,12 @@ export const builtins: Descriptor[] = [
     type: "@keeb/tmdb-lookup",
     version: "2026.07.03.1",
     capabilities: ["movies", "episodes"],
-    methods: { movies: "digitalReleases", episodes: "airedEpisodes" },
+    methods: {
+      movies: "digitalReleases",
+      episodes: "airedEpisodes",
+      resolveTitle: "resolveTitle",
+      requestTargets: "requestTargets",
+    },
   },
   {
     id: "local",
@@ -68,11 +73,13 @@ export const builtins: Descriptor[] = [
     id: "fixture",
     roles: ["discovery", "search", "downloader", "network"],
     type: "@funsaized/hoardarr/fixture",
-    version: "2026.11.11.4",
+    version: "2026.11.12.1",
     capabilities: ["torrent", "seed-time", "local-payload", "offline"],
     methods: {
       movies: "movies",
       episodes: "episodes",
+      resolveTitle: "resolveTitle",
+      requestTargets: "requestTargets",
       search: "search",
       health: "health",
       add: "add",

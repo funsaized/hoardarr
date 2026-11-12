@@ -38,6 +38,7 @@ export const report = {
       status: context.workflowStatus,
       items: items.map((i) => ({ key: i.key, kind: i.mediaKind, status: i.status })),
       television: work?.television ?? [],
+      requests: work?.requests ?? [],
       failed,
       attention,
     };
@@ -55,6 +56,17 @@ export const report = {
           attention.length
             ? "\nItems requiring attention: " + attention.map(escape).join(", ") + ".\n"
             : ""
+        }\n${
+          ((work?.requests ?? []) as {
+            id: string;
+            status: string;
+            total: number | null;
+            delivered: number;
+          }[]).map((r) =>
+            `Request ${escape(r.id)}: ${r.status}; ${r.delivered}/${
+              r.total ?? "unknown"
+            } delivered.`
+          ).join("\n")
         }`,
     };
   },

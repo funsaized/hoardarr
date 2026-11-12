@@ -1,6 +1,7 @@
 #!/usr/bin/env -S deno run --allow-all
 /** Hoardarr operator CLI. All scheduled execution remains a Swamp workflow. */
 import { tvProgress } from "../extensions/models/_lib/tv_progress.ts";
+import { requestCommand, requestStatus } from "../src/requests.ts";
 import type { SearchState } from "../extensions/models/_lib/tv_backlog.ts";
 import { dirname, join, resolve } from "node:path";
 import { ConfigSchema, defaultConfig, encodeConfig, readConfig } from "../src/config.ts";
@@ -48,6 +49,7 @@ plan       Preview catalog work; --refresh also refreshes discovery.
 run        Reconcile discovery, downloads, verified delivery and cleanup.
 organize   Organize existing local library copies; --dry-run previews filenames.
 status     Show catalog states and outstanding reconciliation ownership.
+request    resolve|submit|run|status|list scoped media requests (request help for options).
 recover    Restore the environment and release an interrupted run's ownership.
 recover-apply Roll back an interrupted native configuration transaction (--journal PATH).
 recover-maintenance Verify and release a restored snapshot's own maintenance owner (--snapshot, --owner).
@@ -186,6 +188,10 @@ async function mainUnlocked(argv: string[]): Promise<void> {
     return;
   }
   const config = await readConfig(configPath);
+  if (action === "request") {
+    output(await requestCommand(argv, repo, config));
+    return;
+  }
   if (action === "recover-maintenance") {
     const snapshot = option("--snapshot"), owner = option("--owner");
     if (!config.guest || !snapshot || !owner) {
@@ -352,6 +358,7 @@ async function mainUnlocked(argv: string[]): Promise<void> {
       })),
       shows: identities,
       television: tvProgress(episodes.results, attempts.results[0]?.attempts ?? {}),
+      requests: (await requestStatus(repo, config)).requests,
       limits: { movieWeekly: config.interests.limit, television: config.television },
       catalog: result,
       schedule: (await effectiveConfiguration(config)).schedule,

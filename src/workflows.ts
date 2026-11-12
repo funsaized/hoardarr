@@ -35,7 +35,7 @@ const call = (
 ) => method(name, provider, "invoke", { ...owned, operation, inputs, tolerateFailure }, after);
 const records = (step: string) => expr(`steps["${step}"].outputs.records`);
 const plan = (name: string, phase: string, after?: string) =>
-  method(name, "pipeline", "plan", { ...owned, phase }, after);
+  method(name, "pipeline", "plan", { ...owned, phase, requestId: expr("inputs.requestId") }, after);
 const job = (steps: Node[]) => ({ name: "main", concurrency: 1, steps, dependsOn: [], weight: 0 });
 const child = (name: string, workflow: string, inputs: Node, after?: string): Node => ({
   name,
@@ -46,7 +46,10 @@ const child = (name: string, workflow: string, inputs: Node, after?: string): No
 });
 const ownerSchema = {
   type: "object",
-  properties: { owner: { type: "string", format: "uuid" } },
+  properties: {
+    owner: { type: "string", format: "uuid" },
+    requestId: { type: "string", default: "" },
+  },
   required: ["owner"],
 };
 const savedIngest = (name: string, kind: string, after?: string) =>
@@ -73,7 +76,8 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   // Replay durable discoveries before talking to any external service.
   const observation: Node[] = [savedIngest("saved-movies", "movie")];
   observation.push(savedIngest("saved-episodes", "episode", "saved-movies"));
-  observation.push(call("snapshot", "download-provider", "sync", {}, "saved-episodes", true));
+  observation.push(method("saved-requests", "requests", "ingest", owned, "saved-episodes"));
+  observation.push(call("snapshot", "download-provider", "sync", {}, "saved-requests", true));
   observation.push(skip(
     method("reconcile", "pipeline", "reconcile", {
       ...owned,
@@ -135,6 +139,34 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   ));
 
   const discovery: Node[] = [plan("known", "summary")];
+  discovery.push(
+    method(
+      "request-plan",
+      "requests",
+      "plan",
+      { ...owned, requestId: expr("inputs.requestId") },
+      "known",
+    ),
+  );
+  discovery.push(skip(
+    call(
+      "request-targets",
+      "request-provider",
+      "requestTargets",
+      {
+        requests: expr('steps["request-plan"].outputs.requests'),
+      },
+      "request-plan",
+      true,
+    ),
+    'size(steps["request-plan"].outputs.requests) == 0',
+  ));
+  discovery.push(
+    method("ingest-requests", "requests", "ingest", {
+      ...owned,
+      requestId: expr("inputs.requestId"),
+    }, "request-targets"),
+  );
   discovery.push(skip(
     call(
       "movies",
@@ -146,10 +178,10 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
         limit: config.interests.limit,
         excludeIds: expr("steps.known.outputs.movieIds"),
       },
-      "known",
+      "ingest-requests",
       true,
     ),
-    String(!config.interests.movies),
+    `inputs.requestId != "" || ${!config.interests.movies}`,
   ));
   discovery.push(savedIngest("ingest-movies", "movie", "movies"));
   discovery.push(skip(
@@ -165,7 +197,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       "ingest-movies",
       true,
     ),
-    String(config.interests.shows.length === 0),
+    `inputs.requestId != "" || ${config.interests.shows.length === 0}`,
   ));
   discovery.push(savedIngest("ingest-episodes", "episode", "episodes"));
 
@@ -289,6 +321,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   const mainInputs = {
     type: "object",
     properties: {
+      requestId: { type: "string", default: "" },
       dryRun: { type: "boolean", default: true },
       refresh: { type: "boolean", default: false },
       reorganize: { type: "boolean", default: false },
@@ -344,9 +377,22 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
         }),
         noOnline,
       ),
-      skip(child("discover", "hoardarr-discovery", { owner }, "readiness"), noOnline),
       skip(
-        child("acquire", "hoardarr-acquisition", { owner }, "discover"),
+        child(
+          "discover",
+          "hoardarr-discovery",
+          { owner, requestId: expr("inputs.requestId") },
+          "readiness",
+        ),
+        noOnline,
+      ),
+      skip(
+        child(
+          "acquire",
+          "hoardarr-acquisition",
+          { owner, requestId: expr("inputs.requestId") },
+          "discover",
+        ),
         "!inputs.acquire || inputs.dryRun",
       ),
     ]),

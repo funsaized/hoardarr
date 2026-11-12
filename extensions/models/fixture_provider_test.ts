@@ -4,6 +4,7 @@ Deno.test("fixture provider covers movie and episode discovery and idempotent ac
   temporary(async (root) => {
     const data = new Map<string, Record<string, unknown>>();
     const ctx = {
+      signal: new AbortController().signal,
       globalArgs: { stagingRoot: root },
       readResource: async (name: string) => data.get(name) ?? null,
       writeResource: async (_spec: string, name: string, value: Record<string, unknown>) => {

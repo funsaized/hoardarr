@@ -114,7 +114,7 @@ export async function withOperatorGate<T>(
     write: true,
     mode: 0o600,
   });
-  if (!file.tryLock(exclusive)) {
+  if (!await file.tryLock(exclusive)) {
     file.close();
     throw new Error(
       "Another operator command holds the installation gate; finish or inspect it before maintenance",
