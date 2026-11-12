@@ -19,7 +19,13 @@ export const report = {
     const work = context.stepExecutions.flatMap((s) => s.dataHandles ?? []).filter((h) =>
       h.name === "work-current"
     ).at(-1)?.attributes;
-    const items = (work?.items ?? []) as { key: string; mediaKind: string; status: string }[];
+    const items = (work?.items ?? []) as {
+      key: string;
+      mediaKind: string;
+      status: string;
+      needsAttention?: boolean;
+    }[];
+    const attention = items.filter((i) => i.needsAttention).map((i) => i.key);
     const phases = context.stepExecutions.map((s) => ({
       job: s.jobName,
       step: s.stepName,
@@ -33,6 +39,7 @@ export const report = {
       items: items.map((i) => ({ key: i.key, kind: i.mediaKind, status: i.status })),
       television: work?.television ?? [],
       failed,
+      attention,
     };
     const escape = (v: string) => v.replaceAll("|", "\\|").replaceAll("\n", " ");
     return {
@@ -44,7 +51,11 @@ export const report = {
           failed.length
             ? "Failed steps: " + failed.map((f) => `${f.job}/${f.step}`).join(", ")
             : "No failed steps."
-        }\n`,
+        }\n${
+          attention.length
+            ? "\nItems requiring attention: " + attention.map(escape).join(", ") + ".\n"
+            : ""
+        }`,
     };
   },
 };

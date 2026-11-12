@@ -306,33 +306,11 @@ async function installUnlocked(
     policy: config.policies.episode,
     downloadProvider: config.providers.downloader,
   });
-  await define("media-files", "hoardarr/media-files", {
-    stagingRoot: config.paths.staging,
-    catalogModelName: "movie-catalog",
-    episodeCatalogModelName: "episode-catalog",
-    sha256Binary: "/usr/bin/sha256sum",
-    ...(config.guest
-      ? {
-        storage: config.guest.storage,
-        libraryRoot: config.paths.library,
-        journalRoot: `${config.guest.projectRoot}/state/maintenance/cleanup`,
-      }
-      : {}),
-  });
   await define(
     "coordinator",
     "@funsaized/hoardarr/coordinator",
     config.guest ? { storage: config.guest.storage } : {},
   );
-  await define("pipeline", "@funsaized/hoardarr/pipeline", {
-    seedTime: config.download.seedTime,
-    movieEnabled: config.interests.movies,
-    episodeSearchLimit: config.television.searchesPerRun,
-    episodeDownloadLimit: config.television.downloadsPerRun,
-    episodeRetryHours: config.television.retryHours,
-    downloadProvider: config.providers.downloader,
-    ...(config.guest ? { expectedInterface: config.guest.vpnInterface } : {}),
-  });
   const actual: Record<string, string> = {};
   const defined = new Set<string>();
   for (const [role, descriptor] of Object.entries(selected)) {
@@ -384,6 +362,33 @@ async function installUnlocked(
       { definition: name, descriptor },
     );
   }
+  await define("media-files", "hoardarr/media-files", {
+    stagingRoot: config.paths.staging,
+    catalogModelName: "movie-catalog",
+    episodeCatalogModelName: "episode-catalog",
+    sha256Binary: "/usr/bin/sha256sum",
+    libraryRoot: config.providers.destination === "local"
+      ? config.paths.library
+      : config.providerSettings[config.providers.destination]?.libraryRoot ?? config.paths.library,
+    destinationModelName: actual.destination,
+    ...(config.guest
+      ? {
+        storage: config.guest.storage,
+        journalRoot: `${config.guest.projectRoot}/state/maintenance/cleanup`,
+      }
+      : {}),
+  });
+  await define("pipeline", "@funsaized/hoardarr/pipeline", {
+    seedTime: config.download.seedTime,
+    discoveryModel: actual.discovery,
+    titleOverrides: config.library.titleOverrides,
+    movieEnabled: config.interests.movies,
+    episodeSearchLimit: config.television.searchesPerRun,
+    episodeDownloadLimit: config.television.downloadsPerRun,
+    episodeRetryHours: config.television.retryHours,
+    downloadProvider: config.providers.downloader,
+    ...(config.guest ? { expectedInterface: config.guest.vpnInterface } : {}),
+  });
   if (config.guest) await guestAssets(config, repo);
   await define("files-provider", "@funsaized/hoardarr/provider", {
     definition: "media-files",
@@ -396,6 +401,7 @@ async function installUnlocked(
       capabilities: [],
       methods: {
         deliver: "stage",
+        prepare: "prepare",
         stage: "stage",
         inspect: "inspect",
         manifest: "manifest",
@@ -416,6 +422,7 @@ async function installUnlocked(
   for (
     const name of [
       "media",
+      "hoardarr-observation",
       "hoardarr-discovery",
       "hoardarr-acquisition",
       "hoardarr-delivery",

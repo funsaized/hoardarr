@@ -1348,7 +1348,7 @@ Deno.test("malformed catalog records block planning instead of becoming empty wo
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.11.11.1", "model version");
+  assertEquals(model.version, "2026.11.12.1", "model version");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {

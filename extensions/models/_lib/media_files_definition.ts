@@ -4,10 +4,26 @@ export { extensionOf, isAllowedExtension } from "./media_paths.ts";
 import { z } from "npm:zod@4.5.1";
 import { assertStorage, type Storage, StorageSchema } from "./storage.ts";
 import { durableJson, syncDirectory } from "./durable.ts";
-import { checkedPath, verifyTree } from "../local_destination.ts";
-import { ReceiptSchema } from "./contracts.ts";
+import {
+  checkedPath,
+  fileHash,
+  fileIdentity,
+  LibraryItemError,
+  sameIdentity,
+  verifyFiles,
+  verifyTree,
+} from "../local_destination.ts";
+import {
+  FileIdentitySchema,
+  ReceiptSchema,
+  RelativePathSchema,
+  type Transfer,
+  TransferSchema,
+} from "./contracts.ts";
+import { fileNames } from "./library_naming.ts";
+import { dirname, join } from "node:path";
 
-const VERSION = "2026.11.09.1";
+const VERSION = "2026.11.12.1";
 
 const CONFIG = {
   stagingRoot: `${Deno.env.get("HOME") ?? "/nonexistent"}/Downloads/hoardarr/movies`,
@@ -75,15 +91,38 @@ const ManifestEntrySchema = z.object({
   relativePath: z.string().max(500),
   bytes: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  identity: FileIdentitySchema.optional(),
 });
 
 const ManifestSchema = z.object({
+  key: z.string().optional(),
+  mediaKind: z.enum(["movie", "episode"]).optional(),
   tmdbId: z.number().int().positive(),
   generatedAt: z.iso.datetime(),
   stagingDir: z.string().max(500),
   entries: z.array(ManifestEntrySchema),
   totalBytes: z.number().int().nonnegative(),
   aggregateSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  libraryRelativeDir: RelativePathSchema.optional(),
+  owner: z.uuid().optional(),
+  previousLibrary: TransferSchema.shape.previousLibrary,
+});
+
+const PrepareArgs = z.object({
+  owner: z.uuid(),
+  tmdbId: z.number().int().positive(),
+  mediaKind: z.enum(["movie", "episode"]),
+  sourceName: z.string().min(1),
+  libraryRelativeDir: RelativePathSchema,
+  stem: z.string().min(1),
+  previousLibraryPath: z.string().optional(),
+  preview: z.boolean().default(false),
+});
+const PreparationSchema = z.object({
+  libraryRelativeDir: RelativePathSchema,
+  stem: z.string(),
+  moves: z.array(z.object({ from: RelativePathSchema, to: RelativePathSchema })),
+  previousLibrary: TransferSchema.shape.previousLibrary,
 });
 
 const CleanupSchema = z.object({
@@ -911,6 +950,172 @@ async function readOwnManifest(
   return ManifestSchema.parse(raw);
 }
 
+/** Prepare one import, persisting the rename list before changing any staged names. */
+async function executePrepare(args: z.infer<typeof PrepareArgs>, context: Context) {
+  if (context.globalArgs.storage) await assertStorage(context.globalArgs.storage);
+  if (!safeBaseName(args.stem)) {
+    throw new LibraryItemError("unsafe-name", "Unsafe library filename");
+  }
+  const key = payloadKey(args.tmdbId, args.mediaKind);
+  const root = await canonicalizeRoot(context.globalArgs.stagingRoot);
+  const stagingDir = computeStagingDir(root, key);
+  const priorPlan = await context.readResource(`preparation-${key}`);
+  let plan = priorPlan ? PreparationSchema.parse(priorPlan) : null;
+  if (
+    plan && (plan.libraryRelativeDir !== args.libraryRelativeDir || plan.stem !== args.stem ||
+      plan.previousLibrary?.directory !== args.previousLibraryPath)
+  ) {
+    if (await Deno.lstat(stagingDir).catch(() => null)) {
+      throw new LibraryItemError(
+        "preparation-in-progress",
+        "Finish the existing import before changing its name",
+      );
+    }
+    plan = null;
+  }
+  if (!plan) {
+    let paths: string[];
+    let previousLibrary: Transfer["previousLibrary"];
+    if (args.previousLibraryPath) {
+      if (!context.globalArgs.libraryRoot) {
+        throw new Error("Local library root required for reorganization");
+      }
+      const directory = await checkedPath(context.globalArgs.libraryRoot, args.previousLibraryPath);
+      const previous = await readOwnManifest(context, args.tmdbId, args.mediaKind);
+      const catalog = await readCatalogSubset(context, args.tmdbId, args.mediaKind);
+      if (
+        !previous || previous.aggregateSha256 !== catalog?.sha256 ||
+        catalog.remotePath !== directory
+      ) {
+        throw new LibraryItemError(
+          "missing-library-manifest",
+          "The saved manifest must identify the current library copy",
+        );
+      }
+      const identities = args.preview
+        ? []
+        : await verifyFiles(directory, previous.entries, context.signal);
+      previousLibrary = {
+        directory,
+        entries: previous.entries.map((e) => ({
+          ...e,
+          identity: identities.find((f) => f.relativePath === e.relativePath)?.identity,
+        })),
+      };
+      paths = previous.entries.map((e) => e.relativePath);
+    } else if (args.preview) {
+      const source = await checkedPath(root, join(root, args.sourceName));
+      const info = await Deno.lstat(source).catch(() => null);
+      paths = info?.isFile ? [args.sourceName] : (await enumerateApproved(
+        info ? source : stagingDir,
+        info ? source : stagingDir,
+        root,
+        context.signal,
+      )).approved.map((e) => e.relativePath);
+    } else {
+      await executeStage(args, context);
+      const enumeration = await enumerateApproved(
+        stagingDir,
+        await canonicalizeDir(stagingDir),
+        root,
+        context.signal,
+      );
+      if (enumeration.denied.length) {
+        throw new LibraryItemError("unsupported-files", "Staging contains unsupported files");
+      }
+      paths = enumeration.approved.map((e) => e.relativePath);
+    }
+    plan = PreparationSchema.parse({
+      libraryRelativeDir: args.libraryRelativeDir,
+      stem: args.stem,
+      moves: fileNames(paths, args.stem),
+      previousLibrary,
+    });
+    if (!args.preview) await context.writeResource("preparation", `preparation-${key}`, plan);
+  }
+  if (args.preview) {
+    return {
+      dataHandles: [await context.writeResource("preparation", `preview-${key}`, plan)],
+    };
+  }
+  await Deno.mkdir(stagingDir, { recursive: true });
+  for (const move of plan.moves) {
+    context.signal.throwIfAborted();
+    const from = await checkedPath(root, join(stagingDir, move.from));
+    const to = await checkedPath(root, join(stagingDir, move.to));
+    let fromInfo = await Deno.lstat(from).catch((e) => {
+      if (!(e instanceof Deno.errors.NotFound)) throw e;
+      return null;
+    });
+    const toInfo = from === to ? fromInfo : await Deno.lstat(to).catch((e) => {
+      if (!(e instanceof Deno.errors.NotFound)) throw e;
+      return null;
+    });
+    if (!fromInfo && !toInfo && plan.previousLibrary) {
+      const old = await checkedPath(
+        context.globalArgs.libraryRoot!,
+        join(plan.previousLibrary.directory, move.from),
+      );
+      await Deno.mkdir(dirname(from), { recursive: true });
+      await Deno.copyFile(old, from);
+      fromInfo = await Deno.lstat(from);
+    }
+    if (from !== to && fromInfo && toInfo) {
+      throw new LibraryItemError(
+        "filename-collision",
+        `Both original and canonical filenames exist: ${move.to}`,
+      );
+    }
+    if (from !== to && fromInfo) {
+      if (!fromInfo.isFile || fromInfo.isSymlink) {
+        throw new LibraryItemError("unsupported-file", move.from);
+      }
+      await Deno.rename(from, to);
+      await syncDirectory(dirname(from));
+      if (dirname(from) !== dirname(to)) await syncDirectory(dirname(to));
+    }
+    if (!fromInfo && !toInfo) {
+      throw new LibraryItemError("missing-file", `Missing staged file: ${move.from}`);
+    }
+  }
+  const entries: Transfer["entries"] = [];
+  await syncDirectory(stagingDir);
+  await syncDirectory(root);
+  for (const move of [...plan.moves].sort((a, b) => a.to < b.to ? -1 : 1)) {
+    const path = await checkedPath(root, join(stagingDir, move.to));
+    const before = await fileIdentity(path), sha256 = await fileHash(path, context.signal);
+    const identity = await fileIdentity(path);
+    if (!sameIdentity(before, identity)) {
+      throw new LibraryItemError("source-changed", `File changed while preparing: ${move.to}`);
+    }
+    const old = plan.previousLibrary?.entries.find((e) => e.relativePath === move.from);
+    if (old && (old.sha256 !== sha256 || old.bytes !== identity.bytes)) {
+      throw new LibraryItemError("copy-mismatch", `Reorganization copy differs: ${move.to}`);
+    }
+    entries.push({ relativePath: move.to, bytes: identity.bytes, sha256, identity });
+  }
+  const transfer = TransferSchema.parse({
+    key,
+    mediaKind: args.mediaKind,
+    stagingDir,
+    entries,
+    owner: args.owner,
+    totalBytes: entries.reduce((sum, e) => sum + e.bytes, 0),
+    aggregateSha256: await aggregateSha256(buildManifestText(entries)),
+    libraryRelativeDir: plan.libraryRelativeDir,
+    previousLibrary: plan.previousLibrary,
+  });
+  return {
+    dataHandles: [
+      await context.writeResource("manifest", `manifest-${key}`, {
+        ...transfer,
+        tmdbId: args.tmdbId,
+        generatedAt: new Date().toISOString(),
+      }),
+    ],
+  };
+}
+
 async function executeInspect(
   args: { tmdbId: number; mediaKind?: MediaKind },
   context: Context,
@@ -1145,8 +1350,137 @@ async function defaultRemoveEmptyDir(path: string): Promise<boolean> {
   }
 }
 
+/** Cleanup consumes the committed receipt; unchanged files need no second checksum pass. */
+async function cleanupPrepared(
+  args: { tmdbId: number; mediaKind?: MediaKind; owner?: string },
+  context: Context,
+  manifest: Manifest,
+) {
+  const key = payloadKey(args.tmdbId, args.mediaKind);
+  const catalog = await readCatalogSubset(context, args.tmdbId, args.mediaKind);
+  const auth = authorizeCatalog(catalog, manifest.aggregateSha256);
+  if (!auth.ok) throw new Error(`cleanup denied: ${auth.reason}`);
+  const found = await context.definitionRepository.findByNameGlobal(
+    context.globalArgs.destinationModelName ?? "local-destination",
+  );
+  if (!found) throw new Error("Destination definition unavailable");
+  const raw = await context.dataRepository.getContent(
+    String(found.type),
+    String(found.definition.id),
+    `receipt-${key}`,
+  );
+  if (!raw) throw new Error("Persisted delivery receipt unavailable");
+  const receipt = ReceiptSchema.parse(JSON.parse(TEXT_DECODER.decode(raw)));
+  if (
+    receipt.key !== key || receipt.destination !== catalog!.remotePath ||
+    receipt.manifestSha256 !== manifest.aggregateSha256 ||
+    receipt.totalBytes !== manifest.totalBytes
+  ) {
+    throw new Error("Receipt does not authorize cleanup of this item");
+  }
+  const fresh = manifest.owner !== undefined && manifest.owner === args.owner;
+  if (receipt.provider === "local") {
+    if (!context.globalArgs.libraryRoot) throw new Error("Local library root unavailable");
+    await checkedPath(context.globalArgs.libraryRoot, receipt.destination);
+    await verifyFiles(
+      receipt.destination,
+      manifest.entries,
+      context.signal,
+      fresh ? receipt.files : undefined,
+    );
+  }
+  const intentName = `cleanup-intent-${key}`;
+  const prior = await context.readResource(intentName);
+  const intended = prior?.aggregateSha256 === manifest.aggregateSha256;
+  const targets = [
+    {
+      directory: manifest.stagingDir,
+      entries: manifest.entries,
+      root: context.globalArgs.stagingRoot,
+    },
+    ...(manifest.previousLibrary
+      ? [{ ...manifest.previousLibrary, root: context.globalArgs.libraryRoot! }]
+      : []),
+  ];
+  const pending: string[] = [];
+  const published = new Set(manifest.entries.map((e) => join(receipt.destination, e.relativePath)));
+  for (const target of targets) {
+    await checkedPath(target.root, target.directory);
+    for (const entry of target.entries) {
+      const path = await checkedPath(target.root, join(target.directory, entry.relativePath));
+      if (published.has(path)) continue;
+      try {
+        const identity = await fileIdentity(path);
+        if (
+          identity.bytes !== entry.bytes ||
+          ((!fresh || !sameIdentity(entry.identity, identity)) &&
+            await fileHash(path, context.signal) !== entry.sha256)
+        ) {
+          throw new LibraryItemError(
+            "source-changed",
+            `Cleanup source changed: ${entry.relativePath}`,
+          );
+        }
+        pending.push(path);
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound) || !intended) throw error;
+      }
+    }
+  }
+  if (!intended) {
+    await context.writeResource("cleanupIntent", intentName, {
+      aggregateSha256: manifest.aggregateSha256,
+    });
+  }
+  for (const path of pending) {
+    context.signal.throwIfAborted();
+    if (context.globalArgs.storage) await assertStorage(context.globalArgs.storage);
+    await defaultRemoveFile(path);
+  }
+  for (const target of targets) {
+    // Only remove directories made empty by these files, never neighboring episode files.
+    const dirs = new Set(
+      target.entries.map((e) => dirname(join(target.directory, e.relativePath))),
+    );
+    dirs.add(target.directory);
+    for (const dir of [...dirs].sort((a, b) => b.length - a.length)) {
+      try {
+        let empty = true;
+        for await (const _entry of Deno.readDir(dir)) {
+          empty = false;
+          break;
+        }
+        if (empty) await defaultRemoveEmptyDir(dir);
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      }
+    }
+  }
+  await pruneEmptyDirs(
+    manifest.stagingDir,
+    manifest.stagingDir,
+    (p) => Deno.realPath(p),
+    defaultRemoveEmptyDir,
+  );
+  const record = CleanupSchema.parse({
+    tmdbId: args.tmdbId,
+    performedAt: new Date().toISOString(),
+    stagingDir: manifest.stagingDir,
+    outcome: pending.length ? "deleted" : "absent",
+    reason: null,
+    approvedFiles: manifest.entries.map((e) => e.relativePath),
+    deletedFiles: manifest.entries.map((e) => e.relativePath),
+    reHashedEntries: [],
+    catalogStatus: catalog!.status,
+    catalogRemotePath: catalog!.remotePath,
+    catalogSha256: catalog!.sha256,
+    errors: [],
+  });
+  return { dataHandles: [await context.writeResource("cleanup", `cleanup-${key}`, record)] };
+}
+
 async function executeCleanup(
-  args: { tmdbId: number; mediaKind?: MediaKind },
+  args: { tmdbId: number; mediaKind?: MediaKind; owner?: string },
   context: Context,
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
   const tmdbId = validateTmdbId(args.tmdbId);
@@ -1160,6 +1494,38 @@ async function executeCleanup(
   if (context.globalArgs.storage) await assertStorage(context.globalArgs.storage);
   const priorManifest = await readOwnManifest(context, tmdbId, args.mediaKind);
   if (!priorManifest) throw new Error(`no prior manifest for tmdbId=${tmdbId}; run manifest first`);
+  if (priorManifest.libraryRelativeDir) {
+    try {
+      return await cleanupPrepared(args, context, priorManifest);
+    } catch (error) {
+      if (!(error instanceof LibraryItemError) && !(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+      const catalog = await readCatalogSubset(context, tmdbId, args.mediaKind);
+      return {
+        dataHandles: [
+          await context.writeResource(
+            "cleanup",
+            `cleanup-${key}`,
+            CleanupSchema.parse({
+              tmdbId,
+              performedAt: new Date().toISOString(),
+              stagingDir,
+              outcome: "failed",
+              reason: error.message,
+              approvedFiles: priorManifest.entries.map((e) => e.relativePath),
+              deletedFiles: [],
+              reHashedEntries: [],
+              catalogStatus: catalog?.status ?? null,
+              catalogRemotePath: catalog?.remotePath ?? null,
+              catalogSha256: catalog?.sha256 ?? null,
+              errors: [error.message],
+            }),
+          ),
+        ],
+      };
+    }
+  }
   const catalog = await readCatalogSubset(context, tmdbId, args.mediaKind);
   const auth = authorizeCatalog(catalog, priorManifest.aggregateSha256);
 
@@ -1364,6 +1730,10 @@ export const definition = {
     toVersion: "2026.11.09.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.12.1",
+    description: "Preserve existing records and add optional canonical library paths",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: z.object({
     storage: StorageSchema.optional(),
@@ -1377,6 +1747,24 @@ export const definition = {
     sha256Binary: z.literal(CONFIG.sha256Binary).default(CONFIG.sha256Binary),
   }),
   resources: {
+    problem: {
+      description: "A file problem isolated to one library item",
+      schema: z.object({ key: z.string(), code: z.string(), error: z.string() }),
+      lifetime: "30d",
+      garbageCollection: 100,
+    },
+    preparation: {
+      description: "Pinned file names for an import, reusable after an interrupted rename",
+      schema: PreparationSchema,
+      lifetime: "infinite",
+      garbageCollection: 50,
+    },
+    cleanupIntent: {
+      description: "Committed intent to remove the files covered by one verified manifest",
+      schema: z.object({ aggregateSha256: z.string() }),
+      lifetime: "infinite",
+      garbageCollection: 50,
+    },
     stage: {
       description:
         "Allowlisted files moved from an exact Torlink payload name into its TMDB-id staging directory.",
@@ -1406,6 +1794,33 @@ export const definition = {
     },
   },
   methods: {
+    prepare: {
+      description:
+        "Stage and name one item deterministically, then produce its single publication manifest; preview only lists names.",
+      arguments: PrepareArgs,
+      execute: async (args: z.infer<typeof PrepareArgs>, context: Context) => {
+        try {
+          return await executePrepare(args, context);
+        } catch (error) {
+          if (!(error instanceof LibraryItemError) && !(error instanceof Deno.errors.NotFound)) {
+            throw error;
+          }
+          return {
+            dataHandles: [
+              await context.writeResource(
+                "problem",
+                `problem-${payloadKey(args.tmdbId, args.mediaKind)}`,
+                {
+                  key: payloadKey(args.tmdbId, args.mediaKind),
+                  code: error instanceof LibraryItemError ? error.code : "missing-file",
+                  error: error.message,
+                },
+              ),
+            ],
+          };
+        }
+      },
+    },
     stage: {
       description:
         "Move only allowlisted files from an exact Torlink payload name into <stagingRoot>/<tmdbId>; refuse symlinks and overwrites.",
@@ -1440,6 +1855,7 @@ export const definition = {
       arguments: z.object({
         tmdbId: z.number().int().positive(),
         mediaKind: z.enum(["movie", "episode"]).default("movie"),
+        owner: z.uuid().optional(),
       }),
       execute: executeCleanup,
     },
@@ -1448,6 +1864,7 @@ export const definition = {
 
 /** Pure helpers, schemas, and dependency-injected execute exposed to tests. */
 export const testing = {
+  executePrepare,
   validateTmdbId,
   payloadKey,
   isAllowedExtension,

@@ -10,7 +10,7 @@ import {
   PolicySchema,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.11.3";
+const MODEL_VERSION = "2026.11.12.1";
 const SPEC_EPISODE = "episode";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -103,6 +103,8 @@ const TransitionSchema = z.object({
   completedAt: z.iso.datetime().nullable().optional(),
   transferredAt: z.iso.datetime().nullable().optional(),
   localCleanedAt: z.iso.datetime().nullable().optional(),
+  libraryRelativeDir: z.string().optional(),
+  layoutVersion: z.number().int().optional(),
 });
 
 const TransitionArgsSchema = z.object({
@@ -536,6 +538,10 @@ function applyPatch(episode: Episode, transition: Transition): Episode {
   if (transition.localCleanedAt !== undefined) {
     next.localCleanedAt = transition.localCleanedAt;
   }
+  if (transition.libraryRelativeDir !== undefined) {
+    next.libraryRelativeDir = transition.libraryRelativeDir;
+  }
+  if (transition.layoutVersion !== undefined) next.layoutVersion = transition.layoutVersion;
   return next;
 }
 
@@ -961,6 +967,10 @@ export const definition = {
   }, {
     toVersion: "2026.11.11.3",
     description: "Retain series premiere years for release identity checks",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.12.1",
+    description: "Preserve existing records and add optional canonical library paths",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: GlobalArgumentsSchema,

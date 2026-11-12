@@ -25,9 +25,9 @@ export async function doctor(config: Config, repo: string, live = false) {
   await check("Swamp", async () => {
     const version = (await command(["--version"])).trim();
     const expected = config.guest
-      ? runtimePins.swamp.derivative.version
-      : runtimePins.swamp.version;
-    if (version.split(/\s+/).at(-1) !== expected) {
+      ? [runtimePins.swamp.derivative.version]
+      : [runtimePins.swamp.version, runtimePins.swamp.derivative.version];
+    if (!expected.includes(version.split(/\s+/).at(-1)!)) {
       throw new Error(`Untested runtime: ${version}; use the pinned release`);
     }
     return version;

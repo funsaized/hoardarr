@@ -17,7 +17,7 @@ for name in ("plan", "first", "retry"):
     assert value["status"] == "succeeded", (name, value["status"])
 row = json.loads((root / "catalog.json").read_text())["results"][0]
 assert row["status"] == "transferred" and row["localCleanedAt"]
-assert (root / "payload/library/Movies/1").is_dir()
+assert (root / "payload/library/Movies/Hoardarr Demo (2026)").is_dir()
 assert not (root / "payload/downloads/1").exists()
 assert not (root / ".hoardarr/lease.json").exists()
 print("Verified fresh installation, preview, acquisition, delivery, cleanup, idempotent replay, and lease release")
@@ -39,24 +39,23 @@ smoke_deno="${HOARDARR_DENO:-${HOME}/.swamp/deno/deno}"
 "$smoke_deno" run --allow-all "$smoke_repo/configure.ts" "$smoke_source" "$smoke_repo"
 "$smoke_source/bin/hoardarr" apply --no-pull --dir "$smoke_repo" > "$smoke_repo/apply.json"
 "$smoke_source/bin/hoardarr" doctor --dir "$smoke_repo" > "$smoke_repo/doctor.json"
-mkdir -p "$smoke_repo/another-library/TV/e-2"
-printf 'deliberate conflicting fixture\n' > "$smoke_repo/another-library/TV/e-2/conflict.mkv"
-if "$smoke_source/bin/hoardarr" run --dir "$smoke_repo" --json > "$smoke_repo/conflict-run.json" 2> "$smoke_repo/conflict-error.log"; then
-  echo 'Expected destination conflict to fail' >&2; exit 1
-fi
+mkdir -p "$smoke_repo/another-library/TV/Hoardarr Fixture Series/Season 01"
+printf 'deliberate conflicting fixture\n' > "$smoke_repo/another-library/TV/Hoardarr Fixture Series/Season 01/Hoardarr Fixture Series - S01E01 - Fixture.mkv"
+"$smoke_source/bin/hoardarr" run --dir "$smoke_repo" --json > "$smoke_repo/episode-add.json"
+"$smoke_source/bin/hoardarr" run --dir "$smoke_repo" --json > "$smoke_repo/conflict-run.json"
 swamp report get @swamp/workflow-summary --workflow media --repo-dir "$smoke_repo" --json > "$smoke_repo/conflict-report.json"
 swamp data query 'modelName == "episode-catalog" && name == "catalog-episode-2"' --select content --repo-dir "$smoke_repo" --json > "$smoke_repo/episode-before.json"
 python3 - "$smoke_repo" <<'PY'
 import json, pathlib, sys
 root=pathlib.Path(sys.argv[1])
 row=json.loads((root/'episode-before.json').read_text())['results'][0]
-assert row['status']=='transfer-ready', row['status']
+assert row['status']=='transfer-ready' and row['error'], row
 assert (root/'payload/downloads/e-2').is_dir()
-assert (root/'another-library/TV/e-2/conflict.mkv').read_text()=='deliberate conflicting fixture\n'
+assert (root/'another-library/TV/Hoardarr Fixture Series/Season 01/Hoardarr Fixture Series - S01E01 - Fixture.mkv').read_text()=='deliberate conflicting fixture\n'
 assert not (root/'.hoardarr/lease.json').exists()
 PY
-rm "$smoke_repo/another-library/TV/e-2/conflict.mkv"
-rmdir "$smoke_repo/another-library/TV/e-2"
+rm "$smoke_repo/another-library/TV/Hoardarr Fixture Series/Season 01/Hoardarr Fixture Series - S01E01 - Fixture.mkv"
+rmdir "$smoke_repo/another-library/TV/Hoardarr Fixture Series/Season 01"
 "$smoke_source/bin/hoardarr" run --dir "$smoke_repo" --json > "$smoke_repo/episode-retry.json"
 swamp data query 'modelName == "episode-catalog" && name == "catalog-episode-2"' --select content --repo-dir "$smoke_repo" --json > "$smoke_repo/episode-after.json"
 python3 - "$smoke_repo" <<'PY'
@@ -64,7 +63,7 @@ import json, pathlib, sys
 root=pathlib.Path(sys.argv[1]); row=json.loads((root/'episode-after.json').read_text())['results'][0]
 assert row['status']=='transferred' and row['localCleanedAt']
 assert row['downloadProvider']=='fixture'
-assert (root/'another-library/TV/e-2').is_dir()
+assert (root/'another-library/TV/Hoardarr Fixture Series/Season 01').is_dir()
 assert not (root/'payload/downloads/e-2').exists()
 PY
 smoke_owner=$(python3 -c 'import uuid; print(uuid.uuid4())')

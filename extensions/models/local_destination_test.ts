@@ -53,3 +53,49 @@ Deno.test("transfer manifests reject line injection and ambiguous path component
       );
     }
   }));
+
+Deno.test("a named destination conflict is recorded per item and another episode can publish", () =>
+  temporary(async (root) => {
+    const { createHash } = await import("node:crypto");
+    const { model, fileIdentity } = await import("./local_destination.ts");
+    const roots = { stagingRoot: `${root}/staging`, libraryRoot: `${root}/library` };
+    const first = await payload(root);
+    const named = { ...first, libraryRelativeDir: "TV/Show/Season 01" };
+    await Deno.mkdir(`${roots.libraryRoot}/${named.libraryRelativeDir}`, { recursive: true });
+    await Deno.writeTextFile(
+      `${roots.libraryRoot}/${named.libraryRelativeDir}/movie.mkv`,
+      "conflicting neighbor",
+    );
+    const outputs: { spec: string; value: Record<string, unknown> }[] = [];
+    const context = {
+      signal: new AbortController().signal,
+      globalArgs: roots,
+      writeResource: async (spec: string, name: string, value: Record<string, unknown>) => {
+        outputs.push({ spec, value });
+        return { name };
+      },
+    };
+    await model.methods.deliver.execute(named, context);
+    assert(outputs[0].spec === "problem");
+    await Deno.mkdir(`${roots.stagingRoot}/e-2`);
+    await Deno.copyFile(`${first.stagingDir}/movie.mkv`, `${roots.stagingRoot}/e-2/episode2.mkv`);
+    const sha256 = first.entries[0].sha256;
+    const second = {
+      ...named,
+      key: "e-2",
+      mediaKind: "episode" as const,
+      stagingDir: `${roots.stagingRoot}/e-2`,
+      entries: [{
+        ...first.entries[0],
+        relativePath: "episode2.mkv",
+        identity: await fileIdentity(`${roots.stagingRoot}/e-2/episode2.mkv`),
+      }],
+      aggregateSha256: createHash("sha256").update(`${sha256}  episode2.mkv\n`).digest("hex"),
+    };
+    await model.methods.deliver.execute(second, context);
+    assert(outputs[1].spec === "receipt");
+    assert(
+      await Deno.readTextFile(`${roots.libraryRoot}/${named.libraryRelativeDir}/movie.mkv`) ===
+        "conflicting neighbor",
+    );
+  }));

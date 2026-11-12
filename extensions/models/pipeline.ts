@@ -1,9 +1,16 @@
 /** Catalog-facing batch operations. Swamp workflows own phase ordering and recovery. */
 import { z } from "npm:zod@4.5.1";
-import { assertLease, invoke, type RecordData, type Runtime } from "./_lib/runtime.ts";
+import {
+  assertLease,
+  invoke,
+  type RecordData,
+  recordExternalIntent,
+  type Runtime,
+} from "./_lib/runtime.ts";
 import { ReceiptSchema, TransferSchema } from "./_lib/contracts.ts";
 import { type EpisodeWork, prioritizeEpisodes, type SearchState } from "./_lib/tv_backlog.ts";
 import { tvProgress } from "./_lib/tv_progress.ts";
+import { libraryNames, type MediaNames, namePart } from "./_lib/library_naming.ts";
 const Globals = z.object({
   movies: z.string().default("movie-catalog"),
   episodes: z.string().default("episode-catalog"),
@@ -16,10 +23,16 @@ const Globals = z.object({
   episodeRetryHours: z.number().int().min(1).max(720).default(24),
   batchLimit: z.number().int().min(1).max(100).default(100),
   expectedInterface: z.string().optional(),
+  discoveryModel: z.string().default("movie-discovery"),
+  titleOverrides: z.record(z.string(), z.string()).default({}),
 });
 type Context = Runtime & { globalArgs: z.infer<typeof Globals> };
 type Row = Record<string, unknown>;
 const Owned = z.object({ owner: z.uuid() });
+const PlanArgs = Owned.extend({
+  phase: z.enum(["all", "observe", "delivery", "acquisition", "submit", "summary"]).default("all"),
+  reorganize: z.boolean().default(false),
+});
 const Records = Owned.extend({
   records: z.array(z.object({ name: z.string(), attributes: z.record(z.string(), z.unknown()) })),
 });
@@ -28,6 +41,7 @@ const WorkItem = z.object({
   id: z.number().int().positive(),
   mediaKind: z.enum(["movie", "episode"]),
   status: z.string(),
+  needsAttention: z.boolean().optional(),
   infoHash: z.string().nullable(),
   releaseName: z.string().nullable(),
   query: z.string(),
@@ -75,6 +89,7 @@ function workItem(row: Row, kind: "movie" | "episode"): Item {
     id,
     mediaKind: kind,
     status: row.status,
+    needsAttention: !!row.error,
     infoHash: row.infoHash,
     releaseName: row.releaseName,
     query: kind === "movie"
@@ -96,10 +111,69 @@ const getRecord = (records: RecordData[], name: string): Row | undefined =>
 async function write(ctx: Context, spec: string, data: Row) {
   return { dataHandles: [await ctx.writeResource(spec, `${spec}-current`, data)] };
 }
+
+const PreparedSchema = z.object({
+  key: z.string(),
+  ready: z.boolean(),
+  cleanup: z.boolean().default(false),
+  preview: z.boolean().default(false),
+  error: z.string().nullable().default(null),
+  transfer: TransferSchema.optional(),
+  directory: z.string().optional(),
+  stem: z.string().optional(),
+  moves: z.array(z.object({ from: z.string(), to: z.string() })).optional(),
+});
+const LayoutSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  year: z.number().nullable(),
+  directory: z.string(),
+});
+
+async function layoutFor(ctx: Context, row: Row, kind: "movie" | "episode") {
+  const id = `${kind === "movie" ? "movie" : "show"}-${
+    kind === "movie" ? row.tmdbId : row.showTmdbId
+  }`;
+  const saved = (await ctx.readModelData("pipeline", "layout")).map((r) =>
+    LayoutSchema.parse(r.attributes)
+  );
+  let layout = saved.find((r) => r.id === id);
+  const override = ctx.globalArgs.titleOverrides?.[id];
+  if (!layout || (override && override !== layout.title)) {
+    const title = override ?? String(kind === "movie" ? row.title : row.showName);
+    const year = (kind === "movie" ? row.year : row.showYear) as number | null | undefined;
+    let directory = `${kind === "movie" ? "Movies" : "TV"}/${
+      namePart(`${namePart(title, id, 100)}${year ? ` (${year})` : ""}`)
+    }`;
+    if (saved.some((r) => r.id !== id && r.directory.toLowerCase() === directory.toLowerCase())) {
+      directory += ` [${id}]`;
+    }
+    layout = { id, title, year: year ?? null, directory };
+    await ctx.writeResource("layout", `layout-${id}`, layout);
+  }
+  return libraryNames(
+    {
+      mediaKind: kind,
+      id: Number(row[idField(kind)]),
+      title: layout.title,
+      year: layout.year,
+      seasonNumber: row.seasonNumber as number,
+      episodeNumber: row.episodeNumber as number,
+      episodeTitle: row.episodeTitle as string | null,
+    } satisfies MediaNames,
+    layout.directory,
+  );
+}
+
+async function itemRow(ctx: Context, item: Item): Promise<Row> {
+  const row = (await rows(ctx, item.mediaKind)).find((r) => r[idField(item.mediaKind)] === item.id);
+  if (!row) throw new Error(`Catalog item is missing: ${item.key}`);
+  return row;
+}
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.11.2",
+  version: "2026.11.12.1",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -108,9 +182,24 @@ export const model = {
     toVersion: "2026.11.11.2",
     description: "Validate TV series identity and retain rejected release hashes",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.12.1",
+    description: "Preserve catalog state while enabling named imports and phase-specific planning",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
   resources: {
+    layout: {
+      schema: LayoutSchema,
+      description: "Stable library folder keyed by movie or series identity",
+      lifetime: "infinite",
+      garbageCollection: 100,
+    },
+    prepared: resource(PreparedSchema, "Prepared import or a per-item problem"),
+    import: resource(
+      z.object({ key: z.string(), cleanup: z.boolean(), error: z.string().nullable() }),
+      "Import result for one item",
+    ),
     submissionState: {
       schema: z.object({ shows: z.record(z.string(), z.string()) }),
       description: "Last episode submission per show for cross-run fairness",
@@ -169,8 +258,8 @@ export const model = {
     },
     plan: {
       description: "Build bounded work from durable catalog records and retry policies.",
-      arguments: Owned,
-      execute: async (args: z.infer<typeof Owned>, ctx: Context) => {
+      arguments: PlanArgs,
+      execute: async (args: z.input<typeof PlanArgs>, ctx: Context) => {
         await assertLease(ctx.repoDir, args.owner);
         const all: Item[] = [], eligible = new Set<string>();
         const movieRows = await rows(ctx, "movie"), episodeRows = await rows(ctx, "episode");
@@ -185,15 +274,20 @@ export const model = {
           }
         }
 
+        const acquisition = !args.phase || ["all", "acquisition"].includes(args.phase);
         for (const kind of ["movie", "episode"] as const) {
-          const results = await invoke(ctx, catalog(ctx, kind), "plan");
-          const plan = getRecord(results, "plan-current");
-          for (
-            const id of [
-              ...(plan?.wanted as number[] ?? []),
-              ...(plan?.retryable as number[] ?? []),
-            ]
-          ) eligible.add(`${kind === "movie" ? "m" : "e"}-${id}`);
+          if (acquisition) {
+            const results = await invoke(ctx, catalog(ctx, kind), "plan");
+            const plan = getRecord(results, "plan-current");
+            for (
+              const id of [
+                ...(plan?.wanted as number[] ?? []),
+                ...(plan?.retryable as number[] ?? []),
+              ]
+            ) {
+              eligible.add(`${kind === "movie" ? "m" : "e"}-${id}`);
+            }
+          }
           for (const row of kind === "movie" ? movieRows : episodeRows) {
             all.push(
               workItem(row, kind),
@@ -256,6 +350,17 @@ export const model = {
               v[idField(r.mediaKind)] === r.id
             )?.localCleanedAt
         );
+        if (args.reorganize) {
+          for (const kind of ["movie", "episode"] as const) {
+            for (const row of kind === "movie" ? movieRows : episodeRows) {
+              if (row.status !== "transferred" || !row.localCleanedAt) continue;
+              const names = await layoutFor(ctx, row, kind);
+              if (row.layoutVersion !== 1 || row.libraryRelativeDir !== names.directory) {
+                delivery.push(workItem(row, kind));
+              }
+            }
+          }
+        }
         return write(ctx, "work", {
           television: tvProgress(episodeRows, state),
           items: all,
@@ -293,23 +398,35 @@ export const model = {
     },
     ingest: {
       description: "Ingest successful discovery records while preserving terminal catalog state.",
-      arguments: Records.extend({ mediaKind: z.enum(["movie", "episode"]) }),
+      arguments: Records.extend({
+        mediaKind: z.enum(["movie", "episode"]),
+        persisted: z.boolean().default(false),
+      }),
       execute: async (
-        args: z.infer<typeof Records> & { mediaKind: "movie" | "episode" },
+        args: z.infer<typeof Records> & { mediaKind: "movie" | "episode"; persisted?: boolean },
         ctx: Context,
       ) => {
         await assertLease(ctx.repoDir, args.owner);
-        const discoveries = args.records.filter((r) =>
+        const records = args.persisted
+          ? await ctx.readModelData(ctx.globalArgs.discoveryModel ?? "movie-discovery")
+          : args.records;
+        const discoveries = records.filter((r) =>
           args.mediaKind === "movie"
             ? r.name.startsWith("digital-release-movie-")
             : r.name.startsWith("aired-episode-") && !r.name.includes("run-current")
         ).map((r) => r.attributes).filter((r) =>
           args.mediaKind === "movie" ? r.tmdbId : r.tmdbEpisodeId
         );
-        if (discoveries.length) {
-          await invoke(ctx, catalog(ctx, args.mediaKind), "ingest", { discoveries });
+        const existing = new Set(
+          (await rows(ctx, args.mediaKind)).map((r) => r[idField(args.mediaKind)]),
+        );
+        const missing = discoveries.filter((r) => !existing.has(r[idField(args.mediaKind)]));
+        for (let offset = 0; offset < missing.length; offset += 500) {
+          await invoke(ctx, catalog(ctx, args.mediaKind), "ingest", {
+            discoveries: missing.slice(offset, offset + 500),
+          });
         }
-        return write(ctx, "summary", { ok: true, count: discoveries.length });
+        return write(ctx, "summary", { ok: true, count: missing.length });
       },
     },
     select: {
@@ -437,69 +554,145 @@ export const model = {
         return write(ctx, "summary", { ok: true });
       },
     },
-    manifest: {
-      description: "Normalize a freshly generated source manifest for a destination.",
-      arguments: Records.extend({ item: WorkItem }),
-      execute: async (args: z.infer<typeof Records> & { item: Item }, ctx: Context) => {
+    prepare: {
+      description:
+        "Prepare canonical filenames and one manifest from catalog metadata, or preview the same mapping.",
+      arguments: Owned.extend({ item: WorkItem, preview: z.boolean().default(false) }),
+      execute: async (args: { owner: string; item: Item; preview?: boolean }, ctx: Context) => {
         await assertLease(ctx.repoDir, args.owner);
+        const row = await itemRow(ctx, args.item);
+        const save = (value: Row) =>
+          ctx.writeResource(
+            "prepared",
+            `prepared-${args.item.key}`,
+            PreparedSchema.parse({ key: args.item.key, ready: false, ...value }),
+          );
+        if (
+          row.status === "cleanup-pending" || row.status === "transferred" && !row.localCleanedAt
+        ) {
+          return { dataHandles: [await save({ cleanup: !args.preview, preview: !!args.preview })] };
+        }
+        if (!["transfer-ready", "transferred"].includes(String(row.status))) {
+          return {
+            dataHandles: [
+              await save({ error: "Item is not ready for import", preview: !!args.preview }),
+            ],
+          };
+        }
+        const names = await layoutFor(ctx, row, args.item.mediaKind);
+        if (!args.preview) {
+          await recordExternalIntent(ctx.repoDir, args.owner, `${ctx.globalArgs.files}.prepare`);
+        }
+        const prepared = await invoke(ctx, ctx.globalArgs.files, "prepare", {
+          owner: args.owner,
+          tmdbId: args.item.id,
+          mediaKind: args.item.mediaKind,
+          sourceName: row.releaseName ?? String(args.item.id),
+          libraryRelativeDir: names.directory,
+          stem: names.stem,
+          ...(row.status === "transferred" ? { previousLibraryPath: row.remotePath } : {}),
+          preview: !!args.preview,
+        });
+        const problem = prepared.find((r) => r.name.startsWith("problem-"))?.attributes;
         const key = args.item.mediaKind === "movie" ? String(args.item.id) : `e-${args.item.id}`;
-        const manifest = getRecord(args.records, `manifest-${key}`);
-        if (!manifest) throw new Error("Missing source manifest");
-        return write(
-          ctx,
-          "transfer",
-          TransferSchema.parse({ ...manifest, key, mediaKind: args.item.mediaKind }),
-        );
+        const manifest = getRecord(prepared, `manifest-${key}`);
+        const preview = getRecord(prepared, `preview-${key}`);
+        return {
+          dataHandles: [
+            await save({
+              directory: names.directory,
+              stem: names.stem,
+              preview: !!args.preview,
+              ready: !!manifest && !args.preview,
+              error: problem ? String(problem.error) : null,
+              ...(manifest ? { transfer: TransferSchema.parse(manifest) } : {}),
+              ...(preview ? { moves: preview.moves } : {}),
+            }),
+          ],
+        };
       },
     },
-    receipt: {
-      description: "Record verified delivery evidence before allowing local cleanup.",
-      arguments: Records.extend({ item: WorkItem, transfer: TransferSchema }),
+    commit: {
+      description:
+        "Commit a verified import once; item problems remain retryable without blocking neighbors.",
+      arguments: Records.extend({ item: WorkItem, prepared: PreparedSchema }),
       execute: async (
-        args: z.infer<typeof Records> & { item: Item; transfer: z.infer<typeof TransferSchema> },
+        args: z.infer<typeof Records> & { item: Item; prepared: z.infer<typeof PreparedSchema> },
         ctx: Context,
       ) => {
         await assertLease(ctx.repoDir, args.owner);
-        const record = args.records.find((r) => r.name.startsWith("receipt-"));
-        const receipt = ReceiptSchema.parse(record?.attributes);
+        const row = await itemRow(ctx, args.item);
+        const result = async (cleanup: boolean, error: string | null) => ({
+          dataHandles: [
+            await ctx.writeResource("import", `import-${args.item.key}`, {
+              key: args.item.key,
+              cleanup,
+              error,
+            }),
+          ],
+        });
+        if (args.prepared.preview) return result(false, args.prepared.error);
+        const problem = args.records.find((r) => r.name.startsWith("problem-"))?.attributes;
+        const error = args.prepared.error ?? (problem ? String(problem.error) : null);
+        if (error) {
+          await transition(ctx, args.item, { to: row.status, error });
+          return result(false, error);
+        }
+        if (!args.prepared.ready) return result(args.prepared.cleanup, null);
+        const transfer = args.prepared.transfer!;
+        const receipt = ReceiptSchema.parse(
+          args.records.find((r) => r.name.startsWith("receipt-"))?.attributes,
+        );
         if (
-          receipt.key !== args.transfer.key ||
-          receipt.manifestSha256 !== args.transfer.aggregateSha256 ||
-          receipt.totalBytes !== args.transfer.totalBytes
+          receipt.key !== transfer.key || receipt.manifestSha256 !== transfer.aggregateSha256 ||
+          receipt.totalBytes !== transfer.totalBytes
         ) throw new Error("Receipt does not identify this payload");
         await transition(ctx, args.item, {
           to: "transferred",
-          localPath: args.transfer.stagingDir,
+          localPath: transfer.stagingDir,
           remotePath: receipt.destination,
           sha256: receipt.manifestSha256,
           bytes: receipt.totalBytes,
           transferredAt: receipt.verifiedAt,
+          localCleanedAt: null,
+          libraryRelativeDir: transfer.libraryRelativeDir,
+          layoutVersion: 1,
           error: null,
         });
-        await transition(ctx, args.item, {
-          to: "cleanup-pending",
-          error: "Verified destination; local cleanup pending",
-        });
-        return write(ctx, "summary", { ok: true });
+        return result(true, null);
       },
     },
     cleanup: {
-      description: "Persist successful or retryable source cleanup outcomes.",
-      arguments: Records.extend({ item: WorkItem }),
-      execute: async (args: z.infer<typeof Records> & { item: Item }, ctx: Context) => {
+      description: "Remove a committed import's staging files and persist its cleanup timestamp.",
+      arguments: Owned.extend({ item: WorkItem }),
+      execute: async (args: { owner: string; item: Item }, ctx: Context) => {
         await assertLease(ctx.repoDir, args.owner);
-        const record = args.records.find((r) => r.name.startsWith("cleanup-"))?.attributes;
-        if (record && ["deleted", "absent"].includes(String(record.outcome))) {
-          await transition(ctx, args.item, {
-            to: "transferred",
-            localCleanedAt: record.performedAt,
-            error: null,
-          });
-        } else {await transition(ctx, args.item, {
-            to: "cleanup-pending",
-            error: String(record?.reason ?? "Cleanup interrupted; retry pending"),
-          });}
-        return write(ctx, "summary", { ok: true });
+        await recordExternalIntent(ctx.repoDir, args.owner, `${ctx.globalArgs.files}.cleanup`);
+        const records = await invoke(ctx, ctx.globalArgs.files, "cleanup", {
+          owner: args.owner,
+          tmdbId: args.item.id,
+          mediaKind: args.item.mediaKind,
+        });
+        const record = records.find((r) => r.name.startsWith("cleanup-"))?.attributes;
+        const cleaned = record && ["deleted", "absent"].includes(String(record.outcome));
+        const row = await itemRow(ctx, args.item);
+        const error = cleaned
+          ? null
+          : String(record?.reason ?? "Cleanup interrupted; retry pending");
+        await transition(ctx, args.item, {
+          to: cleaned ? "transferred" : row.status,
+          ...(cleaned ? { localCleanedAt: record.performedAt } : {}),
+          error,
+        });
+        return {
+          dataHandles: [
+            await ctx.writeResource("import", `import-${args.item.key}`, {
+              key: args.item.key,
+              cleanup: !cleaned,
+              error,
+            }),
+          ],
+        };
       },
     },
   },

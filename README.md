@@ -100,8 +100,8 @@ bin/hoardarr status --dir "$HOME/hoardarr-demo"
 
 The demo writes harmless text files with media filenames. It uses no torrent peers, VPN or TMDB
 account. Its synthetic downloads finish immediately; delivery and cleanup use the real filesystem
-implementation. Look under `~/hoardarr-demo/payload/library/Movies/1`. A completed run reports
-`lease: null`. Running it again preserves completed catalog entries.
+implementation. Look under `~/hoardarr-demo/payload/library/Movies/Hoardarr Demo (2026)`. A
+completed run reports `lease: null`. Running it again preserves completed catalog entries.
 
 To include the fixture episode, add this to the generated `hoardarr.yaml`, then run `apply` and
 `run` with the same `--dir`:
@@ -336,23 +336,24 @@ media scope. Rebuild or pull the selected image, then start and check it.
 
 ```mermaid
 flowchart TD
-    A[Manual run or Swamp schedule] --> B[Admission and single-owner checks]
-    B --> C[Network readiness and discovery]
-    C --> D[Reconcile downloader state]
-    D --> E[Reject mismatches and select due searches]
-    E --> F[Submit bounded new work]
-    F --> G[Observe state and detach completed seeds]
-    G --> H[Deliver ready movies, then episodes]
-    H --> I[Verify hashes and save receipts]
-    I --> J[Clean verified staging copies]
-    J --> K[Reconcile and release ownership]
-    F -. downloads continue between runs .-> D
+    A[Manual run or Swamp schedule] --> B[Acquire installation ownership]
+    B --> C[Replay saved discoveries and observe downloads]
+    C --> D[Detach completed seeds]
+    D --> E[Prepare, publish, commit and clean ready imports]
+    E --> F[Check network and discover new candidates]
+    F --> G[Search, select and admit bounded downloads]
+    G --> H[Report outcomes and release ownership]
+    G -. downloads continue between runs .-> C
 ```
 
-The root `media` Swamp workflow owns discovery, acquisition, delivery and recovery child workflows.
-The CLI generates the DAG from validated configuration. Typed behavior methods perform outside work;
-CEL expressions pass their evidence to later steps. Providers cannot substitute a previous
-successful snapshot for a failed current call.
+The root `media` Swamp workflow owns observation, discovery, acquisition, delivery and recovery
+child workflows. The CLI generates the DAG from validated configuration. Typed behavior methods
+perform outside work; CEL expressions pass their evidence to later steps. Providers cannot
+substitute a previous successful snapshot for a failed current call. Already-ready imports and
+pending cleanup finish before new discovery or acquisition. Network failures and admission capacity
+checks therefore leave completed local work intact. If the downloader is unavailable, saved ready
+items can still import. Saved discoveries replay idempotently, including after interrupted catalog
+ingestion.
 
 A single installation owner protects manual and scheduled runs. Another tick cannot start a second
 writer. Ownership does not expire merely because time passed. After an interruption, recover the
@@ -426,17 +427,31 @@ by another valid item remains blocked for operator inspection.
 | `seed-stopped`                   | Seeding ended; detachment and delivery may follow        |
 | `transfer-ready`                 | Payload is detached and eligible for checked delivery    |
 | `transferred`                    | A verified destination receipt is recorded               |
-| `cleanup-pending`                | Delivery exists; local cleanup remains                   |
+| `cleanup-pending`                | Legacy pending cleanup; retried without another download |
 | `failed` / unavailable reporting | Inspect the recorded error, attempt count and next retry |
 
 Status separates selected, downloading, seeding, ready and completed TV counts. Downloader
 observations are **saved snapshots** with timestamps, not continuous live readings. A successful
 workflow may still contain source-specific search errors; inspect `searchHealth` and reports.
 
-Delivery copies into destination staging, verifies every expected file and the aggregate manifest,
-and promotes the directory without overwriting conflicting content. An identical existing copy can
-satisfy the receipt. Catalog publication precedes cleanup. A receipt proves copy integrity, not the
-truth of a release label or successful upload by a separate cloud-sync client.
+Each import has four Swamp steps: `prepare`, `publish`, `commit`, and `cleanup`. Preparation stages
+and names the files and creates one source manifest. Publication copies and verifies each listed
+file, then atomically publishes it without replacing conflicting content. The catalog records the
+verified location before cleanup. The uninterrupted local path reads each source once for its hash
+and each destination once for verification; retries and changed files require fresh checks.
+`transferred` stays complete while `localCleanedAt` tracks pending staging cleanup.
+
+Movies use `Movies/Title (Year)/Title (Year).ext`. Episodes share
+`TV/Show (Year)/Season 01/Show - S01E01 - Episode Title.ext`. Subtitle language suffixes survive the
+rename. Hoardarr omits missing years. Swamp retains IDs and a stable folder per movie or series; an
+ID suffix resolves a collision between catalog titles. Ambiguous videos and conflicting files record
+an item error while other imports continue. A receipt proves copy integrity, not the truth of a
+release label or completion by a separate cloud-sync client.
+
+Use [`organize --dry-run`](docs/how-to/organize-library.md) to preview existing library names, then
+`organize` to move completed local copies through the same import steps. This preserves completed
+catalog identities and acquisition history. Explicit `library.titleOverrides` let an operator or
+agent choose a name that later runs apply deterministically.
 
 ## Operator agent
 
@@ -636,6 +651,7 @@ native installation, service environment and configuration. It deliberately reje
 | `doctor [--live]`                                               | Check pins, extensions, provider contracts, paths and required keys; optional daemon health           |
 | `status`                                                        | Read catalog, show identity, TV backlog, retries, saved downloader state, source errors and ownership |
 | `plan [--refresh]`                                              | Record a preview workflow; `--refresh` also changes discovery/catalog state                           |
+| `organize [--dry-run]`                                          | Preview or apply canonical names to completed local library copies                                    |
 | `run`                                                           | Execute one owned reconciliation                                                                      |
 | `schedule enable\|disable`                                      | Update schedule activation and generated definitions                                                  |
 | `inhibit --reason TEXT`                                         | Persistently close new admissions; the current owner may finish                                       |
@@ -685,8 +701,8 @@ shares it into the guest at the same absolute path through 9p. It survives image
 | `P/state/torlink`                                  | Downloader queue, history, seeds, configuration and torrent metadata                          |
 | `P/state/maintenance`                              | Ownership, admissions, schedule activation, transaction journals and commissioning evidence   |
 | `P/downloads`                                      | In-progress and staged payloads                                                               |
-| `P/library/Movies/ID`                              | Verified movie directories keyed by TMDB movie ID                                             |
-| `P/library/TV/e-ID`                                | Verified episode directories keyed by TMDB episode ID                                         |
+| `P/library/Movies/Title (Year)`                    | Named movie directories; catalog retains TMDB identity                                        |
+| `P/library/TV/Show (Year)/Season NN`               | Shared season directories with named episode files                                            |
 | `P/runtime-home/.config/swamp`                     | Private Swamp user configuration                                                              |
 | `P/runtime-home/pi-agent`                          | Pi authentication, sessions and writable operator workspace                                   |
 | `P/secrets`                                        | Private credentials, vault storage and encrypted guest-recovery capsule                       |

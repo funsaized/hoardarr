@@ -38,17 +38,31 @@ schema is in [`src/config.ts`](../../src/config.ts), and provider contracts are 
 | `television.downloadsPerRun` | 8 new episode submissions per run               |
 | `television.retryHours`      | 24 hours between unavailable or failed searches |
 
-Native runs reconcile downloads on later ticks. `download.timeoutSeconds` applies to profiles that
 wait for downloads.
 
 ## Downloads
 
-| Field                     | Default / accepted values                               |
-| ------------------------- | ------------------------------------------------------- |
-| `download.seedTime`       | `5m`; integer duration with optional `s`, `m`, `h`, `d` |
-| `download.concurrency`    | `4` (1 to 16)                                           |
-| `download.timeoutSeconds` | `86400` (30 to 604800)                                  |
-| `download.minFreeBytes`   | 20 GiB; demo initialization sets `0`                    |
+| Field                   | Default / accepted values                               |
+| ----------------------- | ------------------------------------------------------- |
+| `download.seedTime`     | `5m`; integer duration with optional `s`, `m`, `h`, `d` |
+| `download.concurrency`  | `4` (1 to 16)                                           |
+| `download.minFreeBytes` | 20 GiB; demo initialization sets `0`                    |
+
+## Library names
+
+`library.titleOverrides` defaults to `{}`. Keys use `show-TMDB_ID` or `movie-TMDB_ID`; values are
+explicit titles. For example:
+
+```yaml
+library:
+  titleOverrides:
+    show-123: Example Show
+    movie-456: Example Film
+```
+
+Hoardarr saves the selected folder by catalog identity so metadata changes do not split a show
+across folders. An explicit override changes that selection. Apply the configuration, then use
+[`organize --dry-run`](../how-to/organize-library.md) to inspect the existing copies affected.
 
 ## Scheduling
 
@@ -69,12 +83,11 @@ the effective schedule. Changing only the YAML flag does not describe native act
 | `torlink.token`     | Optional vault expression                                              |
 | `torlink.interface` | Tunnel interface binding; mandatory for native profile                 |
 
-## Credentials and legacy hosts
+## Credentials
 
-| Field         | Default / accepted values                                              |
-| ------------- | ---------------------------------------------------------------------- |
-| `tmdbKey`     | `${{ vault.get("hoardarr", "TMDB_API_KEY") }}`                         |
-| `host`, `ssh` | Required legacy host/SSH identity, paths and destination configuration |
+| Field     | Default / accepted values                      |
+| --------- | ---------------------------------------------- |
+| `tmdbKey` | `${{ vault.get("hoardarr", "TMDB_API_KEY") }}` |
 
 Secrets belong in vault references, not literal YAML values:
 

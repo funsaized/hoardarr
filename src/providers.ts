@@ -41,7 +41,7 @@ export const builtins: Descriptor[] = [
     id: "local",
     roles: ["destination"],
     type: "@funsaized/hoardarr/local-destination",
-    version: "2026.11.09.1",
+    version: "2026.11.12.1",
     capabilities: ["verified-receipt", "local-payload"],
     methods: { deliver: "deliver" },
   },

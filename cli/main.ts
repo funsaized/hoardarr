@@ -46,6 +46,7 @@ apply      Generate and validate definitions from the selected configuration.
 doctor     Check runtime, extension loading and configured filesystem paths.
 plan       Preview catalog work; --refresh also refreshes discovery.
 run        Reconcile discovery, downloads, verified delivery and cleanup.
+organize   Organize existing local library copies; --dry-run previews filenames.
 status     Show catalog states and outstanding reconciliation ownership.
 recover    Restore the environment and release an interrupted run's ownership.
 recover-apply Roll back an interrupted native configuration transaction (--journal PATH).
@@ -396,13 +397,16 @@ async function mainUnlocked(argv: string[]): Promise<void> {
     output({ recovered: true, owner: lease.owner });
     return;
   }
-  if (action === "plan" || action === "run") {
+  if (action === "plan" || action === "run" || action === "organize") {
+    if (action === "organize" && config.providers.destination !== "local") {
+      throw new Error("Existing-library reorganization currently requires the local destination");
+    }
     if (config.guest) {
       await assertAdmission(repo, true);
       if (await readLease(join(await ownershipDirectory(repo), "lease.json"))) {
         throw new Error("Existing owner must finish or recover before native execution");
       }
-      if (action === "run" || argv.includes("--refresh")) await assertCommissioned(config, repo);
+      if (action !== "plan" || argv.includes("--refresh")) await assertCommissioned(config, repo);
     }
     await command(["workflow", "validate", "media", "--json"], repo);
     const result = await swamp([
@@ -410,9 +414,13 @@ async function mainUnlocked(argv: string[]): Promise<void> {
       "run",
       "media",
       "--input",
-      `dryRun=${action === "plan"}`,
+      `dryRun=${action === "plan" || argv.includes("--dry-run")}`,
       "--input",
       `refresh=${argv.includes("--refresh")}`,
+      "--input",
+      `reorganize=${action === "organize"}`,
+      "--input",
+      `acquire=${action !== "organize"}`,
       "--json",
     ], repo);
     if (argv.includes("--json")) output(result.stdout);

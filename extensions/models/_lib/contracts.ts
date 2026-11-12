@@ -12,6 +12,22 @@ export const DescriptorSchema = z.object({
   configuration: z.record(z.string(), z.unknown()).default({}),
 }).strict();
 export type Descriptor = z.infer<typeof DescriptorSchema>;
+/** Cheap change detection between preparation, publication and cleanup. */
+export const FileIdentitySchema = z.object({
+  bytes: z.number().int().nonnegative(),
+  device: z.string(),
+  inode: z.string(),
+  modified: z.number().nullable(),
+  changed: z.number().nullable(),
+});
+export type FileIdentity = z.infer<typeof FileIdentitySchema>;
+export const RelativePathSchema = z.string().min(1).max(500).refine(
+  (path) =>
+    !path.startsWith("/") && !path.includes("\\") &&
+    !path.split("/").some((part) => part === "" || part === "." || part === "..") &&
+    ![...path].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127),
+  "Use a relative path without traversal or control characters",
+);
 export const ManifestEntry = z.object({
   relativePath: z.string().min(1).max(500).refine(
     (path) =>
@@ -23,6 +39,7 @@ export const ManifestEntry = z.object({
   ),
   bytes: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  identity: FileIdentitySchema.optional(),
 });
 export const TransferSchema = z.object({
   key: z.string().regex(/^(?:e-)?[1-9]\d*$/),
@@ -31,6 +48,12 @@ export const TransferSchema = z.object({
   entries: z.array(ManifestEntry).min(1),
   totalBytes: z.number().int().nonnegative(),
   aggregateSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  libraryRelativeDir: RelativePathSchema.optional(),
+  owner: z.uuid().optional(),
+  previousLibrary: z.object({
+    directory: z.string().min(1),
+    entries: z.array(ManifestEntry).min(1),
+  }).optional(),
 });
 export const ReceiptSchema = z.object({
   contractVersion: z.literal(1),
@@ -40,6 +63,10 @@ export const ReceiptSchema = z.object({
   manifestSha256: z.string().regex(/^[a-f0-9]{64}$/),
   totalBytes: z.number().int().nonnegative(),
   verifiedAt: z.iso.datetime(),
+  files: z.array(z.object({
+    relativePath: RelativePathSchema,
+    identity: FileIdentitySchema,
+  })).optional(),
 });
 export type Transfer = z.infer<typeof TransferSchema>;
 export type Receipt = z.infer<typeof ReceiptSchema>;

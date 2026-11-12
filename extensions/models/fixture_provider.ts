@@ -26,7 +26,7 @@ export const model = {
   type: "@funsaized/hoardarr/fixture",
   version: "2026.11.11.4",
   upgrades: [{
-    toVersion: "2026.11.09.1",
+    toVersion: "2026.11.11.4",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],

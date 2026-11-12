@@ -33,8 +33,8 @@ The fixture provider creates completed downloads and advances its seed timer wit
 Hoardarr detaches them, copies the files, checks their SHA-256 hashes and saves receipts. Only then
 does it remove the staging payloads.
 
-Look for the movie under `Movies/1` and the episode under `TV`. The status output shows catalog
-records and `lease: null` when the run has released ownership.
+Look for the movie under `Movies/Hoardarr Demo (2026)` and the episode under `TV`. The status output
+shows catalog records and `lease: null` when the run has released ownership.
 
 ## Run it again
 

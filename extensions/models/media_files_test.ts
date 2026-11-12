@@ -1105,3 +1105,151 @@ Deno.test("cleanup rejects symlinks introduced after enumeration as denied entri
     await Deno.remove(root, { recursive: true });
   }
 });
+
+Deno.test("named preparation resumes renames and cleanup preserves neighboring episodes", () =>
+  temporary(async (root) => {
+    const stagingRoot = `${root}/staging`, libraryRoot = `${root}/library`;
+    await Deno.mkdir(`${stagingRoot}/Release/Subs`, { recursive: true });
+    await Deno.writeTextFile(`${stagingRoot}/Release/video.mkv`, "episode");
+    await Deno.writeTextFile(`${stagingRoot}/Release/Subs/en.srt`, "subtitle");
+    const { context, store } = makeContext({
+      stagingRoot,
+      catalogType: "hoardarr/episode-catalog",
+      catalogId: "episodes",
+      catalogName: "episode-catalog",
+      catalogSpec: "episode",
+    });
+    context.globalArgs.libraryRoot = libraryRoot;
+    const args = {
+      owner: crypto.randomUUID(),
+      tmdbId: 2,
+      mediaKind: "episode" as const,
+      sourceName: "Release",
+      libraryRelativeDir: "TV/Show (2022)/Season 01",
+      stem: "Show - S01E02 - Second",
+      preview: false,
+    };
+    // A saved rename list survives a failure after the files were renamed but before manifest persistence.
+    const write = context.writeResource;
+    context.writeResource = (spec, name, value) => {
+      if (spec === "manifest") throw new Error("interrupted manifest persistence");
+      return write(spec, name, value);
+    };
+    await rejects(() => model.methods.prepare.execute(args, context));
+    context.writeResource = write;
+    await model.methods.prepare.execute(args, context);
+    const { TransferSchema } = await import("./_lib/contracts.ts");
+    const transfer = TransferSchema.parse(store.resources.get("manifest-e-2")!.value);
+    assert(transfer.entries.length === 2, "video and subtitle mapped together");
+    const neighbor = `${libraryRoot}/${args.libraryRelativeDir}/Show - S01E01 - First.mkv`;
+    await Deno.mkdir(`${libraryRoot}/${args.libraryRelativeDir}`, { recursive: true });
+    await Deno.writeTextFile(neighbor, "neighbor");
+    const receipt = await deliverLocal(transfer, { stagingRoot, libraryRoot });
+    await deliverLocal(transfer, { stagingRoot, libraryRoot });
+    store.resources.set("catalog-episode-2", {
+      specName: "episode",
+      value: {
+        status: "transferred",
+        remotePath: receipt.destination,
+        sha256: transfer.aggregateSha256,
+      },
+    });
+    const lookup = context.definitionRepository.findByNameGlobal;
+    context.definitionRepository.findByNameGlobal = (name) =>
+      name === "local-destination"
+        ? Promise.resolve({ type: "destination", definition: { id: "destination" } })
+        : lookup(name);
+    const read = context.dataRepository.getContent;
+    context.dataRepository.getContent = (type, id, name) =>
+      type === "destination"
+        ? Promise.resolve(new TextEncoder().encode(JSON.stringify(receipt)))
+        : read(type, id, name);
+    context.writeResource = (spec, name, value) => {
+      if (spec === "cleanup") throw new Error("interrupted cleanup persistence");
+      return write(spec, name, value);
+    };
+    await rejects(() => model.methods.cleanup.execute(args, context));
+    context.writeResource = write;
+    await model.methods.cleanup.execute({ ...args, owner: crypto.randomUUID() }, context);
+    assert(
+      store.resources.get("cleanup-e-2")!.value.outcome === "absent",
+      "cleanup replay settles",
+    );
+    assert(!await statExists(transfer.stagingDir), "source removed");
+    assert(await Deno.readTextFile(neighbor) === "neighbor", "shared season neighbor preserved");
+    assert(
+      await Deno.readTextFile(`${receipt.destination}/${args.stem}.mkv`) === "episode",
+      "import preserved",
+    );
+  }));
+
+Deno.test("existing completed library copies reorganize without changing catalog identity", () =>
+  temporary(async (root) => {
+    const transfer = await payload(root),
+      stagingRoot = `${root}/staging`,
+      libraryRoot = `${root}/library`;
+    const previous = await deliverLocal(transfer, { stagingRoot, libraryRoot });
+    await Deno.remove(transfer.stagingDir, { recursive: true });
+    const { context, store } = makeContext({
+      stagingRoot,
+      catalogType: "hoardarr/movie-catalog",
+      catalogId: "catalog",
+      catalogResources: [{
+        name: "catalog-movie-1",
+        value: {
+          status: "transferred",
+          remotePath: previous.destination,
+          sha256: transfer.aggregateSha256,
+        },
+      }],
+    });
+    context.globalArgs.libraryRoot = libraryRoot;
+    store.resources.set("manifest-1", {
+      specName: "manifest",
+      value: { ...transfer, tmdbId: 1, generatedAt: new Date().toISOString() },
+    });
+    const args = {
+      owner: crypto.randomUUID(),
+      tmdbId: 1,
+      mediaKind: "movie" as const,
+      sourceName: "movie.mkv",
+      libraryRelativeDir: "Movies/Example (2026)",
+      stem: "Example (2026)",
+      previousLibraryPath: previous.destination,
+      preview: true,
+    };
+    await model.methods.prepare.execute(args, context);
+    assert(!await statExists(transfer.stagingDir), "preview leaves files alone");
+    await model.methods.prepare.execute({ ...args, preview: false }, context);
+    const { TransferSchema } = await import("./_lib/contracts.ts");
+    const next = TransferSchema.parse(store.resources.get("manifest-1")!.value);
+    const receipt = await deliverLocal(next, { stagingRoot, libraryRoot });
+    assert(
+      await Deno.readTextFile(`${previous.destination}/movie.mkv`) === "fixture\n",
+      "old copy retained until commit",
+    );
+    store.resources.get("catalog-movie-1")!.value = {
+      status: "transferred",
+      remotePath: receipt.destination,
+      sha256: next.aggregateSha256,
+    };
+    const lookup = context.definitionRepository.findByNameGlobal;
+    context.definitionRepository.findByNameGlobal = (name) =>
+      name === "local-destination"
+        ? Promise.resolve({ type: "destination", definition: { id: "destination" } })
+        : lookup(name);
+    const read = context.dataRepository.getContent;
+    context.dataRepository.getContent = (type, id, name) =>
+      type === "destination"
+        ? Promise.resolve(new TextEncoder().encode(JSON.stringify(receipt)))
+        : read(type, id, name);
+    await model.methods.cleanup.execute(args, context);
+    assert(
+      !await statExists(previous.destination),
+      "old directory removed after verified publication",
+    );
+    assert(
+      await Deno.readTextFile(`${receipt.destination}/Example (2026).mkv`) === "fixture\n",
+      "new copy retained",
+    );
+  }));

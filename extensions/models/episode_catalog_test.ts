@@ -335,7 +335,7 @@ Deno.test("identity: tmdbEpisodeId must be a positive integer and instance name 
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/episode-catalog", "model type");
-  assertEquals(model.version, "2026.11.11.3", "model version");
+  assertEquals(model.version, "2026.11.12.1", "model version");
   assert("episode" in model.resources, "episode spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {

@@ -12,14 +12,25 @@ const Args = z.object({
 /** Swamp behavior implementing provider operations. */
 export const model = {
   type: "@funsaized/hoardarr/provider",
-  version: "2026.11.09.1",
+  version: "2026.11.12.1",
   upgrades: [{
     toVersion: "2026.11.09.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.12.1",
+    description: "Preserve catalog state while enabling named imports and phase-specific planning",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
   resources: {
+    effect: {
+      description:
+        "Whether a downloader mutation still needs reconciliation after an ambiguous result",
+      schema: z.object({ owner: z.string(), pending: z.boolean() }),
+      lifetime: "30d",
+      garbageCollection: 100,
+    },
     result: {
       description: "Fresh evidence for a single provider invocation",
       schema: z.object({
@@ -41,12 +52,15 @@ export const model = {
       arguments: Args,
       execute: async (
         args: z.infer<typeof Args>,
-        ctx: Runtime & { globalArgs: z.infer<typeof Globals> },
+        ctx: Runtime & {
+          globalArgs: z.infer<typeof Globals>;
+          readResource?(name: string): Promise<Record<string, unknown> | null>;
+        },
       ) => {
         await assertLease(ctx.repoDir, args.owner);
         const method = ctx.globalArgs.descriptor.methods[args.operation];
         if (!method) throw new Error(`Unsupported operation: ${args.operation}`);
-        if (["add", "control", "stage", "deliver", "cleanup"].includes(args.operation)) {
+        if (["add", "control", "stage", "prepare", "deliver", "cleanup"].includes(args.operation)) {
           await recordExternalIntent(
             ctx.repoDir,
             args.owner,
@@ -56,11 +70,23 @@ export const model = {
         const before = new Map(
           (await ctx.readModelData(ctx.globalArgs.definition)).map((r) => [r.name, r.version]),
         );
+        const effectName = `effect-${args.owner}`;
+        const mutation = ["add", "control"].includes(args.operation);
+        const priorPending = mutation && (await ctx.readResource?.(effectName))?.pending === true;
+        if (mutation) {
+          await ctx.writeResource("effect", effectName, { owner: args.owner, pending: true });
+        }
         const result = await ctx.runModel({
           definition: ctx.globalArgs.definition,
           method,
           arguments: args.inputs,
         });
+        if (mutation) {
+          await ctx.writeResource("effect", effectName, {
+            owner: args.owner,
+            pending: priorPending || !result.ok,
+          });
+        }
         const records = result.ok
           ? result.resources
           : (await ctx.readModelData(ctx.globalArgs.definition)).filter((r) =>

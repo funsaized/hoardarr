@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: "@funsaized/hoardarr"
-version: 2026.11.11.4
+version: 2026.11.12.1
 description: Recoverable movie and TV automation with configurable Swamp providers
 license: MIT
 repository: https://github.com/funsaized/hoardarr
@@ -34,6 +34,7 @@ include:
   - _lib/runtime.ts
   - _lib/policy.ts
   - _lib/media_paths.ts
+  - _lib/library_naming.ts
   - _lib/durable.ts
   - _lib/storage.ts
   - _lib/migration.ts

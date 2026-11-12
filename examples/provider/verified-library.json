@@ -3,7 +3,7 @@
   "id": "example-library",
   "roles": ["destination"],
   "type": "@example/verified-library",
-  "version": "2026.11.09.1",
+  "version": "2026.11.12.1",
   "capabilities": ["verified-receipt", "local-payload"],
   "methods": { "deliver": "deliver" },
   "configuration": { "stagingRoot": "absolute directory", "libraryRoot": "absolute directory" }

@@ -2,4 +2,4 @@
 export * from "./_lib/episode_catalog_definition.ts";
 import { definition } from "./_lib/episode_catalog_definition.ts";
 /** Legacy-compatible episode-catalog behavior. */
-export const model = { ...definition, type: "hoardarr/episode-catalog", version: "2026.11.11.3" };
+export const model = { ...definition, type: "hoardarr/episode-catalog", version: "2026.11.12.1" };

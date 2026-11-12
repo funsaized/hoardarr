@@ -28,10 +28,25 @@ Deno.test("all deployment modes reconcile in-flight work without waiting or swit
     assert(!root.trigger, "fresh installations must not start scheduled downloads");
     const acquisition = graph.find((w) => w.name === "hoardarr-acquisition")!;
     const work = steps(acquisition);
-    assert(work.some((s) => s.name === "snapshot-before"));
-    assert(work.some((s) => s.name === "snapshot-added"));
+    const observation = steps(graph.find((w) => w.name === "hoardarr-observation")!);
+    assert(observation.find((s) => s.name === "snapshot")?.task.inputs?.tolerateFailure);
+    assert(observation.find((s) => s.name === "snapshot-audited")?.guard);
+    assert(!work.some((s) => s.task.inputs?.operation === "sync"));
     assert(!work.some((s) => s.task.inputs?.operation === "wait"));
-    assert(work.find((s) => s.name === "network")?.task.inputs?.operation === "assertReady");
+    assert(
+      steps(root).find((s) => s.name === "readiness")?.task.inputs?.operation === "assertReady",
+    );
+    const jobs = root.jobs as { name: string; dependsOn: { job: string }[] }[];
+    assert(jobs.find((j) => j.name === "online")?.dependsOn.some((d) => d.job === "delivery"));
+    assert(
+      !work.some((s) => s.name === "capacity") || work.find((s) => s.name === "capacity")?.guard,
+    );
+    deepStrictEqual(steps(graph.find((w) => w.name === "hoardarr-delivery")!).map((s) => s.name), [
+      "prepare",
+      "publish",
+      "commit",
+      "cleanup",
+    ]);
     assert(!JSON.stringify(graph).match(/enterDownload|enterTransfer|host-bootstrap|torlink-unit/));
     const recovery = steps(graph.find((w) => w.name === "hoardarr-recovery")!);
     deepStrictEqual(recovery.map((s) => s.name), ["ownership", "snapshot", "reconcile"]);
@@ -58,7 +73,7 @@ Deno.test("configured schedules use the same owned media workflow and never catc
   const rootSteps = steps(scheduled[0]);
   assert(
     rootSteps.find((s) => s.name === "readiness")?.guard ===
-      "${{ inputs.dryRun && !inputs.refresh }}",
+      "${{ !inputs.acquire || (inputs.dryRun && !inputs.refresh) }}",
   );
   assert(rootSteps.some((s) => s.name === "acquire" && s.guard?.includes("inputs.dryRun")));
   assert(rootSteps.find((s) => s.name === "release"));

@@ -4,6 +4,6 @@ import { definition } from "./_lib/media_files_definition.ts";
 export const model = {
   ...definition,
   type: "@funsaized/hoardarr/media-files",
-  version: "2026.11.09.1",
+  version: "2026.11.12.1",
   upgrades: definition.upgrades,
 };

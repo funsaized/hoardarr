@@ -253,3 +253,97 @@ Deno.test("TV submissions cap at eight, rotate persistently, and exclude in-flig
         episodes.find((e) => `e-${e.tmdbEpisodeId}` === next.key)!.showTmdbId,
     );
   }));
+
+Deno.test("persisted discoveries replay after interruption without rewriting completed catalog items", () =>
+  temporary(async (root) => {
+    const owner = crypto.randomUUID(),
+      catalogRows = new Map<number, Record<string, unknown>>([
+        [1, { tmdbId: 1, status: "transferred", remotePath: "/library/Existing" }],
+      ]);
+    const ingested: number[] = [];
+    const ctx: Runtime & { globalArgs: ReturnType<typeof model.globalArguments.parse> } = {
+      repoDir: root,
+      signal: new AbortController().signal,
+      globalArgs: model.globalArguments.parse({ discoveryModel: "discovery" }),
+      writeResource: async (_spec, name) => ({ name }),
+      readModelData: async (name) =>
+        name === "discovery"
+          ? [1, 2].map((id) => ({
+            name: `digital-release-movie-${id}`,
+            attributes: { tmdbId: id, title: `Movie ${id}`, year: 2026 },
+          }))
+          : [...catalogRows].map(([id, attributes]) => ({
+            name: `catalog-movie-${id}`,
+            attributes,
+          })),
+      runModel: async ({ arguments: args }) => {
+        for (const row of args!.discoveries as Record<string, unknown>[]) {
+          ingested.push(Number(row.tmdbId));
+          catalogRows.set(Number(row.tmdbId), row);
+        }
+        return { ok: true, resources: [] };
+      },
+    };
+    await coordinator.methods.acquire.execute({ owner }, ctx);
+    const args = { owner, mediaKind: "movie" as const, records: [], persisted: true };
+    await model.methods.ingest.execute(args, ctx);
+    await model.methods.ingest.execute(args, ctx);
+    deepStrictEqual(ingested, [2]);
+    assert(catalogRows.get(1)!.status === "transferred");
+  }));
+
+Deno.test("series layout remains stable across metadata changes and disambiguates matching titles", () =>
+  temporary(async (root) => {
+    const owner = crypto.randomUUID(), saved = new Map<string, Record<string, unknown>>();
+    const row = {
+      tmdbEpisodeId: 1,
+      showTmdbId: 10,
+      showName: "Example",
+      showYear: 2020,
+      seasonNumber: 1,
+      episodeNumber: 1,
+      episodeTitle: "First",
+      status: "transfer-ready",
+      releaseName: "release.mkv",
+    };
+    const ctx: Runtime & { globalArgs: ReturnType<typeof model.globalArguments.parse> } = {
+      repoDir: root,
+      signal: new AbortController().signal,
+      globalArgs: model.globalArguments.parse({}),
+      writeResource: async (_spec, name, value) => {
+        saved.set(name, value);
+        return { name };
+      },
+      readModelData: async (name, spec) =>
+        name === "episode-catalog"
+          ? [{ name: "catalog-episode-1", attributes: row }]
+          : [...saved].filter(([key]) => key.startsWith(`${spec}-`)).map(([name, attributes]) => ({
+            name,
+            attributes,
+          })),
+      runModel: async () => ({
+        ok: true,
+        resources: [{ name: "preview-e-1", attributes: { moves: [] } }],
+      }),
+    };
+    const item = {
+      key: "e-1",
+      id: 1,
+      mediaKind: "episode" as const,
+      status: "transfer-ready",
+      infoHash: null,
+      releaseName: row.releaseName,
+      query: "",
+      category: "tv",
+      input: null,
+    };
+    await coordinator.methods.acquire.execute({ owner }, ctx);
+    await model.methods.prepare.execute({ owner, item, preview: true }, ctx);
+    row.showName = "Changed metadata";
+    await model.methods.prepare.execute({ owner, item, preview: true }, ctx);
+    assert(saved.get("prepared-e-1")!.directory === "TV/Example (2020)/Season 01");
+    row.showTmdbId = 20;
+    row.showName = "Example";
+    await model.methods.prepare.execute({ owner, item, preview: true }, ctx);
+    assert(saved.get("prepared-e-1")!.directory === "TV/Example (2020) [show-20]/Season 01");
+  }));

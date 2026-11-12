@@ -56,6 +56,12 @@ export const ConfigSchema = z.object({
     downloadsPerRun: z.number().int().min(1).max(100).default(8),
     retryHours: z.number().int().min(1).max(720).default(24),
   }).strict().default({ searchesPerRun: 20, downloadsPerRun: 8, retryHours: 24 }),
+  library: z.object({
+    titleOverrides: z.record(
+      z.string().regex(/^(?:show|movie)-[1-9]\d*$/),
+      z.string().min(1).max(300),
+    ).default({}),
+  }).strict().default({ titleOverrides: {} }),
   policies: z.object({
     movie: PolicySchema.default(moviePolicy),
     episode: PolicySchema.default(episodePolicy),

@@ -9,7 +9,7 @@ import {
   PolicySchema,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.11.1";
+const MODEL_VERSION = "2026.11.12.1";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -83,6 +83,8 @@ const TransitionSchema = z.object({
   completedAt: z.iso.datetime().nullable().optional(),
   transferredAt: z.iso.datetime().nullable().optional(),
   localCleanedAt: z.iso.datetime().nullable().optional(),
+  libraryRelativeDir: z.string().optional(),
+  layoutVersion: z.number().int().optional(),
 });
 
 const TransitionArgsSchema = z.object({
@@ -418,6 +420,10 @@ function applyPatch(movie: Movie, transition: Transition): Movie {
   if (transition.localCleanedAt !== undefined) {
     next.localCleanedAt = transition.localCleanedAt;
   }
+  if (transition.libraryRelativeDir !== undefined) {
+    next.libraryRelativeDir = transition.libraryRelativeDir;
+  }
+  if (transition.layoutVersion !== undefined) next.layoutVersion = transition.layoutVersion;
   return next;
 }
 
@@ -781,6 +787,10 @@ export const definition = {
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.12.1",
+    description: "Preserve existing records and add optional canonical library paths",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: z.object({
