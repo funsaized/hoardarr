@@ -449,11 +449,14 @@ The image pins Pi and ships defaults for **`openai-codex/gpt-6-luna` with `xhigh
 private writable workspace so Pi can lock its files. Authentication and sessions persist outside the
 image. Explicit Pi command options can select a different model for a session.
 
-Try requests such as:
+Include a title and year when requesting media so the agent can resolve the intended TMDB entry. Try
+requests such as:
 
 ```text
 Give me a read-only health summary. Include snapshot timestamps, backlog and source errors.
-Add this series to automatic tracking and report its selected TMDB identity.
+Track Severance (2022), including its aired backlog and new episodes. Report the matched TMDB entry.
+Add Arrival (2016) to the movie catalog for the normal workflow to acquire. Preserve any existing progress.
+Change the weekly movie discovery allowance to 10 and keep my TV search and download limits unchanged.
 Explain why this episode has not transferred, using the saved reports and catalog.
 Pause new work for maintenance, wait for the current owner, and report when it is safe to stop.
 ```
@@ -487,10 +490,10 @@ interests:
       year: 2021
       tmdbId: 126116
       category: tv
-    - name: The Lord of the Rings: The Rings of Power
-        year: 2022
-        tmdbId: 84773
-        category: tv
+    - name: "The Lord of the Rings: The Rings of Power"
+      year: 2022
+      tmdbId: 84773
+      category: tv
 television:
   searchesPerRun: 20
   downloadsPerRun: 8
