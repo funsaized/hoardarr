@@ -88,3 +88,11 @@ under G2, G3 and G6 with `passed: false`, `waived: true` and a specific `reason`
 requires `--allow-waived-upgrade-checks` to accept these waivers and records them in the
 commissioning receipt. G1, G4 and G5 still require passing evidence. Fresh installations cannot use
 this exception.
+
+## Native agent checks
+
+Record the resolved DevVM and Pi builds. Verify native API-key authentication, streaming and
+operator commands. Prove that a media process cannot join `hoardarragent.slice` or use the host
+proxy, including while the VPN is disconnected. Check that operator commands leave the agent slice
+and retain the direct application environment. Test shared-tool drift refusal and verified
+enrollment refresh. Check durable writes with the Linux project mount's `cache=none`.

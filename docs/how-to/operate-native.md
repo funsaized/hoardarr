@@ -73,8 +73,9 @@ services keeps the installed version.
    replace its guest disk. DevVM retains the project and home directories.
 4. Complete the credential handoff in the replacement guest to restore its identity and rebuild its
    control checkout from the new image. Verify the new runtime and complete the applicable
-   [qualification and commissioning](../reference/qualification.md). Refresh the enrolled runtime
-   bundle and image-chain records used for automatic host boot.
+   [qualification and commissioning](../reference/qualification.md). Refresh enrollment with
+   `deploy/devvm/refresh-host.py` after verifying the new runtime bundle. It records the image chain
+   and shared tools used for automatic host boot.
 5. Inside the guest, run `sudo hoardarr-operator apply --no-pull`, then
    [resume](#resume-after-vm-maintenance). `apply` regenerates definitions using the installed
    version.
@@ -181,23 +182,35 @@ weekly movie limit does not reset an existing weekly discovery marker.
 
 ## Open the operator agent
 
-Run `hoardarr-agent` in the DevVM management shell. Pi uses the pinned runtime in the image and
-stores its private authentication and sessions under `P/runtime-home/pi-agent`. On first use, enter
-`/login` and select the OpenAI Codex ChatGPT subscription login. Complete the browser flow; if the
-remote callback cannot reach the VM, follow Pi's prompt to paste the redirect URL. Keep that URL
-private.
+Run `hoardarr-agent` in the DevVM management shell, without sudo. The launcher opens the Hoardarr
+operator workspace using DevVM's native Pi runtime. Hoardarr supplies the operator instructions;
+DevVM manages Pi's runtime, provider credentials and sessions.
 
-The image ships project settings for `openai-codex/gpt-6-luna` with `xhigh` reasoning, `codemode`
-and automatic compaction. The launcher copies these defaults and operator instructions into a
-private, writable workspace under `P/runtime-home/pi-agent/operator`, where Pi can lock its
-settings. These settings take precedence over saved global defaults; explicit Pi command options can
-override the model for a session. Authentication stays in the persistent private directory. The
-settings adapt [this reference](https://github.com/funsaized/dotbento/blob/main/pi/settings.json)
-and include only the configured operator model.
+On the host, select the Hoardarr inventory and production project, then enter your provider key
+through the interactive prompt:
 
-The agent uses `sudo hoardarr-operator` and the documented maintenance procedures. It can inspect
-progress and errors and perform operator actions you request. Scheduled media work continues through
-the Swamp workflow without an agent session. Application updates still require image replacement.
+```sh
+devvm agent login pi --api-key --provider openai
+```
+
+The key stays in DevVM's private host login store. The guest receives a placeholder, which the host
+proxy replaces only for the provider's requests. API usage has separate billing from a ChatGPT
+subscription. Native Pi does not support subscription login; do not use `/login` for it. Use another
+supported provider by changing the provider argument and Pi's settings.
+
+Pi keeps its standard `~/.pi/agent` directory in the guest home. DevVM imports settings with
+`devvm agent import pi`, saves reviewed settings with `devvm agent save pi`, and exports sessions
+with `devvm history export`. These commands use the selected isolated Hoardarr inventory. Hoardarr's
+writable workspace is `~/.local/share/hoardarr/operator`. Its project settings select only
+`openai/gpt-5.4-mini`, use low reasoning, and enable `codemode` and compaction. Pi uses this model
+for operator tasks without automatic model switching. The launcher passes this selection explicitly,
+including for noninteractive runs. Explicit command options can override it for a session.
+
+The launcher starts Pi in the root-managed, non-delegated `hoardarragent.slice`. This operator
+process group can use DevVM's proxy. Media services and commands launched by `hoardarr-operator` run
+outside that group, with their existing VPN guard, direct environment and restricted privileges. Pi
+retains the management user's authorized sudo access. Scheduled media processing needs no running Pi
+session or model calls.
 
 ## Request a movie or episodes
 

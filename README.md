@@ -145,8 +145,10 @@ For an **already enrolled installation**, select its host project and isolated D
 
 ```sh
 cd "$HOME/.local/share/hoardarr-devvm"
+export PATH="$HOME/.hoardarr-host/tools/bin:$PATH"
 export XDG_CONFIG_HOME="$HOME/.hoardarr-host/config"
 export XDG_DATA_HOME="$HOME/.hoardarr-host/data"
+export DEVVM_LIMA_HOME="$HOME/.hoardarr-lima"
 devvm ls
 devvm
 ```
@@ -209,17 +211,17 @@ install -m 700 /private/build/layer/hoardarr.sh "$XDG_CONFIG_HOME/devvm/layers/h
 install -m 600 /private/build/layer/hoardarr.policy "$XDG_CONFIG_HOME/devvm/layers/hoardarr.policy"
 ```
 
-The export includes public extensions, patched Torlink, Pi, dependency caches and checked OS
-packages. Review it before redistribution. Serve only the generated `runtime.tar.gz` at the pinned
-URL while building, then run `devvm build hoardarr` and `devvm images`. Keep the checked archive for
-recovery and remakes; stop the temporary server afterward.
+The export includes public extensions, patched Torlink, dependency caches and checked OS packages.
+Review it before redistribution. Serve only the generated `runtime.tar.gz` at the pinned URL while
+building, then run `devvm build hoardarr` and `devvm images`. Keep the checked archive for recovery
+and remakes; stop the temporary server afterward.
 
 Create a private qualification project owned by the unprivileged operator:
 
 ```sh
 mkdir -m 700 /ABSOLUTE/SHARED/QUALIFICATION
 cd /ABSOLUTE/SHARED/QUALIFICATION
-devvm --layers hoardarr --tools none --agents none --network open --ports none --no-git-protect --no-input
+devvm --layers hoardarr --tools none --agents pi --network open --ports none --no-git-protect --no-input
 ```
 
 Generate an RSA recovery key on the host. Keep its private key there, mode 600; transfer only its
@@ -455,39 +457,38 @@ agent choose a name that later runs apply deterministically.
 
 ## Operator agent
 
-Run `hoardarr-agent` inside the native VM as the management user, without sudo. On first use, enter
-`/login`, select the OpenAI Codex ChatGPT subscription login, and complete Pi's browser flow. If the
-remote callback cannot reach the VM, follow Pi's prompt to paste the redirect URL privately.
+Run `hoardarr-agent` in the DevVM management shell, without sudo. The launcher opens the Hoardarr
+operator workspace using DevVM's native Pi runtime. Hoardarr supplies the operator instructions;
+DevVM manages Pi's runtime, provider credentials and sessions.
 
-The image pins Pi and ships defaults for **`openai-codex/gpt-6-luna` with `xhigh` reasoning**,
-`codemode` and automatic compaction. The launcher copies its settings and instructions into a
-private writable workspace so Pi can lock its files. Authentication and sessions persist outside the
-image. Explicit Pi command options can select a different model for a session.
+On the host, select the Hoardarr inventory and production project, then enter your provider key
+through the interactive prompt:
 
-Include a title and year when requesting media so the agent can resolve the intended TMDB entry. Try
-requests such as:
-
-```text
-Give me a read-only health summary. Include snapshot timestamps, backlog and source errors.
-Track Severance (2022), including its aired backlog and new episodes. Report the matched TMDB entry.
-Add Arrival (2016) to the movie catalog for the normal workflow to acquire. Preserve any existing progress.
-Download Severance (2022) season 1 episode 3.
-Download the entire series of The Good Place (2016), including only episodes aired so far.
-Get the latest aired episode of Severance (2022).
-Finish the remaining episodes of The Good Place (2016).
-Change the weekly movie discovery allowance to 10 and keep my TV search and download limits unchanged.
-Explain why this episode has not transferred, using the saved reports and catalog.
-Pause new work for maintenance, wait for the current owner, and report when it is safe to stop.
+```sh
+devvm agent login pi --api-key --provider openai
 ```
 
-The agent has internet access through the VM's VPN and can fetch URLs or call APIs through code and
-command-line tools. No dedicated browser or web-search integration is configured. ChatGPT login
-supplies model authentication, not ChatGPT's browser tools.
+The key stays in DevVM's private host login store. The guest receives a placeholder, which the host
+proxy replaces only for the provider's requests. API usage has separate billing from a ChatGPT
+subscription. Native Pi does not support subscription login; do not use `/login` for it. Use another
+supported provider by changing the provider argument and Pi's settings.
 
-Pi is an operator with the management user's privileges, including authorized sudo operations. Its
-instructions require Swamp commands, maintenance controls and image-based application updates.
-Closing Pi does not stop scheduled work. Its requests and model usage are separate from the
-scheduled deterministic media workflow.
+Pi keeps its standard `~/.pi/agent` directory in the guest home. DevVM imports settings with
+`devvm agent import pi`, saves reviewed settings with `devvm agent save pi`, and exports sessions
+with `devvm history export`. These commands use the selected isolated Hoardarr inventory. Hoardarr's
+writable workspace is `~/.local/share/hoardarr/operator`. Its project settings select only
+`openai/gpt-5.4-mini`, use low reasoning, and enable `codemode` and compaction. Pi uses this model
+for operator tasks without automatic model switching. The launcher passes this selection explicitly,
+including for noninteractive runs. Explicit command options can override it for a session.
+
+The launcher starts Pi in the root-managed, non-delegated `hoardarragent.slice`. This operator
+process group can use DevVM's proxy. Media services and commands launched by `hoardarr-operator` run
+outside that group, with their existing VPN guard, direct environment and restricted privileges. Pi
+retains the management user's authorized sudo access. Scheduled media processing needs no running Pi
+session or model calls.
+
+Try asking: “Give me a read-only health summary,” “Download Severance (2022) season 1 episode 3,” or
+“Finish the remaining episodes of The Good Place (2016).” Include a year for ambiguous titles.
 
 One-off requests use `hoardarr-operator request`: resolve a title, submit a finite scope, then read
 its status. Pi translates the conversation into those typed commands. A request records the selected
@@ -721,7 +722,7 @@ shares it into the guest at the same absolute path through 9p. It survives image
 | `P/library/Movies/Title (Year)`                    | Named movie directories; catalog retains TMDB identity                                        |
 | `P/library/TV/Show (Year)/Season NN`               | Shared season directories with named episode files                                            |
 | `P/runtime-home/.config/swamp`                     | Private Swamp user configuration                                                              |
-| `P/runtime-home/pi-agent`                          | Pi authentication, sessions and writable operator workspace                                   |
+| `~/.pi/agent` (guest home)                         | DevVM-managed Pi placeholder credentials, settings and sessions                               |
 | `P/secrets`                                        | Private credentials, vault storage and encrypted guest-recovery capsule                       |
 | Guest `/var/lib/hoardarr/control`                  | Rebuildable Swamp checkout and local indexes on ext4                                          |
 | Guest `/opt/hoardarr`                              | Image-supplied application, README and extensions                                             |
@@ -1007,7 +1008,7 @@ hoardarr.yaml -> Deno CLI -> Swamp behaviors and workflow DAG
 | [local_destination.ts](extensions/models/local_destination.ts), [ssh_destination.ts](extensions/models/ssh_destination.ts) | Verified delivery                                               |
 | [src/transaction.ts](src/transaction.ts), [src/maintenance.ts](src/maintenance.ts), [src/backup.ts](src/backup.ts)         | Configuration rollback, snapshots and recovery                  |
 | [src/native.ts](src/native.ts), [deploy/devvm](deploy/devvm)                                                               | Protected guest/host lifecycle, image builders and provisioning |
-| [deploy/devvm/pi](deploy/devvm/pi)                                                                                         | Pinned Pi runtime, settings and launcher                        |
+| [deploy/devvm/pi](deploy/devvm/pi)                                                                                         | Operator instructions, settings and native Pi launcher          |
 | [deploy/compose](deploy/compose), [Dockerfile](Dockerfile)                                                                 | Container build and deployment                                  |
 | [portable_run_summary.ts](extensions/reports/portable_run_summary.ts)                                                      | Media workflow report                                           |
 | [migration_comparison.ts](extensions/reports/migration_comparison.ts)                                                      | Semantic relocation verification                                |
@@ -1022,15 +1023,15 @@ hoardarr.yaml -> Deno CLI -> Swamp behaviors and workflow DAG
 | Official Swamp (demo/Compose) | `20261105.030003.0-sha.363a1dad`                                                        |
 | Native Swamp                  | The same source plus the durable datastore/control-plane patch and derivative identity  |
 | Torlink                       | 1.10.0, source `c9f0ab0e90e9d02b63ecbb860d0f51722893e579`, plus the durable-state patch |
-| Pi                            | `@earendil-works/pi-coding-agent` 1.5.2                                                 |
+| Pi                            | DevVM native shared tool; exact build recorded at enrollment                            |
 | Gluetun                       | 3.41.3                                                                                  |
 | Native guest                  | Ubuntu 26.04 x86-64 with pinned image and package hashes                                |
-| Native host tools             | DevVM 0.1.0 at the pinned revision; Lima 2.3.0                                          |
+| Native host tools             | DevVM 0.1.1-rc.3 at the pinned archive checksum; Lima 2.3.0                             |
 
 The authoritative native inputs are [pins.json](deploy/devvm/pins.json), the package locks and
-[patches](deploy/devvm/patches). Pi has its own [npm lock](deploy/devvm/pi/package-lock.json). Swamp
-account, plan and registry terms are separate from Hoardarr's license. Native needs NordVPN; Compose
-needs a provider WireGuard configuration; discovery needs TMDB credentials.
+[patches](deploy/devvm/patches). DevVM manages Pi as a read-only shared tool. Swamp account, plan
+and registry terms are separate from Hoardarr's license. Native needs NordVPN; Compose needs a
+provider WireGuard configuration; discovery needs TMDB credentials.
 
 Distribution consists of source releases, GHCR application images, the `@funsaized/hoardarr` Swamp
 extension, and native build inputs. `swamp extension pull @funsaized/hoardarr` installs reusable

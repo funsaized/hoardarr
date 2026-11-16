@@ -93,3 +93,13 @@ Swamp listens on guest loopback port 9090, and Torlink on 9161. Use the `devvm` 
 application access.
 
 [Back to the README](../../README.md#reference)
+
+## Native Pi
+
+Run `hoardarr-agent` in the guest. On the host, use
+`devvm agent login pi --api-key --provider openai` to enter a key privately. Use
+`devvm tools --json` to inspect the installed Pi version. Follow the image deployment procedure
+before updating shared tools; enrollment rejects unqualified changes. See
+[operator agent setup](../how-to/operate-native.md#open-the-operator-agent).
+
+The operator uses `openai/gpt-5.4-mini` with low reasoning and one enabled model.

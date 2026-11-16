@@ -122,3 +122,12 @@ those effects before restoring older catalog state; the journals and outside-eff
 resolve them.
 
 [Back to the README](../../README.md#reference)
+
+## Pi credentials and sessions
+
+Native Pi uses DevVM's host login store under the selected `XDG_DATA_HOME`, separate from the
+Hoardarr project's application credentials. Include that private store in a recovery kit only when
+credential recovery is part of the chosen backup scope. `devvm history export` saves sessions, not
+provider keys or downloaded media. Pi state can be discarded without deleting media or catalog
+state. Image replacement retains the guest home; migrating from the old bundled Pi does not require
+importing its authentication or sessions.

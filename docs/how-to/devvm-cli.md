@@ -11,8 +11,10 @@ first, then select that inventory:
 
 ```sh
 cd "$HOME/.local/share/hoardarr-devvm"
+export PATH="$HOME/.hoardarr-host/tools/bin:$PATH"
 export XDG_CONFIG_HOME="$HOME/.hoardarr-host/config"
 export XDG_DATA_HOME="$HOME/.hoardarr-host/data"
+export DEVVM_LIMA_HOME="$HOME/.hoardarr-lima"
 devvm ls
 ```
 

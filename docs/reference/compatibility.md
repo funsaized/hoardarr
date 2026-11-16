@@ -2,17 +2,17 @@
 
 ## Runtime matrix
 
-| Component               | Release baseline                                                                      |
-| ----------------------- | ------------------------------------------------------------------------------------- |
-| Hoardarr                | 0.2.0                                                                                 |
-| Application runtime     | Deno 2.9.8                                                                            |
-| Swamp official baseline | `20261105.030003.0-sha.363a1dad`                                                      |
-| Native Swamp derivative | Same source plus `swamp-control-plane.patch`; explicit build identity in pins         |
-| Torlink                 | `torlnk` 1.10.0, source `c9f0ab0e90e9d02b63ecbb860d0f51722893e579` plus durable patch |
-| Node                    | 22.21.1                                                                               |
-| Compose gateway         | Gluetun 3.41.3                                                                        |
-| Native guest            | Ubuntu 26.04 x86-64; pinned image release and package checksums                       |
-| Native host             | Linux x86-64, KVM, systemd, GNU tools, Btrfs project storage, DevVM 0.1.0, Lima 2.3.0 |
+| Component               | Release baseline                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------ |
+| Hoardarr                | 0.2.0                                                                                      |
+| Application runtime     | Deno 2.9.8                                                                                 |
+| Swamp official baseline | `20261105.030003.0-sha.363a1dad`                                                           |
+| Native Swamp derivative | Same source plus `swamp-control-plane.patch`; explicit build identity in pins              |
+| Torlink                 | `torlnk` 1.10.0, source `c9f0ab0e90e9d02b63ecbb860d0f51722893e579` plus durable patch      |
+| Node                    | 22.21.1                                                                                    |
+| Compose gateway         | Gluetun 3.41.3                                                                             |
+| Native guest            | Ubuntu 26.04 x86-64; pinned image release and package checksums                            |
+| Native host             | Linux x86-64, KVM, systemd, GNU tools, Btrfs project storage, DevVM 0.1.1-rc.3, Lima 2.3.0 |
 
 These pins record the tested baseline. They do not update themselves. Test dependency changes and
 repeat native qualification when the runtime changes.
@@ -55,3 +55,11 @@ packet captures.
 Read [third-party notices](../../THIRD_PARTY_NOTICES.md) before redistributing bundled runtimes.
 
 [Back to the README](../../README.md#reference)
+
+## Native Pi
+
+Pi is a DevVM shared tool. Enrollment records its resolved build; updates require validation before
+refreshing enrollment. Provider API keys stay in the isolated DevVM host login store. Pi
+subscription logins are unsupported. The operator uses only `openai/gpt-5.4-mini` with low
+reasoning. Hoardarr retains its operator instructions, request commands and model-free media
+workflows. Linux project mounts use `cache=none`; writable mapped databases belong on guest ext4.

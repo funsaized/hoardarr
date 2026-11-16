@@ -19,8 +19,10 @@ Lima 2.3.0, Node 22.21.1 and Deno 2.9.8. Keep DevVM's config/data directories se
 VMs. From the source checkout on the physical host, select that isolated inventory:
 
 ```sh
+export PATH="$HOME/.hoardarr-host/tools/bin:$PATH"
 export XDG_CONFIG_HOME="$HOME/.hoardarr-host/config"
 export XDG_DATA_HOME="$HOME/.hoardarr-host/data"
+export DEVVM_LIMA_HOME="$HOME/.hoardarr-lima"
 devvm --version
 devvm doctor
 devvm ls
@@ -100,9 +102,11 @@ for qualification. On the physical host, replace the absolute path below with th
 ```sh
 mkdir -m 700 /ABSOLUTE/SHARED/QUALIFICATION
 cd /ABSOLUTE/SHARED/QUALIFICATION
+export PATH="$HOME/.hoardarr-host/tools/bin:$PATH"
 export XDG_CONFIG_HOME="$HOME/.hoardarr-host/config"
 export XDG_DATA_HOME="$HOME/.hoardarr-host/data"
-devvm --layers hoardarr --tools none --agents none --network open --ports none --no-git-protect --no-input
+export DEVVM_LIMA_HOME="$HOME/.hoardarr-lima"
+devvm --layers hoardarr --tools none --agents pi --network open --ports none --no-git-protect --no-input
 ```
 
 DevVM creates the guest, shares this project through 9p at the same absolute path and opens its
@@ -181,3 +185,33 @@ guest application services. Verify a manual run before enabling the first produc
 Subsequent starts use `devvm`; the enabled services start with the guest.
 
 [Back to the README](../../README.md#reference)
+
+## Native Pi and shared tools
+
+DevVM 0.1.1-rc.3 supplies Pi as a read-only shared tool. The Hoardarr image contains operator
+instructions and a launcher, without a second Pi installation. Record the resolved Pi version and
+build in enrollment; `devvm update` also updates shared tools and therefore requires qualification.
+Use `devvm mount-cache none` for existing Linux projects before their next start. Keep SQLite WAL
+databases on guest-native storage. The Swamp control checkout already uses guest ext4.
+
+After a verified image deployment, run this from the host source checkout:
+
+```sh
+python3 deploy/devvm/refresh-host.py \
+  --deployment "$HOME/.hoardarr-host/production-deployment.json" \
+  --devvm /ABSOLUTE/PATH/TO/devvm \
+  --runtime-bundle /PRIVATE/BUILD/layer/runtime.tar.gz \
+  --lima-home "$HOME/.hoardarr-lima"
+```
+
+The helper verifies the existing storage and VM identities and matches the installed runtime
+manifest to the selected bundle. Ordinary boot rejects image or shared-tool changes until this
+refresh succeeds. Refreshing enrollment neither commissions the guest nor opens admissions.
+
+The shorter Lima path avoids Unix socket path limits for enrolled VM names. On an existing
+installation it can be a private symlink to the original Lima directory, keeping disk paths intact.
+Use the same `DEVVM_LIMA_HOME` for all commands; enrollment preserves it for host boot.
+
+Provisioning allows the DevVM host address `192.168.5.2/32` through NordVPN. The independent media
+guard still rejects that address outside the root-managed operator slice. After credential recovery,
+connect NordVPN before running Swamp validation or application checks.
