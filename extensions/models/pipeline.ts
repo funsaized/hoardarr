@@ -21,8 +21,10 @@ import {
   RequestSchema,
   targetKey,
 } from "./_lib/requests.ts";
+import { archive, ArchiveArgs, ArchiveRecord } from "./_lib/archive.ts";
 const Globals = z.object({
   requestModel: z.string().optional(),
+  libraryRoot: z.string().optional(),
   maxMovieAttempts: z.number().int().positive().default(3),
   maxEpisodeAttempts: z.number().int().positive().default(3),
   movies: z.string().default("movie-catalog"),
@@ -199,7 +201,7 @@ async function itemRow(ctx: Context, item: Item): Promise<Row> {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.12.2",
+  version: "2026.11.16.1",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -216,9 +218,29 @@ export const model = {
     toVersion: "2026.11.12.2",
     description: "Accept scoped requests while retaining catalog progress and autonomous budgets",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.16.1",
+    description: "Add user-directed local library archival",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
   resources: {
+    archiveIntent: {
+      schema: ArchiveRecord,
+      description: "Pinned files authorized for user-directed local archival",
+      lifetime: "infinite",
+      garbageCollection: 100,
+    },
+    archive: {
+      schema: ArchiveRecord,
+      description: "User-directed local archive intent and completion",
+      lifetime: "infinite",
+      garbageCollection: 100,
+    },
+    archiveSummary: resource(
+      z.object({ dryRun: z.boolean(), items: z.array(z.record(z.string(), z.unknown())) }),
+      "Archive batch results",
+    ),
     requestFairness: {
       schema: z.object({
         search: z.record(z.string(), z.string()),
@@ -270,6 +292,12 @@ export const model = {
     transfer: resource(TransferSchema, "Validated source manifest for delivery"),
   },
   methods: {
+    archive: {
+      description:
+        "Remove completed local library copies after user-managed export, preserving catalog history.",
+      arguments: ArchiveArgs,
+      execute: archive,
+    },
     health: {
       description: "Require runtime capabilities before submitting configured downloads.",
       arguments: Records,
@@ -424,7 +452,7 @@ export const model = {
         if (args.reorganize) {
           for (const kind of ["movie", "episode"] as const) {
             for (const row of kind === "movie" ? movieRows : episodeRows) {
-              if (row.status !== "transferred" || !row.localCleanedAt) continue;
+              if (row.status !== "transferred" || !row.localCleanedAt || row.archivedAt) continue;
               const names = await layoutFor(ctx, row, kind);
               if (row.layoutVersion !== 1 || row.libraryRelativeDir !== names.directory) {
                 delivery.push(workItem(row, kind));

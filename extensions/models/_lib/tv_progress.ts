@@ -13,6 +13,7 @@ export function tvProgress(rows: Record<string, unknown>[], attempts: SearchStat
     total: episodes.length,
     completed:
       episodes.filter((e) => ["transferred", "cleanup-pending"].includes(String(e.status))).length,
+    archived: episodes.filter((e) => !!e.archivedAt).length,
     remaining:
       episodes.filter((e) =>
         !["transferred", "cleanup-pending", "ignored"].includes(String(e.status))

@@ -401,6 +401,7 @@ async function installUnlocked(
   });
   await define("pipeline", "@funsaized/hoardarr/pipeline", {
     requestModel: "requests",
+    ...(config.providers.destination === "local" ? { libraryRoot: config.paths.library } : {}),
     maxMovieAttempts: config.policies.movie.maxAttempts,
     maxEpisodeAttempts: config.policies.episode.maxAttempts,
     seedTime: config.download.seedTime,

@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-all
 /** Hoardarr operator CLI. All scheduled execution remains a Swamp workflow. */
+import { ARCHIVE_HELP, archiveCommand } from "../src/archive.ts";
 import { tvProgress } from "../extensions/models/_lib/tv_progress.ts";
 import { requestCommand, requestStatus } from "../src/requests.ts";
 import type { SearchState } from "../extensions/models/_lib/tv_backlog.ts";
@@ -47,6 +48,7 @@ apply      Generate and validate definitions from the selected configuration.
 doctor     Check runtime, extension loading and configured filesystem paths.
 plan       Preview catalog work; --refresh also refreshes discovery.
 run        Reconcile discovery, downloads, verified delivery and cleanup.
+archive    Remove exported local library copies; --dry-run lists files (archive help for options).
 organize   Organize existing local library copies; --dry-run previews filenames.
 status     Show catalog states and outstanding reconciliation ownership.
 request    resolve|submit|run|status|list scoped media requests (request help for options).
@@ -76,6 +78,10 @@ async function mainUnlocked(argv: string[]): Promise<void> {
     console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
   if (["help", "--help", "-h"].includes(action)) {
     output(HELP);
+    return;
+  }
+  if (action === "archive" && argv.some((arg) => ["help", "--help", "-h"].includes(arg))) {
+    output(ARCHIVE_HELP);
     return;
   }
   if (action === "native-init") {
@@ -188,6 +194,14 @@ async function mainUnlocked(argv: string[]): Promise<void> {
     return;
   }
   const config = await readConfig(configPath);
+  if (action === "archive") {
+    if (config.providers.destination !== "local") {
+      throw new Error("Archive requires the local destination");
+    }
+    if (config.guest) await assertCommissioned(config, repo);
+    output(await archiveCommand(argv, repo));
+    return;
+  }
   if (action === "request") {
     output(await requestCommand(argv, repo, config));
     return;
@@ -309,7 +323,7 @@ async function mainUnlocked(argv: string[]): Promise<void> {
       "query",
       'modelName in ["movie-catalog", "episode-catalog"] && name.startsWith("catalog-")',
       "--select",
-      '{"name": name, "status": attributes.status, "error": attributes.error}',
+      '{"name": name, "status": attributes.status, "error": attributes.error, "archivedAt": ("archivedAt" in attributes ? attributes.archivedAt : null)}',
     ], repo);
     const episodes = await jsonCommand<{ results: Record<string, unknown>[] }>([
       "data",

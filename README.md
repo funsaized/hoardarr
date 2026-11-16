@@ -450,6 +450,9 @@ ID suffix resolves a collision between catalog titles. Ambiguous videos and conf
 an item error while other imports continue. A receipt proves copy integrity, not the truth of a
 release label or completion by a separate cloud-sync client.
 
+After exporting files yourself, use [`archive`](docs/how-to/archive-library.md) to remove selected
+local library copies while retaining catalog history.
+
 Use [`organize --dry-run`](docs/how-to/organize-library.md) to preview existing library names, then
 `organize` to move completed local copies through the same import steps. This preserves completed
 catalog identities and acquisition history. Explicit `library.titleOverrides` let an operator or

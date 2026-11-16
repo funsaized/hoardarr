@@ -10,7 +10,7 @@ import {
   PolicySchema,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.12.1";
+const MODEL_VERSION = "2026.11.16.1";
 const SPEC_EPISODE = "episode";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -103,6 +103,7 @@ const TransitionSchema = z.object({
   completedAt: z.iso.datetime().nullable().optional(),
   transferredAt: z.iso.datetime().nullable().optional(),
   localCleanedAt: z.iso.datetime().nullable().optional(),
+  archivedAt: z.iso.datetime().optional(),
   libraryRelativeDir: z.string().optional(),
   layoutVersion: z.number().int().optional(),
 });
@@ -535,6 +536,7 @@ function applyPatch(episode: Episode, transition: Transition): Episode {
   if (transition.transferredAt !== undefined) {
     next.transferredAt = transition.transferredAt;
   }
+  if (transition.archivedAt !== undefined) next.archivedAt = transition.archivedAt;
   if (transition.localCleanedAt !== undefined) {
     next.localCleanedAt = transition.localCleanedAt;
   }
@@ -971,6 +973,10 @@ export const definition = {
   }, {
     toVersion: "2026.11.12.1",
     description: "Preserve existing records and add optional canonical library paths",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.16.1",
+    description: "Retain optional local archival timestamps without changing completed status",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: GlobalArgumentsSchema,

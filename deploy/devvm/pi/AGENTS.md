@@ -70,3 +70,14 @@ existing maintenance procedure for `interests.shows`, pin the resolved TMDB iden
 unrelated settings. A one-off request must never add a show to that list. Quality, capacity and
 download budgets remain the configured policies. Do not call the downloader directly or create
 alternate media workflows, schedules, databases or background agent loops.
+
+## Archive exported media
+
+Use `sudo hoardarr-operator archive help` for single movies, batches and series, or all movies/TV.
+Archive removes completed local library copies and preserves acquisition history. Export belongs
+to the user; do not require cloud receipts or integrate an upload service. A user request to archive
+a clear target authorizes removal. Resolve titles to exact catalog TMDB movie or series IDs with
+Swamp data queries, inspect `swamp behavior get pipeline --json`, and preview with `archive --dry-run`
+before executing. Ask only when the intended title or scope is ambiguous. Report skipped unfinished
+imports and archived items. Archiving a series covers currently completed episodes; future episodes
+remain eligible. Never run archive as part of routine deployment or maintenance.
