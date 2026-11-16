@@ -81,3 +81,9 @@ Swamp data queries, inspect `swamp behavior get pipeline --json`, and preview wi
 before executing. Ask only when the intended title or scope is ambiguous. Report skipped unfinished
 imports and archived items. Archiving a series covers currently completed episodes; future episodes
 remain eligible. Never run archive as part of routine deployment or maintenance.
+
+Archive previews use metadata only and do not acquire durable installation ownership. Downloads and
+ready items do not require waiting for the whole library to become idle; removal skips unfinished
+imports. Before retrying a lock timeout, inspect active Swamp runs and identify the holder's method
+and PID. A previous archive command may still be running. Do not start concurrent retries or call a
+persisted owner active without checking. Recover cancelled owners through the documented path.

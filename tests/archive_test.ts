@@ -212,3 +212,115 @@ Deno.test("both catalog transition schemas retain archival metadata", () => {
     assert(parsed.transitions[0].archivedAt);
   }
 });
+
+Deno.test("archive preview reads metadata without hashing or taking installation ownership", () =>
+  temporary(async (root) => {
+    const f = await fixture(root), a = await f.add(1), owner = crypto.randomUUID();
+    await coordinator.methods.acquire.execute({ owner }, f.ctx);
+    // A same-size change would fail a content hash; preview only lists the saved file plan.
+    await Deno.writeTextFile(a.path, "Changed");
+    const { archive } = await import("../extensions/models/_lib/archive.ts");
+    await archive(
+      model.methods.archive.arguments.parse({
+        owner: crypto.randomUUID(),
+        movieIds: [1],
+        dryRun: true,
+      }),
+      f.ctx,
+      () => {
+        throw new Error("Preview must not read media bytes");
+      },
+    );
+    await assertLease(root, owner);
+    assert(!a.row.archivedAt);
+  }));
+
+Deno.test("archive reuses verified destination identities across guest device-number changes", () =>
+  temporary(async (root) => {
+    const f = await fixture(root), a = await f.add(1);
+    const { archive } = await import("../extensions/models/_lib/archive.ts");
+    const { fileIdentity } = await import("../extensions/models/local_destination.ts");
+    const identity = await fileIdentity(a.path);
+    f.store.set("local-destination", [{
+      name: "receipt-1",
+      attributes: {
+        contractVersion: 1,
+        key: "1",
+        provider: "local",
+        destination: a.row.remotePath,
+        manifestSha256: a.row.sha256,
+        totalBytes: identity.bytes,
+        verifiedAt: new Date().toISOString(),
+        files: [{ relativePath: "1.mkv", identity: { ...identity, device: "old-guest-device" } }],
+      },
+    }]);
+    // Include the new spec in the fixture's filtered data reads.
+    const read = f.ctx.readModelData;
+    f.ctx.readModelData = (name, spec) =>
+      name === "local-destination" ? Promise.resolve(f.store.get(name) ?? []) : read(name, spec);
+    await archive(
+      model.methods.archive.arguments.parse({ owner: crypto.randomUUID(), movieIds: [1] }),
+      f.ctx,
+      () => {
+        throw new Error("Unchanged verified copy must not be rehashed");
+      },
+    );
+    await rejects(() => Deno.stat(a.path));
+    assert(a.row.archivedAt);
+  }));
+
+Deno.test("cancelled previews leave no installation owner", () =>
+  temporary(async (root) => {
+    const f = await fixture(root);
+    await f.add(1);
+    const controller = new AbortController();
+    const read = f.ctx.readModelData;
+    f.ctx.signal = controller.signal;
+    f.ctx.readModelData = async (name, spec) => {
+      controller.abort();
+      return await read(name, spec);
+    };
+    await rejects(() => f.run({ all: "both", dryRun: true }));
+    const { ownershipDirectory, readLease } = await import("../extensions/models/_lib/runtime.ts");
+    assert(await readLease(`${await ownershipDirectory(root)}/lease.json`) === null);
+  }));
+
+Deno.test("archive hashes changed copies even when a saved receipt exists", () =>
+  temporary(async (root) => {
+    const f = await fixture(root), a = await f.add(1);
+    const { archive } = await import("../extensions/models/_lib/archive.ts");
+    const { fileIdentity, fileHash } = await import("../extensions/models/local_destination.ts");
+    const identity = await fileIdentity(a.path);
+    const read = f.ctx.readModelData;
+    f.ctx.readModelData = (name, spec) =>
+      name === "local-destination"
+        ? Promise.resolve([{
+          name: "receipt-1",
+          attributes: {
+            contractVersion: 1,
+            key: "1",
+            provider: "local",
+            destination: a.row.remotePath,
+            manifestSha256: a.row.sha256,
+            totalBytes: identity.bytes,
+            verifiedAt: new Date().toISOString(),
+            files: [{ relativePath: "1.mkv", identity }],
+          },
+        }])
+        : read(name, spec);
+    await Deno.writeTextFile(a.path, "Changed");
+    await Deno.utime(a.path, new Date(0), new Date(0));
+    let hashes = 0;
+    await rejects(() =>
+      archive(
+        model.methods.archive.arguments.parse({ owner: crypto.randomUUID(), movieIds: [1] }),
+        f.ctx,
+        async (...args) => {
+          hashes++;
+          return await fileHash(...args);
+        },
+      )
+    );
+    assert(hashes === 1 && !a.row.archivedAt);
+    assert(await Deno.readTextFile(a.path) === "Changed");
+  }));

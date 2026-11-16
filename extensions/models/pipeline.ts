@@ -25,6 +25,7 @@ import { archive, ArchiveArgs, ArchiveRecord } from "./_lib/archive.ts";
 const Globals = z.object({
   requestModel: z.string().optional(),
   libraryRoot: z.string().optional(),
+  destination: z.string().default("local-destination"),
   maxMovieAttempts: z.number().int().positive().default(3),
   maxEpisodeAttempts: z.number().int().positive().default(3),
   movies: z.string().default("movie-catalog"),
@@ -201,7 +202,7 @@ async function itemRow(ctx: Context, item: Item): Promise<Row> {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.16.1",
+  version: "2026.11.16.2",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -221,6 +222,11 @@ export const model = {
   }, {
     toVersion: "2026.11.16.1",
     description: "Add user-directed local library archival",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.16.2",
+    description:
+      "Preview archives without ownership or media reads; reuse verified copy identities",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,

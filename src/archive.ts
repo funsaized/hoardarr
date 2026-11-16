@@ -8,7 +8,7 @@ Archive removes completed local library files and retains catalog history.
 Export the files yourself before running it. No cloud upload is performed or checked.
 --shows selects all completed episodes currently imported for those TMDB series IDs.
 Incomplete downloads are skipped; future episodes remain eligible for acquisition.
-Use --dry-run to list the exact files without deleting them.
+Use --dry-run for a metadata-only preview without reading media contents or taking ownership.
 `;
 export function archiveArguments(argv: string[], owner = crypto.randomUUID()) {
   const value = (name: string) => {

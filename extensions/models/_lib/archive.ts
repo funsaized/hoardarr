@@ -2,7 +2,7 @@
 import { z } from "npm:zod@4.5.1";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
-import { ManifestEntry } from "./contracts.ts";
+import { ManifestEntry, ReceiptSchema } from "./contracts.ts";
 import { assertLease, invoke, type Runtime } from "./runtime.ts";
 import { checkedPath, fileHash, fileIdentity, sameIdentity } from "../local_destination.ts";
 import { syncDirectory } from "./durable.ts";
@@ -26,16 +26,26 @@ export const ArchiveRecord = z.object({
   archivedAt: z.iso.datetime().nullable(),
 });
 type Context = Runtime & {
-  globalArgs: { movies: string; episodes: string; files: string; libraryRoot?: string };
+  globalArgs: {
+    movies: string;
+    episodes: string;
+    files: string;
+    libraryRoot?: string;
+    destination?: string;
+  };
 };
 type Row = Record<string, unknown>;
 
 /** One fan-out operation holds installation ownership across the selected batch. */
-export async function archive(args: z.infer<typeof ArchiveArgs>, ctx: Context) {
+export async function archive(
+  args: z.infer<typeof ArchiveArgs>,
+  ctx: Context,
+  hash = fileHash,
+) {
   if (!ctx.globalArgs.libraryRoot) throw new Error("Archive requires the local destination");
   const root = await checkedPath(ctx.globalArgs.libraryRoot, ctx.globalArgs.libraryRoot);
   if (!(await Deno.lstat(root)).isDirectory) throw new Error("Library root is unavailable");
-  await invoke(ctx, "coordinator", "acquire", { owner: args.owner });
+  if (!args.dryRun) await invoke(ctx, "coordinator", "acquire", { owner: args.owner });
   let removalStarted = false;
   try {
     const movies = (await ctx.readModelData(ctx.globalArgs.movies, "movie")).map((r) =>
@@ -52,6 +62,9 @@ export async function archive(args: z.infer<typeof ArchiveArgs>, ctx: Context) {
     }
     const manifests = await ctx.readModelData(ctx.globalArgs.files, "manifest");
     const saved = await ctx.readModelData("pipeline", "archiveIntent");
+    const receipts = args.dryRun
+      ? []
+      : await ctx.readModelData(ctx.globalArgs.destination ?? "local-destination", "receipt");
     const selected = [
       ...movies.filter((r) =>
         args.all === "movies" || args.all === "both" || args.movieIds.includes(Number(r.tmdbId))
@@ -70,7 +83,7 @@ export async function archive(args: z.infer<typeof ArchiveArgs>, ctx: Context) {
     const results: Row[] = [];
     const handles: { name: string }[] = [];
     for (const { row, kind, id, key } of selected) {
-      await assertLease(ctx.repoDir, args.owner);
+      if (!args.dryRun) await assertLease(ctx.repoDir, args.owner);
       if (row.archivedAt || row.status !== "transferred" || !row.localCleanedAt) {
         results.push({
           key,
@@ -111,13 +124,29 @@ export async function archive(args: z.infer<typeof ArchiveArgs>, ctx: Context) {
         digest !== row.sha256 ||
         new Set(record.entries.map((e) => e.relativePath)).size !== record.entries.length
       ) throw new Error(`Invalid archive manifest: ${key}`);
+      const receiptKey = kind === "movie" ? String(id) : key;
+      const candidate = receipts.find((r) => r.name === `receipt-${receiptKey}`);
+      const parsed = ReceiptSchema.safeParse(candidate?.attributes);
+      const receipt = parsed.success && parsed.data.provider === "local" &&
+          parsed.data.key === receiptKey && parsed.data.destination === directory &&
+          parsed.data.manifestSha256 === row.sha256
+        ? parsed.data
+        : undefined;
       const paths: { path: string; identity: Awaited<ReturnType<typeof fileIdentity>> }[] = [];
       for (const entry of record.entries) {
         ctx.signal.throwIfAborted();
         const path = await checkedPath(root, join(directory, entry.relativePath));
         try {
           const identity = await fileIdentity(path);
-          if (identity.bytes !== entry.bytes || await fileHash(path, ctx.signal) !== entry.sha256) {
+          const published = receipt?.files?.find((f) => f.relativePath === entry.relativePath)
+            ?.identity;
+          // Guest 9p device numbers can change across boots; the lease verifies the storage root.
+          const unchanged = published &&
+            sameIdentity({ ...published, device: identity.device }, identity);
+          if (
+            identity.bytes !== entry.bytes ||
+            (!args.dryRun && !unchanged && await hash(path, ctx.signal) !== entry.sha256)
+          ) {
             throw new Error(`Library content changed: ${path}`);
           }
           paths.push({ path, identity });
@@ -188,10 +217,12 @@ export async function archive(args: z.infer<typeof ArchiveArgs>, ctx: Context) {
         items: results,
       }),
     );
-    await invoke(ctx, "coordinator", "release", { owner: args.owner });
+    if (!args.dryRun) await invoke(ctx, "coordinator", "release", { owner: args.owner });
     return { dataHandles: handles };
   } catch (error) {
-    if (!removalStarted) await invoke(ctx, "coordinator", "release", { owner: args.owner });
+    if (!args.dryRun && !removalStarted) {
+      await invoke(ctx, "coordinator", "release", { owner: args.owner });
+    }
     throw error;
   }
 }
