@@ -1,11 +1,11 @@
 # Archive exported library files
 
-Use `archive` after exporting the files you want to keep. It removes completed local library copies,
-records an archive timestamp and retains their catalog identities and acquisition history. Hoardarr
-trusts your export: it does not upload files or check a cloud service.
+After exporting your media, use `archive` to remove the local copies. Hoardarr records when you
+archived each item and keeps its catalog identity and download history. You handle the export;
+Hoardarr does not upload files or check your cloud drive.
 
-Inside the native guest, select movies by TMDB movie ID and shows by TMDB series ID. Preview the
-exact files first:
+In the native guest, choose movies by TMDB movie ID or shows by TMDB series ID. Preview the files
+first:
 
 ```sh
 sudo hoardarr-operator archive --movies 123 --dry-run
@@ -21,28 +21,30 @@ sudo hoardarr-operator archive --all tv --dry-run
 sudo hoardarr-operator archive --all both --dry-run
 ```
 
-For demo or Compose installations, use `bin/hoardarr archive --dir PATH` with the same options. The
-command requires the local destination. Removal takes installation ownership so scheduled processing
-cannot modify the library during removal. A preview lists the manifest and checks file metadata. It
-does not read media contents or acquire installation ownership. It writes a Swamp summary and leaves
-media and catalog records unchanged. The removal command checks the files again.
+For demo or Compose installations, use `bin/hoardarr archive --dir PATH` with the same options.
+Archiving requires the local destination.
 
-Each show selection covers its imported episodes. The command skips unfinished imports and
-downloads. Archiving a show does not disable future episode acquisition. Completed items remain
-`transferred` with an `archivedAt` timestamp. Library reorganization skips them, and acquisition
-leaves them complete. Their old local paths remain in the catalog as delivery history.
+A preview lists files from the saved import manifest and checks their metadata. It writes a Swamp
+summary without reading media contents, taking installation ownership or changing media and catalog
+records. Removal checks the files again and holds installation ownership so scheduled processing
+cannot change the library at the same time.
 
-Archive removes only files in the saved import manifest. It reuses the verified destination file
-identities when they match, and hashes files whose metadata changed or lacks a matching receipt.
-Untracked files and neighboring episodes survive. Archive removes empty directories. Changed files,
-missing manifests and unsafe paths stop the batch; earlier items may already have finished. The
-saved archive intent lets an interrupted removal resume. Inspect the method report and recover any
-held owner through the normal
-[recovery procedure](backup-and-recovery.md#recover-an-interrupted-run), then repeat the same
-selection.
+Selecting a show archives its completed imports and skips unfinished imports and downloads. Future
+episodes remain eligible for acquisition. Archived items keep their `transferred` status and gain an
+`archivedAt` timestamp. Hoardarr skips them during library reorganization and does not download them
+again. The catalog keeps their old local paths as delivery history.
 
-Agents can call the same Swamp method directly. Inspect the behavior and catalog IDs first, then run
-`pipeline archive` with explicit selectors:
+Removal deletes only files in the saved import manifest. It uses the verified copy's file identities
+to check for changes, and hashes a file only if its metadata changed or no matching receipt exists.
+Untracked files and neighboring episodes stay in place. Hoardarr removes empty directories.
+
+Changed files, missing manifests and unsafe paths stop the batch. Earlier items may already have
+finished. Hoardarr saves a removal record so an interrupted archive can resume. Inspect the method
+report, follow the [recovery procedure](backup-and-recovery.md#recover-an-interrupted-run) for any
+held owner, then repeat the same selection.
+
+Agents can call the Swamp method directly. Inspect the behavior and catalog IDs first, then pass
+those IDs to `pipeline archive`:
 
 ```sh
 sudo hoardarr-operator swamp behavior get pipeline --json

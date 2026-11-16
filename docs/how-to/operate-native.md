@@ -1,6 +1,6 @@
 # Operate the native VM
 
-Use this guide for an enrolled, commissioned installation. For initial setup, see the
+Use this guide after enrolling and commissioning the installation. For initial setup, follow the
 [native build guide](native-devvm.md).
 
 ## Start and check
@@ -20,8 +20,8 @@ sudo hoardarr-operator native-check
 sudo hoardarr-operator status
 ```
 
-Enabled services and the previously enabled schedule resume on boot when admissions are open.
-Exiting the shell leaves them running. Application commands run inside this guest shell:
+When admissions are open, enabled services and an enabled schedule resume on boot. Exiting the shell
+leaves them running. Run application commands inside the guest:
 
 | Task                          | Command                                 |
 | ----------------------------- | --------------------------------------- |
@@ -29,11 +29,11 @@ Exiting the shell leaves them running. Application commands run inside this gues
 | Refresh discovery and preview | `sudo hoardarr-operator plan --refresh` |
 | Run a reconciliation now      | `sudo hoardarr-operator run`            |
 
-`plan` writes workflow history and reports. For a read-only inspection, use `status` and saved Swamp
-data or reports. `status` labels downloader observations with their saved snapshot timestamp.
+`plan` writes workflow history and reports. To inspect without changing state, use `status` or saved
+Swamp data and reports. Downloader observations in `status` show when Swamp saved the snapshot.
 
-A reconciliation delivers all ready movies, then all ready TV episodes, sequentially. Manual runs
-use the same admission and ownership checks as scheduled runs.
+Each reconciliation delivers every ready movie, then every ready TV episode, one at a time. Manual
+and scheduled runs use the same admission and ownership checks.
 
 ## Pause for maintenance
 
@@ -51,18 +51,19 @@ sudo systemctl stop hoardarr-swamp.service hoardarr-torlink.service
 sudo systemctl is-active hoardarr-swamp.service hoardarr-torlink.service
 ```
 
-Both should report `inactive`; `is-active` returns a nonzero exit status in that case. If a run was
-interrupted, inspect its report and [recover it](backup-and-recovery.md#recover-an-interrupted-run).
-Preserve its lease. Leave the VPN and observation sockets running for ordinary maintenance.
+Both services should report `inactive`, with a nonzero exit status from `is-active`. If a run
+stopped unexpectedly, inspect its report and
+[recover it](backup-and-recovery.md#recover-an-interrupted-run). Keep its lease in place. Leave the
+VPN and observation sockets running during ordinary maintenance.
 
 For a VM stop or restart, use `exit`, then run `devvm stop` or `devvm restart` on the host.
 Admissions remain closed until you resume them below.
 
 ## Update code and restart
 
-Build software changes into the image and deploy it through DevVM. Keep `/opt/hoardarr` and
-installed runtimes as supplied by that image. Pulling host source prepares a build; restarting
-services keeps the installed version.
+Build software changes into a new image and deploy it through DevVM. Leave `/opt/hoardarr` and the
+installed runtimes as the image supplies them. Pulling source on the host prepares a build;
+restarting services keeps the installed version.
 
 1. Prepare the changed layer using the [build guide](native-devvm.md), then run
    `devvm rebuild hoardarr` on the host. Check `devvm images`.
@@ -85,9 +86,9 @@ The replacement needs credential recovery and provisioning even though the proje
 
 ## Resume after VM maintenance
 
-Open the guest with `devvm`. Check `sudo hoardarr-operator status`; recover any outstanding owner
-before reopening admissions. With no outstanding owner, run each step only after the previous one
-succeeds:
+Open the guest with `devvm` and check `sudo hoardarr-operator status`. Recover any outstanding owner
+before reopening admissions. Once ownership is clear, run these commands in order. Stop if a command
+fails:
 
 ```sh
 sudo hoardarr-operator doctor
@@ -204,7 +205,7 @@ with `devvm history export`. These commands use the selected isolated Hoardarr i
 writable workspace is `~/.local/share/hoardarr/operator`. Its project settings select only
 `openai/gpt-5.4-mini`, use low reasoning, and enable `codemode` and compaction. Pi uses this model
 for operator tasks without automatic model switching. The launcher passes this selection explicitly,
-including for noninteractive runs. Explicit command options can override it for a session.
+including runs without user interaction. Explicit command options can override it for a session.
 
 The launcher starts Pi in the root-managed, non-delegated `hoardarragent.slice`. This operator
 process group can use DevVM's proxy. Media services and commands launched by `hoardarr-operator` run
@@ -252,7 +253,7 @@ through the maintenance procedure.
 Submission attempts an immediate run of the existing workflow. That run limits new searches and
 submissions to the request while continuing observation and ready imports. If another owner is
 active, the request remains queued for a later run. Use `--defer` to submit without starting work;
-if scheduling is disabled, use `request run --id REQUEST_ID`. Admission and maintenance checks still
+with scheduling off, use `request run --id REQUEST_ID`. Admission and maintenance checks still
 apply.
 
 ```sh

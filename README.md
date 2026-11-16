@@ -1,22 +1,21 @@
 # Hoardarr
 
-**An autonomous movie and TV library, with deterministic workflows and an agent at the controls.**
+Movie and TV automation with Swamp workflows and an operator agent.
 
 [![CI](https://github.com/funsaized/hoardarr/actions/workflows/ci.yml/badge.svg)](https://github.com/funsaized/hoardarr/actions/workflows/ci.yml)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Give Hoardarr a list of shows and a weekly movie allowance. It discovers releases, searches for
-eligible downloads, works through the TV backlog, and delivers checked copies to your library. New
-episodes get priority; previous seasons follow. Each scheduled run picks up the state left by the
-last one.
+Give Hoardarr a list of shows and a weekly movie discovery limit. It finds eligible releases, fills
+the TV backlog and copies verified files into your library. New episodes come first, followed by
+older episodes. Each scheduled run continues where the last one left off.
 
 [Swamp](https://github.com/swamp-club/swamp) runs the schedule and workflows. Torlink handles
 BitTorrent. The native VM includes Pi for questions and operator tasks: ask what arrived, inspect a
-failed transfer, add a show, or change the schedule. Normal media processing needs no model calls,
-interactive review queue, or running agent session.
+failed transfer, add a show, or change the schedule. Routine processing runs without model calls, a
+review queue or an open agent session.
 
-Start with the fixture demo, choose a VPN-backed deployment, and use the same configuration and
-provider contracts to extend it. This README is the canonical guide for the current source tree.
+Start with the fixture demo, then choose a VPN-backed deployment. Both use the same configuration
+and provider contracts. This README covers the current source tree.
 
 [Why Hoardarr](#why-hoardarr) · [Quick start](#quick-start) · [Run modes](#run-modes) ·
 [Install](#installation) · [Media workflow](#media-workflow) · [Agent](#operator-agent) ·
@@ -25,36 +24,31 @@ provider contracts to extend it. This README is the canonical guide for the curr
 
 ## Why Hoardarr
 
-Hoardarr is for people who want to run their own media library and understand what it does. You
-choose the shows, acquisition limits, storage and schedule. The workflows handle the routine work
-and retain the evidence you need to inspect a decision or recover an interrupted run.
+You choose the shows, acquisition limits, storage and schedule. Swamp workflows handle routine
+processing and keep the records you need to understand a decision or recover an interrupted run.
 
-The native deployment packages that system as a VM appliance. Giving the media stack its own Linux
-guest makes its network policy, runtime and lifecycle explicit:
+The native deployment runs the media stack in its own Linux VM:
 
-- Keep the media VPN inside the guest. Hoardarr and Torlink run behind the guest's VPN and
-  application egress guard, with Torlink bound to the tunnel interface. Your host keeps its own
-  networking, VPN and Tailscale routes. A separate management identity lets you diagnose the guest
-  when the media VPN fails.
-- Give the stack its own operating environment. The VM has its own kernel, services and runtime
-  dependencies. Hoardarr's application runs as an unprivileged user; administration uses a separate
-  identity. The persistent project share defines where application data lives on the host. See the
-  [trust boundaries](#trust-boundaries) for the scope of that separation.
-- Deploy a known system. The image contains pinned application code and runtimes. Updates replace
-  that image through DevVM, with checks against the exact runtime manifest. You can rebuild from
-  recorded inputs and test an image in a separate qualification VM before putting it into service.
-- Keep your library independent of the appliance. Media, catalogs, configuration and downloader
-  state live in the persistent project and survive image replacement. Storage identity checks reject
-  a missing or substituted mount. Explicit backup and recovery procedures preserve the state and
-  credentials needed to resume work.
-- Let it run without an open terminal or agent session. Host systemd starts the enrolled VM, guest
-  services supervise the application, and Swamp runs the schedule. Downloads continue between
-  workflow runs; each run reconciles saved progress and delivers what is ready. Pi is available
-  inside the VM when you want help operating it.
-- See what the automation does. Catalogs, provider results, retry times, reports and ownership
-  records explain what happened. Delivery checks file sizes and SHA-256 hashes and saves a receipt
-  before deleting staging files. You can pause new work, inspect an interruption and recover it
-  through explicit controls.
+- The VPN stays inside the guest. Hoardarr and Torlink use the guest's VPN and application egress
+  guard, with Torlink bound to the tunnel interface. Your host keeps its networking, VPN and
+  Tailscale routes. A separate management identity lets you diagnose the guest if its media VPN
+  fails.
+- The VM has its own kernel, services and runtime dependencies. Hoardarr runs as an unprivileged
+  user, with a separate identity for administration. A persistent project share holds application
+  data on the host. See the [trust boundaries](#trust-boundaries) for the scope of this separation.
+- Updates replace the image through DevVM. Images contain pinned code and runtimes, checked against
+  an exact runtime manifest. You can rebuild from recorded inputs and test an image in a separate
+  qualification VM before using it in production.
+- Media, catalogs, configuration and downloader state stay in the host project across image
+  replacement. Storage checks reject missing or substituted mounts. Backup and recovery procedures
+  preserve the state and credentials needed to resume work.
+- Host systemd starts the enrolled VM, guest services keep the application running, and Swamp runs
+  the schedule. Downloads continue between workflow runs. Each run checks their progress and
+  delivers ready files. Pi is available inside the VM when you need help; routine work needs no open
+  terminal or agent session.
+- Catalogs, provider results, retry times, reports and ownership records explain what happened.
+  Delivery checks file sizes and SHA-256 hashes and saves a receipt before deleting staging files.
+  You can pause new work, inspect an interruption and recover it through the operator commands.
 
 Follow a show once and Hoardarr maintains its aired-episode backlog. Separate movie and TV budgets
 bound new work: by default, 20 movie discoveries per ISO week, 20 episode searches and eight episode
@@ -365,8 +359,8 @@ saved owner after proving writers have stopped.
 
 **Movies.** TMDB discovery requests digitally released movies (`with_release_type=4`) released on or
 before today, for the configured region/language, ordered by popularity. It examines at most ten
-result pages and excludes known IDs. The allowance counts new catalog discoveries per UTC ISO week;
-it is not a torrent count and does not mean every title was released that week.
+result pages and excludes known IDs. The allowance counts new catalog discoveries per UTC ISO week.
+It counts discoveries, not torrents, and can include titles from earlier release weeks.
 
 A completed marker for that week, region and language prevents another discovery batch. Raising
 `interests.limit` does not top up an already completed week. Existing catalog work can still search,
@@ -375,8 +369,8 @@ download and transfer. Do not delete discovery markers to force more results.
 **TV.** Configure a name, optional premiere year, and optional TMDB series ID. A supplied ID pins
 the series. Otherwise, lookup matches a normalized title or original title, applies the year when
 given, and breaks ties by popularity then ID. It saves the selected identity and reports title, year
-and TMDB link in status. No credible match stays pending for a later run; no approval queue is
-required.
+and TMDB link in status. If lookup finds no credible match, the series stays pending for a later
+run. There is no approval queue.
 
 Discovery catalogs aired episodes from regular seasons, including previous seasons. Specials and
 future episodes stay out of the queue. Each later discovery sees newly aired episodes. The backlog
@@ -420,21 +414,22 @@ by another valid item remains blocked for operator inspection.
 
 ### Delivery and status
 
-| State or status field            | What it means                                            |
-| -------------------------------- | -------------------------------------------------------- |
-| `wanted`                         | Cataloged and awaiting an eligible search                |
-| `selected`                       | A release was selected; submission has not completed     |
-| `downloading`                    | Downloader work is in progress                           |
-| `seeding`                        | Download completed; seeding is still active              |
-| `seed-stopped`                   | Seeding ended; detachment and delivery may follow        |
-| `transfer-ready`                 | Payload is detached and eligible for checked delivery    |
-| `transferred`                    | A verified destination receipt is recorded               |
-| `cleanup-pending`                | Legacy pending cleanup; retried without another download |
-| `failed` / unavailable reporting | Inspect the recorded error, attempt count and next retry |
+| State or status field            | What it means                                             |
+| -------------------------------- | --------------------------------------------------------- |
+| `wanted`                         | Cataloged and awaiting an eligible search                 |
+| `selected`                       | Hoardarr chose a release; submission is incomplete        |
+| `downloading`                    | Downloader work is in progress                            |
+| `seeding`                        | Download completed; seeding is still active               |
+| `seed-stopped`                   | Seeding ended; detachment and delivery may follow         |
+| `transfer-ready`                 | Hoardarr detached the payload; ready for checked delivery |
+| `transferred`                    | Hoardarr recorded a verified destination receipt          |
+| `cleanup-pending`                | Legacy pending cleanup; retried without another download  |
+| `failed` / unavailable reporting | Inspect the recorded error, attempt count and next retry  |
 
 Status separates selected, downloading, seeding, ready and completed TV counts. Downloader
-observations are **saved snapshots** with timestamps, not continuous live readings. A successful
-workflow may still contain source-specific search errors; inspect `searchHealth` and reports.
+observations come from saved snapshots with timestamps; they do not update continuously. A
+successful workflow may still contain source-specific search errors; inspect `searchHealth` and
+reports.
 
 Each import has four Swamp steps: `prepare`, `publish`, `commit`, and `cleanup`. Preparation stages
 and names the files and creates one source manifest. Publication copies and verifies each listed
@@ -482,7 +477,7 @@ with `devvm history export`. These commands use the selected isolated Hoardarr i
 writable workspace is `~/.local/share/hoardarr/operator`. Its project settings select only
 `openai/gpt-5.4-mini`, use low reasoning, and enable `codemode` and compaction. Pi uses this model
 for operator tasks without automatic model switching. The launcher passes this selection explicitly,
-including for noninteractive runs. Explicit command options can override it for a session.
+including runs without user interaction. Explicit command options can override it for a session.
 
 The launcher starts Pi in the root-managed, non-delegated `hoardarragent.slice`. This operator
 process group can use DevVM's proxy. Media services and commands launched by `hoardarr-operator` run
@@ -567,8 +562,8 @@ Policy fields are `version: 1`, `minSeeders`, `maxSizeBytes`, `resolution` (`720
 nonempty. The `legacy` ranking value means seeders, then name, then hash; `source-priority` means
 seeders, then configured source order, then hash. It does not override the seeder ranking.
 
-Torlink defaults to `http://127.0.0.1:9161`. This implementation requires local payload access;
-remote daemon payload mapping is unsupported. Native fixes the binary to `/opt/torlink/dist/cli.cjs`
+Torlink defaults to `http://127.0.0.1:9161`. This implementation requires local payload access; it
+does not map payloads from remote daemons. Native fixes the binary to `/opt/torlink/dist/cli.cjs`
 and binds the tunnel interface. Secrets use vault expressions or private files; do not put
 credential literals in YAML.
 
@@ -624,7 +619,7 @@ sudo systemctl stop hoardarr-swamp.service hoardarr-torlink.service
 sudo systemctl is-active hoardarr-swamp.service hoardarr-torlink.service
 ```
 
-Both should report `inactive` (a nonzero `is-active` exit is expected). Leave the VPN and
+Both should report `inactive`, with a nonzero exit status from `is-active`. Leave the VPN and
 observation sockets running for ordinary maintenance. Use the recovery procedure if a failed run
 still owns the installation. Never delete its lease to unlock it.
 
@@ -972,7 +967,7 @@ conditions; the firewall enforces the boundary when the tunnel fails afterward.
 
 Root, the Docker daemon, the host administrator and a compromised guest kernel are outside these
 boundaries. Pi has operator privileges, not the restricted service boundary. Treat media filenames,
-provider responses and logs as untrusted input. Download only material you are authorized to
+provider responses and logs as untrusted input. Download only material you have permission to
 acquire.
 
 Public images contain code and dependencies, never operator credentials. Private files, inventories,

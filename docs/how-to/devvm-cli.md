@@ -1,13 +1,12 @@
 # Use the DevVM CLI
 
-Manage the native VM with `devvm` on the physical host. Run application commands with
-`sudo hoardarr-operator` inside its guest shell. The image supplies application code and runtimes;
-the persistent project holds configuration, catalog state and media.
+Run `devvm` on the host to manage the VM. Inside its shell, use `sudo hoardarr-operator` for
+application commands. The VM image holds code and runtimes; the host project holds configuration,
+catalog state and media.
 
 ## Select the inventory and project
 
-Hoardarr has a separate DevVM inventory. In your host terminal, change to the persistent project
-first, then select that inventory:
+Hoardarr uses a separate DevVM inventory. In your host terminal, select its project and inventory:
 
 ```sh
 cd "$HOME/.local/share/hoardarr-devvm"
@@ -18,18 +17,18 @@ export DEVVM_LIMA_HOME="$HOME/.hoardarr-lima"
 devvm ls
 ```
 
-Use your enrolled paths from `~/.hoardarr-host/production-deployment.json` if they differ. Without
-these exports, `devvm ls` uses the default inventory, which may be empty. Check the exports after
-changing directories if a shell environment manager supplies them.
+If your paths differ, use those in `~/.hoardarr-host/production-deployment.json`. Without these
+exports, `devvm ls` reads the default inventory, which may be empty. If a shell environment manager
+sets them, check their values after changing directories.
 
-Check that the production row's `FOLDER` matches your current directory. DevVM selects a VM by
-project folder. The source checkout is usually a different folder; running `devvm` there can create
-another VM.
+Check that the production row's `FOLDER` matches your current directory. DevVM chooses a VM by
+project folder. Running it from the source checkout, usually a different folder, can create another
+VM.
 
-Use the pinned executable recorded at enrollment; `command -v devvm` and `devvm --version` should
-match the [runtime pins](../../deploy/devvm/pins.json). If your checkout already has the local
-`mise run devvm` task, it selects the enrolled inventory and project for you; for example,
-`mise run devvm ls`. That task is local setup, not part of the shipped image.
+Check `command -v devvm` and `devvm --version` against the enrolled executable and
+[runtime pins](../../deploy/devvm/pins.json). If your checkout has a local `mise run devvm` task, it
+selects the project and inventory for you. For example, run `mise run devvm ls`. This task belongs
+to the local setup; the VM image does not include it.
 
 ## Open the guest shell
 
@@ -69,9 +68,9 @@ Run these on the host with the selected inventory and project:
 Before a production stop or restart, [pause work](operate-native.md#pause-for-maintenance).
 Afterward, [resume admissions](operate-native.md#resume-after-vm-maintenance).
 
-A restart keeps the installed code. Building an image does not update existing VMs. Follow
-[image deployment](operate-native.md#update-code-and-restart) to replace a guest while preserving
-its installation identity and data.
+Restarting keeps the installed code, and building an image leaves existing VMs unchanged. Follow
+[image deployment](operate-native.md#update-code-and-restart) to install a new image and preserve
+the guest's installation identity and data.
 
 See DevVM's [command guide](https://devvm.dev/docs/getting-started/commands/) and
 [SSH guide](https://devvm.dev/docs/using/ssh/) for more CLI and editor options.
