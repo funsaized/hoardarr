@@ -67,6 +67,8 @@ def checked_folder(config):
             record['id'] != expected['vmRecordId'] or record['chain'] != expected['imageChain'] or
             record['folder'].split(':', 1)[1] != current.split(':', 1)[1]):
         raise RuntimeError('VM record identity differs; leave the VM stopped')
+    if 'sharedTools' in expected and record.get('tools', {}) != expected['sharedTools']:
+        raise RuntimeError('Shared agent tools differ from enrollment; qualify and refresh before boot')
     return project, current, record_path, record
 
 
@@ -74,6 +76,8 @@ def main(argv=None, deployment=None):
     argv = sys.argv[1:] if argv is None else argv
     deployment = Path.home() / '.hoardarr-host/production-deployment.json' if deployment is None else Path(deployment)
     config = private_json(deployment)
+    if config.get('limaHome'):
+        os.environ['DEVVM_LIMA_HOME'] = config['limaHome']
     real = Path(config['devvmExecutable'])
     with real.open('rb') as file:
         if hashlib.file_digest(file, 'sha256').hexdigest() != config['devvmExecutableSha256']:

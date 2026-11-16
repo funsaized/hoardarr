@@ -1,0 +1,6 @@
+[Unit]
+Description=Hoardarr interactive operator agents
+Before=hoardarr-egress-guard.service
+
+[Slice]
+# Root owns this slice; each transient agent service explicitly disables delegation.

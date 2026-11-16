@@ -43,10 +43,6 @@ def main():
         raise RuntimeError('Use the pinned Deno version')
     if subprocess.check_output(['node', '--version'], text=True).strip() != 'v' + pins['node']['version']:
         raise RuntimeError('Use the pinned Node version')
-    pi = public / 'pi'; pi.mkdir()
-    for name in ['package.json', 'package-lock.json']:
-        shutil.copyfile(source / 'deploy/devvm/pi' / name, pi / name)
-    run(['npm', 'ci', '--omit=dev', '--ignore-scripts'], pi)
     torlink = public / 'torlink'
     run(['git', 'init', torlink]); run(['git', 'remote', 'add', 'origin', 'https://github.com/baairon/torlink.git'], torlink)
     run(['git', 'fetch', '--depth', '1', 'origin', pins['torlink']['source']], torlink)

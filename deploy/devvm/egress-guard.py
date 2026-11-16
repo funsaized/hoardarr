@@ -23,6 +23,7 @@ if not isinstance(uid, int) or isinstance(uid, bool) or uid <= 0:
 rules = f"""table inet hoardarr {{
   chain application_output {{
     type filter hook output priority -20; policy accept;
+    socket cgroupv2 level 1 "hoardarragent.slice" return
     meta skuid != {uid} return
     oifname "{interface}" counter accept
     oifname "lo" ip daddr 127.0.0.1 tcp dport {{ 9090, 9161 }} counter accept

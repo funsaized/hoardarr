@@ -128,6 +128,13 @@ for label, helper in [("maintenance-status", "maintenance-status"), ("vpn-status
     Path(f"/etc/systemd/system/hoardarr-{label}@.service").write_text(service)
 run(["systemctl", "daemon-reload"])
 run(["systemctl", "enable", "--now", "hoardarr-maintenance-status.socket", "hoardarr-vpn-status.socket", "hoardarr-egress-guard.service"])
+# Permit only the DevVM host through the vendor firewall. The independent UID
+# guard still rejects that endpoint for all processes outside the operator slice.
+run(["systemctl", "enable", "--now", "nordvpnd.service"])
+proxy_allow = subprocess.run(["/usr/bin/nordvpn", "allowlist", "add", "subnet", "192.168.5.2/32"],
+                            capture_output=True, text=True, env={"PATH":"/usr/bin:/bin", "HOME":"/root", "LC_ALL":"C"})
+if proxy_allow.returncode and "already on the allowlist" not in proxy_allow.stdout + proxy_allow.stderr:
+    raise RuntimeError("Cannot configure the DevVM management proxy exception")
 # Bootstrap extensions under the same direct DNS and privilege boundary as
 # hoardarr-operator. A login shell's loopback resolver is blocked by the UID guard.
 base = ["systemd-run", "--wait", "--pipe", "--collect", "--quiet", "--expand-environment=no",

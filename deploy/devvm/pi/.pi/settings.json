@@ -1,14 +1,17 @@
 {
-  "defaultTools": ["+codemode"],
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6-luna",
-  "defaultThinkingLevel": "xhigh",
-  "modelThinkingLevels": { "openai-codex/gpt-6-luna": "xhigh" },
+  "defaultTools": [
+    "+codemode"
+  ],
+  "defaultProvider": "openai",
+  "defaultModel": "gpt-5.4-mini",
+  "enabledModels": [
+    "openai/gpt-5.4-mini"
+  ],
+  "defaultThinkingLevel": "low",
   "showCacheMissNotices": true,
   "compaction": {
     "enabled": true,
     "reserveTokens": 32768,
-    "keepRecentTokens": 32000,
-    "modelOverrides": { "openai-codex/gpt-6-luna": { "reserveTokens": 72000 } }
+    "keepRecentTokens": 32000
   }
 }

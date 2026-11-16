@@ -34,7 +34,7 @@ previous_path=Path(identity['projectRoot'])/'state/maintenance/commissioned.json
 previous=json.loads(previous_path.read_text()) if previous_path.exists() else {}
 waived=validate_evidence(proof,manifest_sha,identity,previous,args.phase,args.allow_waived_upgrade_checks)
 # Verify installed executable/code assets against the immutable layer manifest.
-prefixes={'pi/':Path('/opt/hoardarr-pi'),'bin/':Path('/usr/local/bin'),'torlink/':Path('/opt/torlink'),'hoardarr/':Path('/opt/hoardarr'),
+prefixes={'bin/':Path('/usr/local/bin'),'torlink/':Path('/opt/torlink'),'hoardarr/':Path('/opt/hoardarr'),
           'public-extensions/':Path('/opt/hoardarr-public-extensions'),'deno-cache/':Path('/opt/hoardarr-cache')}
 for entry in json.loads(manifest_bytes)['entries']:
     name=entry['path']

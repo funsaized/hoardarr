@@ -1,7 +1,8 @@
 [Unit]
 Description=Independent Hoardarr guest application egress guard
 DefaultDependencies=no
-After=local-fs.target
+Requires=hoardarragent.slice
+After=local-fs.target hoardarragent.slice
 Before=network-pre.target hoardarr-torlink.service hoardarr-swamp.service
 Wants=network-pre.target
 

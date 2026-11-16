@@ -74,7 +74,7 @@ class HostDeviceBinding(unittest.TestCase):
             self.assertEqual(len(called.read_text().splitlines()), 3)
 
     def test_changed_identity_refuses_before_adopt_or_start(self):
-        for change in ['filesystem', 'inode', 'storage', 'vm', 'executable']:
+        for change in ['filesystem', 'inode', 'storage', 'vm', 'executable', 'tools']:
             with self.subTest(change=change), tempfile.TemporaryDirectory(prefix='.host-device-test-', dir=REPO) as directory:
                 project, deployment, config, called, record_path, _ = self.fixture(directory)
                 if change == 'filesystem': config['hostStorageIdentity']['filesystemId'] = '0'
@@ -83,6 +83,7 @@ class HostDeviceBinding(unittest.TestCase):
                 elif change == 'storage': self.write(project / 'secrets/.hoardarr-storage.json', {'installationId': 'other', 'storageId': '6'})
                 elif change == 'vm':
                     record = json.loads(record_path.read_text()); record['id'] = 'replacement-vm'; self.write(record_path, record)
+                elif change == 'tools': config['hostStorageIdentity']['sharedTools'] = {'versions': {'pi': 'qualified'}}
                 elif change == 'executable': config['devvmExecutableSha256'] = '0' * 64
                 self.write(deployment, config)
                 result = self.launch(deployment)
