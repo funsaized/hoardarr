@@ -18,7 +18,7 @@ resolve --kind movie|tv --query TITLE [--year YYYY] [--tmdb-id ID]
         Saves metadata candidates without acquiring media. Use the returned resolutionId.
 submit  --resolution UUID --tmdb-id ID --scope movie|episode|season|series|latest|remaining
         --key IDEMPOTENCY_KEY --text ORIGINAL_REQUEST [--season N] [--episode N]
-        [--category tv|anime] [--defer]
+        [--category tv|anime] [--defer] [--download-again (archived movie)]
         Accepts a resolved candidate and attempts the same owned media workflow immediately.
         --defer leaves acquisition to the existing schedule or request run.
 run     --id REQUEST_ID
@@ -152,6 +152,7 @@ export async function requestCommand(
       tmdbId: number("--tmdb-id"),
       selection: {
         scope: option("--scope"),
+        downloadAgain: argv.includes("--download-again") || undefined,
         season: number("--season"),
         episode: number("--episode"),
       },

@@ -183,7 +183,7 @@ Deno.test("TV search budgets persist no-match and provider failure independently
       { outcome: string }
     >;
     assert(state[queries[0].key.slice(2)].outcome === "provider-error");
-    assert(state[queries[1].key.slice(2)].outcome === "no-match");
+    assert(state[queries[1].key.slice(2)].outcome === "no-releases");
     await model.methods.plan.execute({ owner }, ctx);
     assert(
       (saved.get("work-current")!.attributes.queries as unknown[]).length === 10,

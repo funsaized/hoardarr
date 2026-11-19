@@ -22,10 +22,14 @@ export const ResolutionSchema = ResolveArgs.extend({
   candidates: z.array(CandidateSchema).max(20),
 });
 export const ScopeSchema = z.object({
+  downloadAgain: z.literal(true).optional(),
   scope: z.enum(["movie", "episode", "season", "series", "latest", "remaining"]),
   season: z.number().int().positive().optional(),
   episode: z.number().int().positive().optional(),
 }).strict().superRefine((value, ctx) => {
+  if (value.downloadAgain && value.scope !== "movie") {
+    ctx.addIssue({ code: "custom", message: "Download again requires movie scope" });
+  }
   if (["episode", "season"].includes(value.scope) !== (value.season !== undefined)) {
     ctx.addIssue({ code: "custom", message: "Only episode and season scopes require a season" });
   }
@@ -101,6 +105,7 @@ export const fingerprint = (intent: Intent) =>
     mediaKind: intent.media.mediaKind,
     tmdbId: intent.media.tmdbId,
     scope: intent.selection.scope,
+    ...(intent.selection.downloadAgain ? { downloadAgain: true } : {}),
     season: intent.selection.season ?? null,
     episode: intent.selection.episode ?? null,
     category: intent.category,
@@ -170,11 +175,18 @@ export function requestProgress(
       (target.mediaKind === "episode" ? searches[key.slice(2)] : undefined);
     const future = target.mediaKind === "episode" &&
       (!target.airDate || target.airDate > now.toISOString().slice(0, 10));
-    const delivered = verifiedDelivery(row);
+    const history = Array.isArray(row?.previousDeliveries) ? row.previousDeliveries as Row[] : [];
+    const delivery = [row, ...history].find((entry) =>
+      verifiedDelivery(entry) &&
+      (!request.intent.selection.downloadAgain ||
+        String(entry?.transferredAt) >= request.acceptedAt)
+    );
+    const delivered = !!delivery;
     const blocked = row?.status === "ignored" || row?.status === "failed" &&
         Number(row.attempts) >= maxAttempts[target.mediaKind];
     return {
       key,
+      archivedAt: delivery?.archivedAt ?? null,
       state: delivered
         ? "delivered"
         : future

@@ -458,3 +458,35 @@ Deno.test("metadata lookup retains ambiguity, applies year hints and redacts cre
     assert(!String(error).includes("private-api-key"));
   }
 });
+
+Deno.test("a fresh archived movie request preserves earlier fulfillment and needs a new delivery", () =>
+  temporary(async (root) => {
+    const h = harness(root);
+    await h.run("coordinator", "acquire", { owner: h.owner });
+    await h.submit("original");
+    await h.expand();
+    const entry = h.store("movie-catalog").get("catalog-movie-3")!;
+    Object.assign(entry.attributes, {
+      status: "transferred",
+      transferredAt: "2025-03-01T00:00:00.000Z",
+      archivedAt: "2025-04-01T00:00:00.000Z",
+      sha256: "a".repeat(64),
+      remotePath: "/library/fixture",
+    });
+    await h.submit("again", "movie", { downloadAgain: true });
+    await h.expand();
+    await h.expand();
+    const current = h.store("movie-catalog").get("catalog-movie-3")!.attributes;
+    assert(current.status === "wanted" && (current.previousDeliveries as Row[]).length === 1);
+    assert(requestProgress(h.request("original"), [current], []).status === "fulfilled");
+    assert(requestProgress(h.request("again"), [current], []).status === "queued");
+    assert(
+      requestProgress(h.request("again"), [{
+        ...current,
+        status: "transferred",
+        sha256: "b".repeat(64),
+        remotePath: "/library/new",
+        transferredAt: new Date().toISOString(),
+      }], []).status === "fulfilled",
+    );
+  }));

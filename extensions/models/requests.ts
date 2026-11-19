@@ -80,7 +80,12 @@ async function writable<T>(ctx: Context, action: () => Promise<T>): Promise<T> {
 }
 export const model = {
   type: "@funsaized/hoardarr/requests",
-  version: "2026.11.12.1",
+  version: "2026.11.18.1",
+  upgrades: [{
+    toVersion: "2026.11.18.1",
+    description: "Retain accepted requests",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }],
   globalArguments: Globals,
   resources: {
     request: resource(RequestSchema, "Accepted user intent and its frozen membership"),
@@ -163,6 +168,19 @@ export const model = {
             selection: args.selection,
             category: args.category,
           });
+          if (intent.selection.downloadAgain) {
+            const catalog = await ctx.readModelData(ctx.globalArgs.movies, "movie");
+            if (
+              !catalog.some((r) =>
+                r.attributes.tmdbId === media.tmdbId && r.attributes.archivedAt &&
+                r.attributes.status === "transferred"
+              )
+            ) {
+              throw new Error(
+                "Download again requires a previously archived movie. Use a normal request for this title.",
+              );
+            }
+          }
           const digest = fingerprint(intent);
           const request = RequestSchema.parse({
             id,
@@ -264,6 +282,12 @@ export const model = {
           const due = request.targets!.filter((t) =>
             t.mediaKind === "movie" || !!t.airDate && t.airDate <= today
           );
+          if (request.intent.selection.downloadAgain) {
+            await invoke(ctx, ctx.globalArgs.movies, "reacquireArchived", {
+              tmdbId: request.intent.media.tmdbId,
+              acceptedAt: request.acceptedAt,
+            });
+          }
           for (const kind of ["movie", "episode"] as const) {
             const known = kind === "movie" ? movies : episodes;
             const missing = due.filter((t) => t.mediaKind === kind && !known.has(targetKey(t)));

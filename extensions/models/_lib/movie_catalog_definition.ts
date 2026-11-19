@@ -9,7 +9,7 @@ import {
   PolicySchema,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.16.1";
+const MODEL_VERSION = "2026.11.18.1";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -798,6 +798,10 @@ export const definition = {
     toVersion: "2026.11.16.1",
     description: "Retain optional local archival timestamps without changing completed status",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.18.1",
+    description: "Retain existing settings and acquisition history",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: z.object({
     policy: PolicySchema.default(moviePolicy),
@@ -818,6 +822,35 @@ export const definition = {
     },
   },
   methods: {
+    reacquireArchived: {
+      description: "Requeue a previously archived movie and preserve its verified delivery.",
+      arguments: z.object({ tmdbId: z.number().int().positive(), acceptedAt: z.iso.datetime() }),
+      execute: async (args: { tmdbId: number; acceptedAt: string }, context: Context) => {
+        const movie = await loadMovie(context, args.tmdbId);
+        if (
+          !movie || movie.status !== "transferred" || !movie.archivedAt ||
+          !movie.transferredAt || movie.transferredAt >= args.acceptedAt
+        ) return { dataHandles: [] };
+        const { previousDeliveries = [], ...prior } = movie;
+        if (!Array.isArray(previousDeliveries)) throw new Error("Invalid movie delivery history");
+        const fresh = createMovieFromDiscovery({
+          tmdbId: movie.tmdbId,
+          title: movie.title,
+          year: movie.year,
+          overview: null,
+          releaseDate: null,
+          discoveredAt: movie.discoveredAt ?? args.acceptedAt,
+        });
+        return {
+          dataHandles: [
+            await writeMovie(context, {
+              ...fresh,
+              previousDeliveries: [...previousDeliveries, prior],
+            }),
+          ],
+        };
+      },
+    },
     relocate: catalogRelocationMethod("movie-catalog", "movie", "tmdbId", MovieSchema),
     recordAdd: {
       description:

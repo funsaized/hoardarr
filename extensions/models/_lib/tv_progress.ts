@@ -30,10 +30,10 @@ export function tvProgress(rows: Record<string, unknown>[], attempts: SearchStat
     ready:
       episodes.filter((e) => ["seed-stopped", "transfer-ready"].includes(String(e.status))).length,
     rejected: episodes.filter((e) => e.error === "identity-mismatch").length,
-    unavailable:
-      episodes.filter((e) =>
-        e.status === "wanted" && attempts[String(e.tmdbEpisodeId)]?.outcome === "no-match"
-      ).length,
+    unavailable: episodes.filter((e) =>
+      e.status === "wanted" &&
+      ["no-match", "no-releases"].includes(attempts[String(e.tmdbEpisodeId)]?.outcome)
+    ).length,
     failed: episodes.filter((e) => e.status === "failed").length,
     retries: episodes.filter((e) =>
       ["wanted", "failed"].includes(String(e.status)) && attempts[String(e.tmdbEpisodeId)]

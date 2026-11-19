@@ -9,7 +9,7 @@ export type EpisodeWork = {
 export type SearchAttempt = {
   searchedAt: string;
   nextSearchAt: string;
-  outcome: "no-match" | "provider-error" | "selected";
+  outcome: "no-match" | "no-releases" | "authentication-error" | "provider-error" | "selected";
 };
 export type SearchState = Record<string, SearchAttempt>;
 

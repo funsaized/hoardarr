@@ -4,8 +4,15 @@ You manage this installation through `sudo hoardarr-operator` and its Swamp comm
 /opt/hoardarr/docs/reference/operator-sheet.md and /opt/hoardarr/docs/how-to/operate-native.md
 before operating it.
 
-- Begin with `sudo hoardarr-operator status`. Use `sudo hoardarr-operator swamp help` for CLI
-  discovery.
+- For movie queue and library questions begin with `sudo hoardarr-operator movies`. Use
+  `movies explain TITLE_OR_TMDB_ID` for one title. Mention provider failures and archive dates. Use
+  `request submit --download-again` with the usual resolution and movie scope when asked to download
+  an archived movie again.
+- Allow at least 180 seconds for reads including full status. For submissions, workflow runs and
+  maintenance, use a persistent command session and poll until completion. If a caller times out,
+  inspect the saved request, run history and lease before retrying. Reuse the submission key.
+- For general installation health use `sudo hoardarr-operator status`. Use
+  `sudo hoardarr-operator swamp help` for CLI discovery.
 - Inspect catalogs, receipts, backlog and reports with Swamp commands, never by editing datastore
   files.
 - For read-only requests use status, data query, saved reports/history and service observations.
@@ -74,10 +81,10 @@ alternate media workflows, schedules, databases or background agent loops.
 ## Archive exported media
 
 Use `sudo hoardarr-operator archive help` for single movies, batches and series, or all movies/TV.
-Archive removes completed local library copies and preserves acquisition history. Export belongs
-to the user; do not require cloud receipts or integrate an upload service. A user request to archive
-a clear target authorizes removal. Resolve titles to exact catalog TMDB movie or series IDs with
-Swamp data queries, inspect `swamp behavior get pipeline --json`, and preview with `archive --dry-run`
+Archive removes completed local library copies and preserves acquisition history. Export belongs to
+the user; do not require cloud receipts or integrate an upload service. A user request to archive a
+clear target authorizes removal. Resolve titles to exact catalog TMDB movie or series IDs with Swamp
+data queries, inspect `swamp behavior get pipeline --json`, and preview with `archive --dry-run`
 before executing. Ask only when the intended title or scope is ambiguous. Report skipped unfinished
 imports and archived items. Archiving a series covers currently completed episodes; future episodes
 remain eligible. Never run archive as part of routine deployment or maintenance.

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-all
+import { movieSummary } from "../src/movies.ts";
 /** Hoardarr operator CLI. All scheduled execution remains a Swamp workflow. */
 import { ARCHIVE_HELP, archiveCommand } from "../src/archive.ts";
 import { tvProgress } from "../extensions/models/_lib/tv_progress.ts";
@@ -57,6 +58,7 @@ recover-apply Roll back an interrupted native configuration transaction (--journ
 recover-maintenance Verify and release a restored snapshot's own maintenance owner (--snapshot, --owner).
 schedule   enable|disable the generated schedule.
 backup     Archive installation definitions and state outside the installation.
+movies [explain TITLE_OR_TMDB_ID]   Show saved movie progress, archive counts and search problems.
 native-init Initialize a fresh, root-identified guest installation; admissions stay inhibited.
 native-check Assert commissioning, storage, admission, downloader state and guest readiness.
 inhibit    Persistently inhibit new media admissions; current owner may finish/recover.
@@ -194,6 +196,16 @@ async function mainUnlocked(argv: string[]): Promise<void> {
     return;
   }
   const config = await readConfig(configPath);
+  if (action === "movies") {
+    const args = argv.slice(1, argv.includes("--dir") ? argv.indexOf("--dir") : undefined).filter(
+      (a) => a !== "--json",
+    );
+    if (args.length && (args[0] !== "explain" || args.length < 2)) {
+      throw new Error("Use movies [explain TITLE_OR_TMDB_ID]");
+    }
+    output(await movieSummary(repo, args.length ? args.slice(1).join(" ") : undefined));
+    return;
+  }
   if (action === "archive") {
     if (config.providers.destination !== "local") {
       throw new Error("Archive requires the local destination");

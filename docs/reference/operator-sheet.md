@@ -27,14 +27,24 @@ credential handoff. Application commands below run inside the guest shell.
 
 ## Guest: everyday commands
 
-| Task                          | Command                                 |
-| ----------------------------- | --------------------------------------- |
-| Native status                 | `sudo hoardarr-operator status`         |
-| Native catalog preview        | `sudo hoardarr-operator plan`           |
-| Refresh discovery and preview | `sudo hoardarr-operator plan --refresh` |
-| Manual reconciliation         | `sudo hoardarr-operator run`            |
-| Request command syntax        | `sudo hoardarr-operator request help`   |
-| Saved request progress        | `sudo hoardarr-operator request list`   |
+| Task                           | Command                                                  |
+| ------------------------------ | -------------------------------------------------------- |
+| Movie queue and library counts | `sudo hoardarr-operator movies`                          |
+| Explain a movie                | `sudo hoardarr-operator movies explain TITLE_OR_TMDB_ID` |
+| Native status                  | `sudo hoardarr-operator status`                          |
+| Native catalog preview         | `sudo hoardarr-operator plan`                            |
+| Refresh discovery and preview  | `sudo hoardarr-operator plan --refresh`                  |
+| Manual reconciliation          | `sudo hoardarr-operator run`                             |
+| Request command syntax         | `sudo hoardarr-operator request help`                    |
+| Saved request progress         | `sudo hoardarr-operator request list`                    |
+
+Allow at least three minutes for status reads. Keep long-running submissions and maintenance
+commands in a persistent terminal and poll for completion. After a timeout, check the request ID and
+saved workflow history before retrying with the same idempotency key.
+
+The movie summary shows saved provider problems, rejection reasons and next search eligibility.
+Archived deliveries count toward request history. To request a fresh local copy of an archived
+movie, add `--download-again` to `request submit` with movie scope.
 
 `plan` writes workflow history and reports. Use `status` and saved Swamp queries for read-only
 inspection. `plan --refresh` can contact discovery services and update the catalog. `run` does real
@@ -66,7 +76,7 @@ If a run fails, inspect its report, close admissions and prove writers have stop
 recovery command for that owner. Preserve journals and leases while diagnosing it.
 
 Keep admissions closed if storage is missing or changed, downloader state is corrupt, or the runtime
-is unqualified.
+lacks qualification.
 
 ## Native paths
 

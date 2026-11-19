@@ -94,7 +94,10 @@ export async function archive(
       }
       const directory = await checkedPath(root, String(row.remotePath));
       if (directory === root) throw new Error(`Library root cannot be an item: ${key}`);
-      const prior = saved.find((r) => r.name === `archive-intent-${key}`);
+      const prior = saved.find((r) =>
+        r.name === `archive-intent-${key}` &&
+        (!row.previousDeliveries || String(r.attributes.startedAt) >= String(row.transferredAt))
+      );
       let record: z.infer<typeof ArchiveRecord>;
       if (prior) {
         record = ArchiveRecord.parse(prior.attributes);

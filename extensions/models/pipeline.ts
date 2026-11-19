@@ -77,6 +77,7 @@ const WorkSchema = z.object({
   television: z.array(z.record(z.string(), z.unknown())).default([]),
   truncated: z.boolean(),
   items: z.array(WorkItem),
+  skippedMovies: z.array(z.string()).optional(),
   queries: z.array(z.object({ key: z.string(), query: z.string(), category: z.string() })),
   additions: z.array(z.object({ key: z.string(), input: z.string(), seedTime: z.string() })),
   activeIds: z.array(z.string()),
@@ -202,7 +203,7 @@ async function itemRow(ctx: Context, item: Item): Promise<Row> {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.16.2",
+  version: "2026.11.18.1",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -227,6 +228,10 @@ export const model = {
     toVersion: "2026.11.16.2",
     description:
       "Preview archives without ownership or media reads; reuse verified copy identities",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.18.1",
+    description: "Retain existing settings and acquisition history",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
@@ -277,16 +282,27 @@ export const model = {
     },
     searchState: {
       schema: z.object({
+        missed: z.record(z.string(), z.number().int()).optional(),
+        issues: z.record(
+          z.string(),
+          z.object({ message: z.string(), affected: z.array(z.string()), observedAt: z.string() }),
+        ).optional(),
         attempts: z.record(
           z.string(),
           z.object({
             searchedAt: z.iso.datetime(),
             nextSearchAt: z.iso.datetime(),
-            outcome: z.enum(["no-match", "provider-error", "selected"]),
+            outcome: z.enum([
+              "no-match",
+              "no-releases",
+              "authentication-error",
+              "provider-error",
+              "selected",
+            ]),
           }),
         ),
       }),
-      description: "Durable TV search history and retry timing",
+      description: "Durable movie and TV search history and retry timing",
       lifetime: "infinite",
       garbageCollection: 100,
     },
@@ -389,23 +405,39 @@ export const model = {
             row.tmdbEpisodeId === r.tmdbEpisodeId && row.status === "selected"
           )
         ).map((row) => all.find((r) => r.key === `e-${row.tmdbEpisodeId}`)!);
+        const now = new Date().toISOString();
+        const requested = new Set(
+          requestRows.filter((r) => r.id === args.requestId)
+            .flatMap((r) => (r.targets ?? []).map(targetKey)),
+        );
+        const dueMovies = all.filter((r) =>
+          r.mediaKind === "movie" && (ctx.globalArgs.movieEnabled || explicit.has(r.key)) &&
+          eligible.has(r.key) && r.status !== "selected" &&
+          (!state[r.key] || state[r.key].outcome === "selected" ||
+            state[r.key].nextSearchAt <= now) &&
+          (!args.requestId || requested.has(r.key))
+        ).sort((a, b) =>
+          (state[a.key]?.searchedAt ?? "").localeCompare(state[b.key]?.searchedAt ?? "") ||
+          a.id - b.id
+        );
+        const lastSearch =
+          Object.entries(state).sort((a, b) => b[1].searchedAt.localeCompare(a[1].searchedAt))[0];
+        const reserveMovie = dueMovies.length > 0 &&
+          (ctx.globalArgs.batchLimit > 1 || !lastSearch?.[0].startsWith("m-"));
         const tvSearch = prioritizeRequests(
           searchableEpisodes,
           requestRows,
-          Math.min(ctx.globalArgs.episodeSearchLimit ?? 20, ctx.globalArgs.batchLimit),
+          Math.min(
+            ctx.globalArgs.episodeSearchLimit ?? 20,
+            ctx.globalArgs.batchLimit - Number(reserveMovie),
+          ),
           requestState.search,
           requestState.searchLane,
           args.requestId,
         );
         const searchable = [
           ...prioritizeRequests(
-            all.filter((r) =>
-              r.mediaKind === "movie" && (ctx.globalArgs.movieEnabled || explicit.has(r.key)) &&
-              eligible.has(r.key) &&
-              (!explicit.has(r.key) || !state[r.key] ||
-                state[r.key].nextSearchAt <= new Date().toISOString()) &&
-              r.status !== "selected"
-            ),
+            dueMovies,
             requestRows,
             Math.max(0, ctx.globalArgs.batchLimit - tvSearch.length),
             requestState.search,
@@ -482,6 +514,9 @@ export const model = {
             all.filter((r) => r.status === "selected" && r.input).length > selected.length ||
             new Set(active.map((r) => r.infoHash)).size > 100 ||
             new Set(stopped.map((r) => r.infoHash)).size > 100,
+          skippedMovies: args.requestId
+            ? []
+            : dueMovies.filter((r) => !searchable.some((s) => s.key === r.key)).map((r) => r.key),
           queries: searchable.map((r) => ({ key: r.key, query: r.query, category: r.category })),
           additions: selected.map((r) => ({
             key: r.key,
@@ -550,6 +585,7 @@ export const model = {
           key: string;
           ok: boolean;
           results: Row[];
+          sources?: Record<string, { ok: boolean; error?: string }>;
         }[];
         for (const kind of ["movie", "episode"]) {
           const prefix = kind === "movie" ? "m-" : "e-";
@@ -559,38 +595,68 @@ export const model = {
           }));
           if (items.length) await invoke(ctx, catalog(ctx, kind), "select", { items });
         }
-        const attempts =
-          ((await ctx.readModelData("pipeline", "searchState"))[0]?.attributes.attempts ??
-            {}) as SearchState;
+        const saved = (await ctx.readModelData("pipeline", "searchState"))[0]?.attributes;
+        const attempts = (saved?.attempts ?? {}) as SearchState;
+        const missed = (saved?.missed ?? {}) as Record<string, number>;
+        const issues = (saved?.issues ?? {}) as Record<
+          string,
+          { message: string; affected: string[]; observedAt: string }
+        >;
         const work = (await ctx.readModelData("pipeline", "work"))[0]?.attributes;
         const planned = (work?.queries ?? []) as { key: string }[];
         const currentEpisodes = await rows(ctx, "episode");
         const now = new Date();
         const requestRows = await requests(ctx);
-        const requestedKeys = new Set(requestRows.flatMap((r) => (r.targets ?? []).map(targetKey)));
         const currentMovies = await rows(ctx, "movie");
-        for (
-          const { key } of planned.filter((q) => q.key.startsWith("e-") || requestedKeys.has(q.key))
-        ) {
+        for (const { key } of planned) {
           const id = key.slice(2),
             query = queries.find((q) => q.key === key),
             movie = key.startsWith("m-");
           const selected = (movie ? currentMovies : currentEpisodes).some((r) =>
             String(r[movie ? "tmdbId" : "tmdbEpisodeId"]) === id && r.status === "selected"
           );
+          const failed = Object.values(query?.sources ?? {}).filter((source) => !source.ok);
+          const auth = failed.some((source) => /\b(401|403)\b/.test(source.error ?? ""));
+          const degraded = failed.length > 0 || args.searchOk === false || !query?.ok;
+          const outcome = selected
+            ? "selected"
+            : auth
+            ? "authentication-error"
+            : degraded
+            ? "provider-error"
+            : query?.results.length
+            ? "no-match"
+            : "no-releases";
+          const policyHours = ctx.globalArgs.episodeRetryHours ?? 24;
+          const hours = outcome === "provider-error"
+            ? Math.min(policyHours, 1)
+            : outcome === "no-releases"
+            ? Math.min(policyHours, 6)
+            : policyHours;
           attempts[movie ? key : id] = {
             searchedAt: now.toISOString(),
             nextSearchAt: new Date(
-              now.getTime() + (ctx.globalArgs.episodeRetryHours ?? 24) * 3600000,
+              now.getTime() + hours * 3600000,
             ).toISOString(),
-            outcome: selected
-              ? "selected"
-              : (args.searchOk === false || !query?.ok)
-              ? "provider-error"
-              : "no-match",
+            outcome,
           };
         }
-        await ctx.writeResource("searchState", "searchState-current", { attempts });
+        for (const key of (work?.skippedMovies ?? []) as string[]) {
+          missed[key] = (missed[key] ?? 0) + 1;
+        }
+        for (const { key } of planned) delete missed[key];
+        const observed = new Set(queries.flatMap((q) => Object.keys(q.sources ?? {})));
+        for (const source of observed) {
+          const failed = queries.filter((q) => q.sources?.[source]?.ok === false);
+          if (failed.length) {
+            issues[source] = {
+              message: failed[0].sources?.[source]?.error ?? "Search failed",
+              affected: failed.map((q) => q.key),
+              observedAt: now.toISOString(),
+            };
+          } else delete issues[source];
+        }
+        await ctx.writeResource("searchState", "searchState-current", { attempts, missed, issues });
         if (ctx.globalArgs.requestModel) {
           await ctx.writeResource(
             "requestFairness",
