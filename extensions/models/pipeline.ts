@@ -797,6 +797,9 @@ export const model = {
           owner: args.owner,
           tmdbId: args.item.id,
           mediaKind: args.item.mediaKind,
+          ...(Array.isArray(row.previousDeliveries) && row.previousDeliveries.length
+            ? { deliveryNumber: row.previousDeliveries.length + 1 }
+            : {}),
           sourceName: row.releaseName ?? String(args.item.id),
           libraryRelativeDir: names.directory,
           stem: names.stem,

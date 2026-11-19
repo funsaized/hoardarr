@@ -109,6 +109,7 @@ const ManifestSchema = z.object({
 });
 
 const PrepareArgs = z.object({
+  deliveryNumber: z.number().int().positive().optional(),
   owner: z.uuid(),
   tmdbId: z.number().int().positive(),
   mediaKind: z.enum(["movie", "episode"]),
@@ -959,7 +960,10 @@ async function executePrepare(args: z.infer<typeof PrepareArgs>, context: Contex
   const key = payloadKey(args.tmdbId, args.mediaKind);
   const root = await canonicalizeRoot(context.globalArgs.stagingRoot);
   const stagingDir = computeStagingDir(root, key);
-  const priorPlan = await context.readResource(`preparation-${key}`);
+  const planName = args.deliveryNumber
+    ? `preparation-${key}-delivery-${args.deliveryNumber}`
+    : `preparation-${key}`;
+  const priorPlan = await context.readResource(planName);
   let plan = priorPlan ? PreparationSchema.parse(priorPlan) : null;
   if (
     plan && (plan.libraryRelativeDir !== args.libraryRelativeDir || plan.stem !== args.stem ||
@@ -1031,7 +1035,7 @@ async function executePrepare(args: z.infer<typeof PrepareArgs>, context: Contex
       moves: fileNames(paths, args.stem),
       previousLibrary,
     });
-    if (!args.preview) await context.writeResource("preparation", `preparation-${key}`, plan);
+    if (!args.preview) await context.writeResource("preparation", planName, plan);
   }
   if (args.preview) {
     return {

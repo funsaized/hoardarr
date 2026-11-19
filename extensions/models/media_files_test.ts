@@ -1253,3 +1253,33 @@ Deno.test("existing completed library copies reorganize without changing catalog
       "new copy retained",
     );
   }));
+
+Deno.test("an archived movie re-download stages its new payload even with the same original name", () =>
+  temporary(async (root) => {
+    const stagingRoot = root + "/staging";
+    await Deno.mkdir(stagingRoot);
+    const { context, store } = makeContext({
+      stagingRoot,
+      catalogType: "hoardarr/movie-catalog",
+      catalogId: "movies",
+    });
+    const args = {
+      owner: crypto.randomUUID(),
+      tmdbId: 1,
+      mediaKind: "movie" as const,
+      sourceName: "Movie.mkv",
+      libraryRelativeDir: "Movies/Movie",
+      stem: "Movie (2000)",
+      preview: false,
+    };
+    await Deno.writeTextFile(stagingRoot + "/Movie.mkv", "old");
+    await model.methods.prepare.execute(args, context);
+    const first = store.resources.get("manifest-1")!.value;
+    await Deno.remove(String(first.stagingDir), { recursive: true });
+    await Deno.writeTextFile(stagingRoot + "/Movie.mkv", "new");
+    await model.methods.prepare.execute({ ...args, deliveryNumber: 2 }, context);
+    assert(
+      first.aggregateSha256 !== store.resources.get("manifest-1")!.value.aggregateSha256,
+      "fresh payload verified",
+    );
+  }));
