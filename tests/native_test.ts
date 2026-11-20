@@ -127,3 +127,16 @@ Deno.test("commissioning receipts accept recorded upgrade waivers without relaxi
   assert(!CommissionSchema.safeParse({ ...receipt, waivedGates: ["G4"] }).success);
   assert(!CommissionSchema.safeParse({ ...receipt, unreviewed: true }).success);
 });
+
+Deno.test("native board follows the media service through starts and maintenance stops", async () => {
+  const { guestAssets } = await import("../src/native.ts");
+  await temporary(async (root) => {
+    const config = nativeConfig(root);
+    await guestAssets(config, config.guest!.repoRoot, root);
+    const board = await Deno.readTextFile(root + "/hoardarr-board.service");
+    const swamp = await Deno.readTextFile(root + "/hoardarr-swamp.service");
+    assert(board.includes("PartOf=hoardarr-swamp.service"));
+    assert(board.includes("unix:/run/hoardarr-board/http.sock"));
+    assert(/^Wants=.*hoardarr-board\.service/m.test(swamp));
+  });
+});

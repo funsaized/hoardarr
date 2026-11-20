@@ -286,9 +286,9 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     `KillMode=control-group\nTimeoutStopSec=120\nRestart=on-failure\nRestartSec=10\n`;
   await Deno.writeTextFile(
     join(path, "hoardarr-board.service"),
-    `[Unit]\nDescription=Hoardarr read-only queue board\nAfter=hoardarr-egress-guard.service\nRequires=hoardarr-egress-guard.service\nRequiresMountsFor=${
+    `[Unit]\nDescription=Hoardarr read-only queue board\nPartOf=hoardarr-swamp.service\nAfter=hoardarr-swamp.service hoardarr-egress-guard.service\nRequires=hoardarr-egress-guard.service\nRequiresMountsFor=${
       q(g.projectRoot)
-    }\n[Service]\n${common}RuntimeDirectory=hoardarr-board\nRuntimeDirectoryMode=0700\nIPAddressDeny=any\nIPAddressAllow=localhost\nExecStart=${direct}/usr/local/bin/deno run --no-config --allow-env=TORLINK_STATE_DIR --allow-read --allow-write=/run/hoardarr-board --allow-net=127.0.0.1:9161,unix:/run/hoardarr-board/http.sock --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts\n[Install]\nWantedBy=multi-user.target\n`,
+    }\n[Service]\n${common}RuntimeDirectory=hoardarr-board\nRuntimeDirectoryMode=0700\nIPAddressDeny=any\nIPAddressAllow=localhost\nExecStart=${direct}/usr/local/bin/deno run --no-config --allow-env=TORLINK_STATE_DIR --allow-read --allow-write=/run/hoardarr-board --allow-net=127.0.0.1:9161,unix:/run/hoardarr-board/http.sock --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts\n`,
   );
   // A socket-activated root helper supplies fresh redacted status. Applications get no VPN control.
   await Deno.writeTextFile(
@@ -321,7 +321,9 @@ export async function guestAssets(config: Config, repo: string, output?: string)
   ) {
     // A failed initial downloader preflight must not cancel the control server's
     // start job. Each service retries its own protected VPN/storage preflight.
-    const dependency = name === "hoardarr-swamp" ? `Wants=${after}\n` : `Requires=${after}\n`;
+    const dependency = name === "hoardarr-swamp"
+      ? `Wants=${after} hoardarr-board.service\n`
+      : `Requires=${after}\n`;
     const unit =
       `[Unit]\nDescription=${name}\n${dependency}Requires=hoardarr-vpn-status.socket hoardarr-egress-guard.service\nAfter=${after} hoardarr-vpn-status.socket hoardarr-egress-guard.service\nRequiresMountsFor=${
         q(g.projectRoot)

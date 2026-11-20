@@ -172,7 +172,6 @@ run(["systemd-analyze", "verify", *[str(file) for file in units]])
 for file in units:
     run(["install", "-m", "644", str(file), "/etc/systemd/system/" + file.name])
 run(["systemctl", "daemon-reload"])
-run(["systemctl", "enable", "--now", "hoardarr-board.service"])
 # Root credentials, VPN configuration and commissioning are distinct explicit steps.
 print(json.dumps({"provisioned": True, "mode": args.mode, "installationId": identity["installationId"],
                   "admissions": "inhibited", "applicationServicesStarted": False}))
