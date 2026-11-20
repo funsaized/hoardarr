@@ -31,3 +31,12 @@ Deno.test("concurrent readers share a load and retain the last reading on failur
     throw Error("Lost last reading");
   }
 });
+Deno.test("a cold catalog does not block live transfer updates", async () => {
+  const load = Promise.withResolvers<number[]>();
+  const read = cache(() => load.promise, () => 60000);
+  const cold = await read(false);
+  if (cold.observed !== null || !cold.refreshing) throw Error("Expected a pending first reading");
+  load.resolve([7]);
+  const warm = await read();
+  if (warm.rows[0] !== 7 || warm.stale || warm.refreshing) throw Error("Expected fresh catalog");
+});

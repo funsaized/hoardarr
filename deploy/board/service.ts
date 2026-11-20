@@ -78,12 +78,11 @@ async function live() {
   return transfers(downloads, seeds, saved);
 }
 async function catalog() {
-  const proc = new Deno.Command("/usr/local/bin/swamp", {
+  const result = await new Deno.Command("/usr/local/bin/swamp", {
     args: ["data", "query", catalogPredicate, "--select", "attributes", "--json"],
-    signal: AbortSignal.timeout(45000),
+    signal: AbortSignal.timeout(600000),
     stderr: "null",
   }).output();
-  const result = await proc;
   if (!result.success) throw new Error("Catalog unavailable");
   const { results } = JSON.parse(new TextDecoder().decode(result.stdout));
   return results.filter((r: Record<string, unknown>) => !r.archivedAt).map((
@@ -111,7 +110,7 @@ export function cache<T>(load: () => Promise<T>, interval: (value: T) => number)
     stale = true,
     next = 0,
     pending: Promise<void> | undefined;
-  return async () => {
+  return async (waitForReading = true) => {
     if (Date.now() >= next && !pending) {
       pending = (async () => {
         try {
@@ -128,8 +127,8 @@ export function cache<T>(load: () => Promise<T>, interval: (value: T) => number)
         }
       })();
     }
-    await pending;
-    return { rows: data ?? [], observed, stale };
+    if (waitForReading) await pending;
+    return { rows: data ?? [], observed, stale, refreshing: !!pending };
   };
 }
 if (import.meta.main) {
@@ -158,7 +157,7 @@ if (import.meta.main) {
     if (req.method !== "GET") return new Response(null, { status: 405, headers });
     const route = new URL(req.url).pathname;
     if (route === "/api/board") {
-      const [live, catalog] = await Promise.all([readLive(), readCatalog()]);
+      const [live, catalog] = await Promise.all([readLive(), readCatalog(false)]);
       return Response.json({ live, catalog }, { headers });
     }
     const asset = assets.get(route);

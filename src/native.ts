@@ -288,7 +288,7 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     join(path, "hoardarr-board.service"),
     `[Unit]\nDescription=Hoardarr read-only queue board\nAfter=hoardarr-egress-guard.service\nRequires=hoardarr-egress-guard.service\nRequiresMountsFor=${
       q(g.projectRoot)
-    }\n[Service]\n${common}RuntimeDirectory=hoardarr-board\nRuntimeDirectoryMode=0700\nIPAddressDeny=any\nIPAddressAllow=localhost\nExecStart=${direct}/usr/local/bin/deno run --no-config --allow-env=TORLINK_STATE_DIR --allow-read --allow-write=/run/hoardarr-board --allow-net=127.0.0.1:9161 --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts\n[Install]\nWantedBy=multi-user.target\n`,
+    }\n[Service]\n${common}RuntimeDirectory=hoardarr-board\nRuntimeDirectoryMode=0700\nIPAddressDeny=any\nIPAddressAllow=localhost\nExecStart=${direct}/usr/local/bin/deno run --no-config --allow-env=TORLINK_STATE_DIR --allow-read --allow-write=/run/hoardarr-board --allow-net=127.0.0.1:9161,unix:/run/hoardarr-board/http.sock --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts\n[Install]\nWantedBy=multi-user.target\n`,
   );
   // A socket-activated root helper supplies fresh redacted status. Applications get no VPN control.
   await Deno.writeTextFile(

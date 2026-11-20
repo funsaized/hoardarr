@@ -76,6 +76,8 @@ function render() {
     ["Waiting", "Downloading", "Seeding"].includes(s) ? !live.observed : !catalog.observed;
   byId("health").textContent = offline
     ? "Connection lost"
+    : !catalog.observed && catalog.refreshing
+    ? "Loading catalog"
     : live.stale || catalog.stale
     ? "Partial · stale data"
     : "●  Connected";
