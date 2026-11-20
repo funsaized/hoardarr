@@ -1,86 +1,52 @@
 # Hoardarr
 
-Movie and TV automation with Swamp workflows and an operator agent.
+Follow the shows you watch. Give new movies a weekly limit. Hoardarr finds releases that fit your
+rules and puts the finished files in your library, named and sorted by movie or season.
 
 [![CI](https://github.com/funsaized/hoardarr/actions/workflows/ci.yml/badge.svg)](https://github.com/funsaized/hoardarr/actions/workflows/ci.yml)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Give Hoardarr a list of shows and a weekly movie discovery limit. It finds eligible releases, fills
-the TV backlog and copies verified files into your library. New episodes come first, followed by
-older episodes. Each scheduled run continues where the last one left off.
-
-[Swamp](https://github.com/swamp-club/swamp) runs the schedule and workflows. Torlink handles
-BitTorrent. The native VM includes Pi for questions and operator tasks: ask what arrived, inspect a
-failed transfer, add a show, or change the schedule. Routine processing runs without model calls, a
-review queue or an open agent session.
-
-Start with the fixture demo, then choose a VPN-backed deployment. Both use the same configuration
-and provider contracts. This README covers the current source tree.
-
-[Why Hoardarr](#why-hoardarr) · [Quick start](#quick-start) · [Run modes](#run-modes) ·
-[Install](#installation) · [Media workflow](#media-workflow) · [Agent](#operator-agent) ·
-[Configuration](#configuration) · [Operations](#operations) · [Commands](#command-reference) ·
-[Storage](#storage) · [Providers](#providers-and-extension-points) · [Development](#development)
-
 ## Why Hoardarr
 
-You choose the shows, acquisition limits, storage and schedule. Swamp workflows handle routine
-processing and keep the records you need to understand a decision or recover an interrupted run.
+Say you're catching up on an older season when a new episode airs. Hoardarr gives the new episode
+priority, then returns to the gaps in your collection. You decide how much work it can start each
+run. A busy week of movie releases has its own allowance, so you can leave movie discovery on while
+working through a long TV backlog.
 
-The native deployment runs the media stack in its own Linux VM:
+You can also ask for just one episode. In the native VM, tell Pi, "Download Severance (2022) season
+1 episode 3." Pi records the request. You can close the conversation there.
+[Swamp](https://github.com/swamp-club/swamp) runs the schedule, and Torlink keeps downloading
+between runs. Routine processing uses no model calls. When the file is ready, Hoardarr checks its
+size and hash, records where it landed, and only then cleans up the staged copy.
 
-- The VPN stays inside the guest. Hoardarr and Torlink use the guest's VPN and application egress
-  guard, with Torlink bound to the tunnel interface. Your host keeps its networking, VPN and
-  Tailscale routes. A separate management identity lets you diagnose the guest if its media VPN
-  fails.
-- The VM has its own kernel, services and runtime dependencies. Hoardarr runs as an unprivileged
-  user, with a separate identity for administration. A persistent project share holds application
-  data on the host. See the [trust boundaries](#trust-boundaries) for the scope of this separation.
-- Updates replace the image through DevVM. Images contain pinned code and runtimes, checked against
-  an exact runtime manifest. You can rebuild from recorded inputs and test an image in a separate
-  qualification VM before using it in production.
-- Media, catalogs, configuration and downloader state stay in the host project across image
-  replacement. Storage checks reject missing or substituted mounts. Backup and recovery procedures
-  preserve the state and credentials needed to resume work.
-- Host systemd starts the enrolled VM, guest services keep the application running, and Swamp runs
-  the schedule. Downloads continue between workflow runs. Each run checks their progress and
-  delivers ready files. Pi is available inside the VM when you need help; routine work needs no open
-  terminal or agent session.
-- Catalogs, provider results, retry times, reports and ownership records explain what happened.
-  Delivery checks file sizes and SHA-256 hashes and saves a receipt before deleting staging files.
-  You can pause new work, inspect an interruption and recover it through the operator commands.
+The native appliance keeps the VPN inside the VM. Your host keeps its own routes, including
+Tailscale, and you can still reach the guest through its management connection if the media VPN
+fails. The software ships in a replaceable image. Your media, catalog and downloader queue live
+together in a persistent host project. That split lets you rebuild the appliance and pick up where
+you left off.
 
-Follow a show once and Hoardarr maintains its aired-episode backlog. Separate movie and TV budgets
-bound new work: by default, 20 movie discoveries per ISO week, 20 episode searches and eight episode
-submissions per run. Typed providers let you extend discovery, search, downloading, delivery and
-network readiness while keeping the same workflow contracts.
+[Try the demo](#quick-start) · [Choose a deployment](#run-modes) · [Find your files](#storage) ·
+[Look up a command](#command-reference)
 
-Start with the fixture demo to see the full process. Choose the native VM for the appliance model,
-or use Compose with Gluetun for a container deployment. Both use the same media policy and verified
-delivery flow.
+## Reference
 
-## Capability index
-
-| Capability                                                     | Guide and reference                                                                         |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| A complete run without real media or VPN credentials           | [Quick start](#quick-start)                                                                 |
-| Native appliance and container deployments                     | [Run modes](#run-modes), [installation](#installation)                                      |
-| Weekly movies, automatic series resolution and season backfill | [Discovery and backlog](#discovery-and-backlog)                                             |
-| Release matching, retries and independent budgets              | [Selection and limits](#selection-and-limits)                                               |
-| Pi login, defaults, network access and operator requests       | [Operator agent](#operator-agent)                                                           |
-| Shows, paths, providers, quality and scheduling                | [Configuration](#configuration)                                                             |
-| Status, manual runs, maintenance and schedule changes          | [Operations](#operations)                                                                   |
-| Catalog state, downloader progress and durable storage         | [Media workflow](#media-workflow), [storage](#storage)                                      |
-| Interrupted work, backups and VM replacement                   | [Recovery](#recovery), [image deployment](#image-deployment)                                |
-| CLI, Swamp access and service controls                         | [Command reference](#command-reference)                                                     |
-| Custom providers and verified delivery contracts               | [Providers](#providers-and-extension-points)                                                |
-| VPN isolation, credentials and security reporting              | [Trust boundaries](#trust-boundaries)                                                       |
-| Source map, checks, image inputs and publication               | [Implementation index](#architecture-and-implementation-index), [development](#development) |
+| What you want to do                                            | Where to start                                                                                                                              |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| See a movie arrive on disk using fixture data                  | [Quick start](#quick-start)                                                                                                                 |
+| Build the VM or run the stack in Docker                        | [Native appliance](#native-appliance) · [Compose](#compose)                                                                                 |
+| Understand why Hoardarr picked a release or skipped an episode | [Discovery and backlog](#discovery-and-backlog) · [Selection and limits](#selection-and-limits)                                             |
+| Follow shows, set limits or change the schedule                | [Configuration](#configuration) · [Operations](#operations)                                                                                 |
+| Ask for one movie or a particular season                       | [Operator agent](#operator-agent)                                                                                                           |
+| Trace a transfer or recover a run                              | [Delivery and status](#delivery-and-status) · [Recovery](#recovery)                                                                         |
+| Back up the collection or replace the VM                       | [Storage](#storage) · [Image deployment](#image-deployment)                                                                                 |
+| Write a provider or inspect the code                           | [Providers](#providers-and-extension-points) · [Implementation index](#architecture-and-implementation-index) · [Development](#development) |
 
 ## Quick start
 
-Use Linux, Deno 2.9.8 and the pinned official Swamp build from [runtime inputs](#runtime-inputs).
-Swamp requires a login even for fixture work and public extension installation.
+The demo takes a synthetic movie all the way into a local library. You can inspect the resulting
+file and catalog before setting up a VPN or supplying a TMDB key. On Linux, install Deno 2.9.8 and
+the [pinned official Swamp build](#runtime-inputs). Sign in to Swamp so it can install the public
+extensions.
 
 ```sh
 git clone https://github.com/funsaized/hoardarr.git
@@ -120,22 +86,31 @@ inspection.
 | `compose-vpn-local`   | Docker Compose on Linux         | Hoardarr and Torlink share Gluetun's WireGuard network; host bind mounts          |
 | `devvm-nordvpn-local` | DevVM appliance on a Linux host | NordVPN and an application egress guard inside the guest; persistent host project |
 
-All three use configuration schema 2 and the same media workflow: observe, submit bounded work,
-reconcile, deliver what is ready, and release ownership. The daemons continue downloads between
-runs. A large delivery batch can still take time; it holds ownership while copying and hashing.
+Choose the demo to try the workflow with fixtures. Choose Compose if you already run Docker and have
+a WireGuard configuration. Choose the native appliance if you want a dedicated Linux guest with Pi,
+host startup through systemd, and a media VPN independent of your host network.
 
-The deployment supplies isolation and process supervision. Native additionally checks protected
-installation identity, enrolled storage and commissioning evidence. Compose uses its container
-network namespace and firewall. These boundaries differ; the media policy does not.
+All three profiles use configuration schema 2. They follow the same release policy and verify
+deliveries the same way. A run holds exclusive ownership while it copies and hashes files, so a
+large batch can take time. Between runs the downloader keeps working.
 
-The native appliance includes Pi. Demo and Compose expose the CLI and Swamp interfaces; they do not
-launch an agent. There is no web dashboard or separate Hoardarr npm package.
+On the native profile, startup checks the installation identity, enrolled storage and commissioning
+record. Compose relies on Gluetun's firewall and container network namespace. You operate both
+through the CLI or Swamp. Pi comes with the native profile. Hoardarr ships without a web dashboard
+or a separate npm package.
 
 ## Installation
 
 ### Native appliance
 
-For an **already enrolled installation**, select its host project and isolated DevVM inventory:
+A native installation has two parts. DevVM builds an Ubuntu image with Hoardarr, Swamp, Torlink and
+NordVPN. You then start a guest from that image in a Btrfs project directory on the host.
+Provisioning gives the installation its private identity and connects it to the project. A later
+image can use the same library and catalog.
+
+For a first installation, follow the [build and provisioning guide](docs/how-to/native-devvm.md) or
+expand the build instructions below. If you've already enrolled the VM, open it from its host
+project using the inventory recorded at enrollment. For the standard paths, run these on the host.
 
 ```sh
 cd "$HOME/.local/share/hoardarr-devvm"
@@ -342,44 +317,47 @@ flowchart TD
     G -. downloads continue between runs .-> C
 ```
 
-The root `media` Swamp workflow owns observation, discovery, acquisition, delivery and recovery
-child workflows. The CLI generates the DAG from validated configuration. Typed behavior methods
-perform outside work; CEL expressions pass their evidence to later steps. Providers cannot
-substitute a previous successful snapshot for a failed current call. Already-ready imports and
-pending cleanup finish before new discovery or acquisition. Network failures and admission capacity
-checks therefore leave completed local work intact. If the downloader is unavailable, saved ready
-items can still import. Saved discoveries replay idempotently, including after interrupted catalog
-ingestion.
+Each run starts by finishing work it already knows about. It replays saved discoveries, checks
+downloads, imports ready files and retries pending cleanup. Only then does it check network
+readiness and look for new releases. A full queue or failed network check therefore leaves completed
+local work intact. Even if Torlink is unavailable, Hoardarr can still import files it already marked
+ready.
 
-A single installation owner protects manual and scheduled runs. Another tick cannot start a second
-writer. Ownership does not expire merely because time passed. After an interruption, recover the
-saved owner after proving writers have stopped.
+The CLI builds the root `media` workflow and its child workflows from your configuration. Swamp
+behaviors call the providers, and CEL expressions carry the results into the next step. A step that
+needs a fresh provider response rejects a stale success. Replaying a saved discovery is safe even if
+an earlier run stopped partway through adding it to the catalog.
+
+Scheduled and manual runs share one owner record. If a second run starts while the first is copying
+a movie, the second run cannot write to the catalog. The record survives an interruption. Confirm
+the writers have stopped before you [recover the run](#interrupted-processing).
 
 ### Discovery and backlog
 
-**Movies.** TMDB discovery requests digitally released movies (`with_release_type=4`) released on or
-before today, for the configured region/language, ordered by popularity. It examines at most ten
-result pages and excludes known IDs. The allowance counts new catalog discoveries per UTC ISO week.
-It counts discoveries, not torrents, and can include titles from earlier release weeks.
+For movies, you set a weekly allowance. Hoardarr asks TMDB for digital releases
+(`with_release_type=4`) in your region and language, released on or before today. It works through
+up to ten pages in popularity order and skips IDs already in the catalog. A title from an earlier
+release week can qualify. Each new catalog entry uses one spot in the current UTC ISO week,
+regardless of when a torrent becomes available.
 
-A completed marker for that week, region and language prevents another discovery batch. Raising
-`interests.limit` does not top up an already completed week. Existing catalog work can still search,
-download and transfer. Do not delete discovery markers to force more results.
+Once discovery finishes, Hoardarr records the week, region and language. Raising `interests.limit`
+afterward takes effect on a future batch. Leave the completion marker in place. Movies already in
+your catalog can still move through search, download and delivery.
 
-**TV.** Configure a name, optional premiere year, and optional TMDB series ID. A supplied ID pins
-the series. Otherwise, lookup matches a normalized title or original title, applies the year when
-given, and breaks ties by popularity then ID. It saves the selected identity and reports title, year
-and TMDB link in status. If lookup finds no credible match, the series stays pending for a later
-run. There is no approval queue.
+For TV, give Hoardarr a show name. A premiere year helps distinguish shows that share a title, and a
+TMDB series ID selects the series directly. Without an ID, lookup matches the normalized title or
+original title, filters by year if supplied, then breaks ties by popularity and ID. You can see the
+chosen title, year and TMDB link in status. If lookup finds no credible match, it leaves the show
+pending and tries again on a later run.
 
-Discovery catalogs aired episodes from regular seasons, including previous seasons. Specials and
-future episodes stay out of the queue. Each later discovery sees newly aired episodes. The backlog
-retains completed and in-flight identities across runs and restarts.
+Following a show includes aired episodes from earlier regular seasons. Hoardarr skips specials and
+future episodes and picks up new episodes as they air. The catalog remembers completed episodes and
+active transfers through a restart.
 
-Episodes aired in the last seven days form the first priority group. Within each group, work rotates
-among shows, starting with the least recently served, and proceeds from newer episodes to older
-ones. Search and submission fairness use persistent state. A no-match or provider error gets its own
-recorded outcome and retry time, allowing other episodes to progress.
+Episodes from the past seven days get first priority. Within each priority group, Hoardarr starts
+with the least recently served show, rotates among shows and works from newer episodes to older
+ones. It remembers whose turn comes next for both searches and submissions. If a search fails or
+finds no match, Hoardarr records a retry time for that episode and moves on to another.
 
 ### Selection and limits
 
@@ -426,17 +404,20 @@ by another valid item remains blocked for operator inspection.
 | `cleanup-pending`                | Legacy pending cleanup; retried without another download  |
 | `failed` / unavailable reporting | Inspect the recorded error, attempt count and next retry  |
 
-Status separates selected, downloading, seeding, ready and completed TV counts. Downloader
-observations come from saved snapshots with timestamps; they do not update continuously. A
-successful workflow may still contain source-specific search errors; inspect `searchHealth` and
-reports.
+To see how far a season has progressed, read the separate TV counts in `status`. Check the timestamp
+beside the downloader snapshot to see when Hoardarr last observed it. If a run finished but a title
+you expected is missing, look at `searchHealth` and the report. Individual search sources can fail
+during an otherwise successful run.
 
-Each import has four Swamp steps: `prepare`, `publish`, `commit`, and `cleanup`. Preparation stages
-and names the files and creates one source manifest. Publication copies and verifies each listed
-file, then atomically publishes it without replacing conflicting content. The catalog records the
-verified location before cleanup. The uninterrupted local path reads each source once for its hash
-and each destination once for verification; retries and changed files require fresh checks.
-`transferred` stays complete while `localCleanedAt` tracks pending staging cleanup.
+A download finishing in Torlink and a file arriving in your library are two different events. Four
+Swamp steps connect them. `prepare` names the files and builds a manifest. `publish` copies them,
+checks the destination against that manifest and promotes the copy atomically. If another file
+already occupies the destination with different contents, Hoardarr leaves it alone. `commit` records
+the verified location. After that, `cleanup` can remove the staging files.
+
+On an uninterrupted local import, Hoardarr reads each source once to hash it and each destination
+once to verify it. Retries and changed files require fresh checks. An item stays `transferred` while
+`localCleanedAt` tracks whether staging cleanup has finished.
 
 Movies use `Movies/Title (Year)/Title (Year).ext`. Episodes share
 `TV/Show (Year)/Season 01/Show - S01E01 - Episode Title.ext`. Subtitle language suffixes survive the
@@ -455,16 +436,20 @@ agent choose a name that later runs apply deterministically.
 
 ## Operator agent
 
-Run `hoardarr-agent` in the DevVM management shell, without sudo. The launcher opens the Hoardarr
-operator workspace using DevVM's native Pi runtime. Hoardarr supplies the operator instructions;
-DevVM manages Pi's runtime, provider credentials and sessions.
+Pi is the person-facing part of the native appliance. Use it to ask what arrived, investigate a
+transfer, or request a season by name. You can look up the corresponding CLI commands in the
+[operator reference](#command-reference).
 
-On the host, select the Hoardarr inventory and production project, then enter your provider key
-through the interactive prompt:
+Start with provider login on the host. Select your Hoardarr inventory and production project, then
+enter your provider key at the interactive prompt.
 
 ```sh
 devvm agent login pi --api-key --provider openai
 ```
+
+Inside the guest management shell, run `hoardarr-agent` as your regular management user. The
+launcher opens the Hoardarr operator workspace. Hoardarr supplies its instructions, and DevVM
+manages the Pi runtime, credentials and sessions.
 
 The key stays in DevVM's private host login store. The guest receives a placeholder, which the host
 proxy replaces only for the provider's requests. API usage has separate billing from a ChatGPT
@@ -503,12 +488,13 @@ commands.
 
 ## Configuration
 
-Edit the installation's `hoardarr.yaml`, then apply it with the appropriate maintenance procedure.
-The [schema](src/config.ts) rejects unknown fields. Do not edit generated workflow YAML to change
-policy or schedule intent.
+Your installation's `hoardarr.yaml` is where you tell Hoardarr what to collect. Edit it and
+[apply the change](#change-shows-limits-or-schedules) so the CLI can regenerate the workflows. The
+[configuration schema](src/config.ts) catches unknown fields.
 
-Merge this settings fragment into the configuration generated by installation. Keep its paths and
-native identity:
+For example, the settings below enable movie discovery and identify shows by name, year and TMDB ID.
+Merge the fields you want into the generated configuration so you keep your installation's paths and
+native identity.
 
 ```yaml
 interests:
@@ -705,8 +691,13 @@ enrolled management transport.
 
 ## Storage
 
-For the standard native installation, `P` is `$HOME/.local/share/hoardarr-devvm` on the host. DevVM
-shares it into the guest at the same absolute path through 9p. It survives image replacement.
+On a standard native install, open `$HOME/.local/share/hoardarr-devvm/library` on the host to find
+finished media. An active download lives one directory over in `downloads/`. If you want to know why
+something hasn't arrived, use `status` to read the catalog and the last downloader observation.
+
+In the table, `P` means your persistent project directory. The standard host path is
+`$HOME/.local/share/hoardarr-devvm`. DevVM shares it with the guest through 9p at the same absolute
+path. Replacing the guest image keeps that directory in place.
 
 | Location                                           | Contents                                                                                      |
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -803,8 +794,10 @@ resuming. The relocation commands record progress in a journal and require a com
 
 ## Image deployment
 
-Application/runtime changes belong in the DevVM image. Restarting services or pulling host source
-alone does not deploy them. Never patch `/opt/hoardarr` or installed runtimes in place.
+Deploy application or runtime changes by replacing the guest from a newly built DevVM image.
+Building registers the new image on the host. Replacing the guest installs it. The handoff below
+preserves the old installation's identity and reconnects the new guest to its existing project. Keep
+the installed copy in `/opt/hoardarr` under image management.
 
 1. Build fresh public inputs and a layer from the intended source. Run `devvm rebuild hoardarr` and
    inspect `devvm images`.
@@ -899,10 +892,12 @@ G1, G4 and G5 still require passing evidence. Fresh installations cannot use thi
 
 ## Providers and extension points
 
-A provider is a Swamp behavior plus a JSON descriptor naming its type, exact version, roles,
-capabilities and method mapping. [Contracts](extensions/models/_lib/contracts.ts) validate required
-operations and evidence; Swamp validates the behavior's arguments. The descriptor's `configuration`
-field supplies reference metadata; it does not perform validation.
+If you want to use a different search service or send files to another destination, the integration
+point is a provider. Each provider pairs a Swamp behavior with a JSON descriptor. The descriptor
+names its type, exact version, roles, capabilities and methods. Swamp validates method arguments.
+Hoardarr checks that the provider implements the role and returns the evidence the next step needs.
+The descriptor's `configuration` field documents its settings.
+[Provider contracts](extensions/models/_lib/contracts.ts)
 
 | Role        | Required operations                | Evidence                                                                 |
 | ----------- | ---------------------------------- | ------------------------------------------------------------------------ |
@@ -955,24 +950,24 @@ review it as executable policy.
 
 ## Trust boundaries
 
-The native application runs as an unprivileged UID outside the NordVPN control group. A root status
-broker reports VPN state; an egress guard restricts application traffic; Torlink binds the tunnel
-interface. Application launchers clear inherited proxies and use the service DNS configuration. The
-management shell retains administrative access for diagnosis. The host's networking stays under host
-control.
+In the native VM, Hoardarr runs under an unprivileged account outside the NordVPN control group. A
+root service reports VPN status. The egress guard restricts where application traffic can go, and
+Torlink binds to the tunnel interface. Launchers clear inherited proxy settings and use the service
+DNS configuration. You can diagnose a guest VPN failure from the management shell while the host
+keeps its own network routes.
 
-Compose puts both application processes in Gluetun's network namespace. Keep control APIs on
-loopback, the firewall enabled, and outbound exemptions narrow. Readiness checks observe current
-conditions; the firewall enforces the boundary when the tunnel fails afterward.
+In Compose, Hoardarr and Torlink share Gluetun's network namespace. Keep the control APIs on
+loopback, leave the firewall enabled and limit outbound exemptions. A readiness check tells you
+whether the tunnel works at that moment. The firewall restricts traffic if it drops a moment later.
 
-Root, the Docker daemon, the host administrator and a compromised guest kernel are outside these
-boundaries. Pi has operator privileges, not the restricted service boundary. Treat media filenames,
-provider responses and logs as untrusted input. Download only material you have permission to
-acquire.
+These protections assume a trusted host administrator, root account, Docker daemon and guest kernel.
+Pi runs with the management user's operator privileges. Treat filenames, provider replies and logs
+as untrusted input. Download only material you have permission to acquire.
 
-Public images contain code and dependencies, never operator credentials. Private files, inventories,
-backups and logs can contain credentials or acquisition locators. Pins make inputs reviewable;
-security updates still require an explicit rebuild and verification.
+Public images carry the application and its dependencies. Add credentials during private
+provisioning and keep inventories, backups and logs private because they can contain credentials and
+acquisition locators. Version pins let you inspect exactly what went into an image. To apply a
+security update, rebuild and verify it.
 
 Report vulnerabilities through the repository's private GitHub security reporting channel when
 available. Otherwise, contact the maintainer through their GitHub profile to arrange a private
@@ -1038,9 +1033,11 @@ versions, OCI digests and native manifests are distinct release identities.
 
 ## Development
 
-Keep catalog identities, one-owner execution, restart-safe external work and receipt-before-cleanup
-ordering intact. Use the demo and provider fixtures to develop without production credentials.
-Follow [AGENTS.md](AGENTS.md) for Swamp integration work.
+Start development in the demo, where the fixture providers exercise the pipeline with synthetic
+files. When changing the workflow, check what happens if it stops halfway through a transfer. A
+retry must recognize the same catalog item, respect its current owner and recover work already
+underway. Cleanup can proceed once the catalog holds a verified destination receipt.
+[Swamp integration conventions](AGENTS.md)
 
 ```sh
 deno task check
