@@ -1,0 +1,12 @@
+[Unit]
+Description=Private Hoardarr queue board tunnel
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/ssh -F %h/.hoardarr-host/data/devvm/lima/%i/ssh.config -o ControlMaster=no -o ControlPath=none -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=2 -NT -L 127.0.0.1:9184:/run/hoardarr-board/http.sock lima-%i
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

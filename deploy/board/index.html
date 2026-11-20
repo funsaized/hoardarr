@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#100c19">
+    <title>Hoardarr · Queue</title>
+    <link rel="stylesheet" href="/board.css">
+    <script type="module" src="/board.js"></script>
+  </head>
+  <body>
+    <header><a href="/" aria-label="Hoardarr home"><b class="mark">H</b> HOARDARR</a><span>TRANSFER MONITOR</span></header>
+    <main>
+      <div class="intro">
+        <h1>Download queue</h1>
+        <div id="health" role="status">Connecting…</div>
+      </div>
+      <nav aria-label="Filter by stage" id="stages"></nav>
+      <div class="columns">
+        <section>
+          <h2 id="group">Downloading</h2>
+          <div id="items"></div>
+        </section>
+        <aside>
+          <h2>Up next</h2>
+          <div id="next"></div>
+        </aside>
+      </div>
+      <section id="detail" hidden>
+        <h2>Transfer details</h2>
+        <h3></h3>
+        <dl></dl>
+      </section>
+      <footer><span id="torlink">Torlink · connecting</span><span id="catalog">Catalog · connecting</span></footer>
+    </main>
+  </body>
+</html>

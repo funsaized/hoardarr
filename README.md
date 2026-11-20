@@ -96,8 +96,8 @@ large batch can take time. Between runs the downloader keeps working.
 
 On the native profile, startup checks the installation identity, enrolled storage and commissioning
 record. Compose relies on Gluetun's firewall and container network namespace. You operate both
-through the CLI or Swamp. Pi comes with the native profile. Hoardarr ships without a web dashboard
-or a separate npm package.
+through the CLI or Swamp. Pi comes with the native profile. The native queue board gives you a
+read-only view of downloads and deliveries. [Open the board](#live-queue-board).
 
 ## Installation
 
@@ -688,6 +688,34 @@ Guest services are `hoardarr-swamp`, `hoardarr-torlink`, `nordvpnd` and `hoardar
 Swamp listens on guest loopback 9090, Torlink on 9161. The host helper
 `~/.hoardarr-host/tools/bin/hoardarr-host-operator` can invoke the protected operator through its
 enrolled management transport.
+
+### Live queue board
+
+The native appliance serves a purple queue board from a private guest socket. It shows Torlink's
+waiting order, active transfers and seeds alongside Hoardarr's backlog and verified deliveries.
+Select a stage to filter the list or a title for its details. Delivered today follows your browser's
+local date. Each source has its own timestamp. If a source goes offline, its last reading stays
+visible with a stale indicator.
+
+Transfer readings refresh every 15 seconds while downloads are active or queued, and every minute
+when idle. Catalog readings refresh once a minute. Open screens share a cache. The service reads
+sources on demand, and hidden tabs suspend requests.
+
+To expose the board on an enrolled host with the standard inventory, install the user tunnel unit
+and select the enrolled VM. Run these commands on the host after provisioning the image.
+
+```sh
+install -Dm644 deploy/devvm/hoardarr-board-tunnel@.service \
+  "$HOME/.local/share/systemd/user/hoardarr-board-tunnel@.service"
+systemctl --user daemon-reload
+board_vm=$(jq -r .vm "$HOME/.hoardarr-host/production-deployment.json")
+systemctl --user enable --now "hoardarr-board-tunnel@$board_vm.service"
+tailscale serve --bg --https=9185 http://127.0.0.1:9184
+```
+
+Open the HTTPS address printed by Tailscale on a device connected to your Tailscale network. The
+tunnel binds only to host loopback. For unattended startup, enable lingering for the host operator
+account. Custom DevVM inventory paths require the corresponding SSH config path in the tunnel unit.
 
 ## Storage
 
