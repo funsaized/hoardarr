@@ -892,12 +892,40 @@ G1, G4 and G5 still require passing evidence. Fresh installations cannot use thi
 
 ## Providers and extension points
 
-If you want to use a different search service or send files to another destination, the integration
-point is a provider. Each provider pairs a Swamp behavior with a JSON descriptor. The descriptor
-names its type, exact version, roles, capabilities and methods. Swamp validates method arguments.
-Hoardarr checks that the provider implements the role and returns the evidence the next step needs.
-The descriptor's `configuration` field documents its settings.
-[Provider contracts](extensions/models/_lib/contracts.ts)
+A provider is the integration Hoardarr uses for a particular job. A _binding_ is the choice you make
+in configuration. For example, `destination: local` tells Hoardarr to put finished files in a
+library directory it can access. The deployment profiles supply these choices for you.
+
+| Provider        | What it does                                                                                                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tmdb`          | Looks up movies and shows in The Movie Database. It identifies digital movie releases and tells Hoardarr which episodes have aired.                                           |
+| `torlink`       | Searches for torrents that might match a movie or episode. When Hoardarr selects one, Torlink downloads it, reports progress and handles seeding.                             |
+| `local`         | Copies the finished files to a library directory on the filesystem Hoardarr can see and verifies the copy. In native deployments, the host shares this directory with the VM. |
+| `ssh`           | Delivers files to a library on another machine over SSH and verifies the files there.                                                                                         |
+| `guest-nordvpn` | Checks that the native VM's NordVPN connection and network protections are ready for media traffic.                                                                           |
+| `gluetun`       | Checks VPN readiness in the Compose deployment, where Hoardarr and Torlink share Gluetun's network connection.                                                                |
+| `fixture`       | Simulates discovery, search, downloads and network checks for the demo. It creates small sample files that the real `local` destination copies into the demo library.         |
+
+Follow one episode through a native installation. TMDB identifies the episode, Torlink finds and
+downloads a matching release, and the local destination copies it into your library. **Local payload
+access** means Hoardarr can open the downloaded files in its staging directory. A torrent ID or a
+progress reading of 100% gives it no bytes to copy. Even when you choose SSH for the destination,
+the source files must be readable locally.
+
+A **verified receipt** is the destination's record of where it put the files and which manifest it
+verified. Hoardarr checks that record against the expected paths, sizes and SHA-256 hashes and saves
+it before allowing staging cleanup.
+
+Each active transfer also has an owner. If Torlink is seeding an episode and you point the
+configuration at another downloader, Torlink still owns that torrent. Changing the setting does not
+move the queue or the files. Hoardarr stops planning when the configured downloader differs from the
+recorded owner of an item marked `downloading`, `seeding` or `seed-stopped`. Finish those items with
+their original downloader or migrate them before switching.
+
+For extension authors, a provider pairs a Swamp behavior with a JSON descriptor that names its type,
+version, roles, capabilities and methods. Swamp validates method arguments. Hoardarr checks the
+operations and results required for each role. The descriptor's `configuration` field documents its
+settings. [Provider contracts](extensions/models/_lib/contracts.ts)
 
 | Role        | Required operations                | Evidence                                                                 |
 | ----------- | ---------------------------------- | ------------------------------------------------------------------------ |
@@ -906,10 +934,6 @@ The descriptor's `configuration` field documents its settings.
 | Downloader  | `health`, `add`, `sync`, `control` | Capabilities, per-input add/control results and a fresh torrent snapshot |
 | Destination | `deliver`                          | `receipt-KEY` matching the requested manifest                            |
 | Network     | `inspect`, `assertReady`           | A failed readiness assertion throws; deployment owns network isolation   |
-
-Built-in bindings are `tmdb`, `torlink`, `local`, `ssh`, `guest-nordvpn`, `gluetun` and `fixture`.
-The downloader must support local payload access and the destination must produce verified receipts.
-Changing an in-flight item's downloader without reconciling it is an error.
 
 To add a provider, search Swamp's extension registry and installed types first. Pull or extend an
 existing type where possible. Add a descriptor to `providerFiles`, select its ID under `providers`,
