@@ -106,13 +106,15 @@ Inspect its workflow report before recovery:
 sudo hoardarr-operator swamp report get @swamp/workflow-summary --workflow media --json
 sudo hoardarr-operator inhibit --reason "Interrupted run recovery"
 sudo hoardarr-operator status
-sudo systemctl stop hoardarr-swamp.service hoardarr-torlink.service
+sudo systemctl stop hoardarr-swamp.service
+sudo systemctl start hoardarr-torlink.service
 sudo hoardarr-operator recover
 ```
 
-The protected operator checks that writers have stopped and runs the recovery workflow before
-releasing ownership. Review the result, then follow
-[resume after VM maintenance](operate-native.md#resume-after-vm-maintenance) before restarting work.
+The protected operator checks that Swamp writers have stopped and that only one Torlink daemon owns
+downloader state. Recovery reads a fresh Torlink snapshot before releasing ownership. Review the
+result, then follow [resume after VM maintenance](operate-native.md#resume-after-vm-maintenance)
+before restarting work.
 
 A configuration transaction has a different owner from a media run. Recover it with
 `recover-apply --journal PATH`.

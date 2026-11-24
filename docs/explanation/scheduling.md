@@ -50,9 +50,9 @@ Cron uses the serve process's local time zone. Swamp skips missed slots after do
 
 ## Delivery and recovery
 
-A run selects every ready movie and every ready episode. Child calls use that run's delivery plan
-and run in sequence, so multiple downloads can finish without concurrent library writers. Discovery
-and download batch limits apply separately.
+A run selects every ready movie and every ready episode. It imports those items one at a time while
+discovery and acquisition run in parallel. Both jobs finish before the run releases ownership.
+Discovery and download batch limits apply separately.
 
 To recover, prove writers have stopped, inspect the report and journal, reconcile outside effects,
 then release the saved owner. Deleting the lease file skips those checks and can let two runs touch

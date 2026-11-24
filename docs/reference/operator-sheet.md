@@ -48,8 +48,8 @@ movie, add `--download-again` to `request submit` with movie scope.
 
 `plan` writes workflow history and reports. Use `status` and saved Swamp queries for read-only
 inspection. `plan --refresh` can contact discovery services and update the catalog. `run` does real
-acquisition and cleanup. A run can deliver all ready movies in sequence, followed by all ready
-episodes in sequence.
+acquisition and cleanup. A run can discover and submit downloads while it imports ready movies and
+episodes into the library.
 
 ## Guest: maintenance
 

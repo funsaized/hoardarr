@@ -62,13 +62,13 @@ const savedIngest = (name: string, kind: string, after?: string) =>
 
 export function workflowDefinitions(config: Config, ids: Record<string, string>): Node[] {
   const native = config.profile === "devvm-nordvpn-local";
-  const base = (name: string, jobs: Node[], inputs: Node = ownerSchema): Node => ({
+  const base = (name: string, jobs: Node[], inputs: Node = ownerSchema, concurrency = 1): Node => ({
     id: ids[name],
     name,
     version: 1,
     description: `Hoardarr ${name}`,
     tags: { app: "hoardarr" },
-    concurrency: 1,
+    concurrency,
     inputs,
     jobs,
   });
@@ -397,10 +397,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       ),
     ]),
     name: "online",
-    dependsOn: [{
-      job: "delivery",
-      condition: { type: "or", conditions: [{ type: "succeeded" }, { type: "skipped" }] },
-    }],
+    dependsOn: [{ job: "initial", condition: { type: "succeeded" } }],
   };
   const finalJob = {
     name: "final-plan",
@@ -427,28 +424,33 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
     }],
     weight: 0,
   };
-  const root = base("media", [
-    {
-      name: "ownership",
-      steps: [method("acquire", "coordinator", "acquire", { owner })],
-      dependsOn: [],
-      weight: 0,
-    },
-    initial,
-    deliveryJob,
-    online,
-    finalJob,
-    recoverJob,
-    {
-      name: "release",
-      steps: [method("release", "coordinator", "release", { owner })],
-      weight: 0,
-      dependsOn: [{ job: "ownership", condition: { type: "succeeded" } }, {
-        job: "recover",
-        condition: { type: "or", conditions: [{ type: "succeeded" }, { type: "skipped" }] },
-      }],
-    },
-  ], mainInputs);
+  const root = base(
+    "media",
+    [
+      {
+        name: "ownership",
+        steps: [method("acquire", "coordinator", "acquire", { owner })],
+        dependsOn: [],
+        weight: 0,
+      },
+      initial,
+      deliveryJob,
+      online,
+      finalJob,
+      recoverJob,
+      {
+        name: "release",
+        steps: [method("release", "coordinator", "release", { owner })],
+        weight: 0,
+        dependsOn: [{ job: "ownership", condition: { type: "succeeded" } }, {
+          job: "recover",
+          condition: { type: "or", conditions: [{ type: "succeeded" }, { type: "skipped" }] },
+        }],
+      },
+    ],
+    mainInputs,
+    2,
+  );
   if (config.schedule.enabled) {
     root.trigger = {
       schedule: config.schedule.cron,

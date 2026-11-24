@@ -32,8 +32,9 @@ leaves them running. Run application commands inside the guest:
 `plan` writes workflow history and reports. To inspect without changing state, use `status` or saved
 Swamp data and reports. Downloader observations in `status` show when Swamp saved the snapshot.
 
-Each reconciliation delivers every ready movie, then every ready TV episode, one at a time. Manual
-and scheduled runs use the same admission and ownership checks.
+Each reconciliation delivers ready movies, then ready TV episodes, one at a time. Discovery and
+acquisition can run while those imports are in progress. Manual and scheduled runs use the same
+admission and ownership checks.
 
 ## Pause for maintenance
 
