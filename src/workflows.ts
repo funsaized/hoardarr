@@ -264,6 +264,9 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       "search",
       {
         queries: expr('steps["search-plan"].outputs.queries'),
+        ...(native && config.providers.search === "torlink"
+          ? { perSource: config.search.perSource }
+          : {}),
         ...(config.providers.search === "torlink"
           ? { timeoutSeconds: config.search.timeoutSeconds }
           : {}),
