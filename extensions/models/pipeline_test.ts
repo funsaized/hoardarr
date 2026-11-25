@@ -172,7 +172,7 @@ Deno.test("TV search budgets persist no-match and provider failure independently
     assert(queries.length === 20);
     await model.methods.select.execute({
       owner,
-      searchOk: true,
+      searchOk: false,
       records: [{
         name: "search-current",
         attributes: { queries: queries.map((q, i) => ({ ...q, ok: i !== 0, results: [] })) },

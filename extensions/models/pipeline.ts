@@ -385,6 +385,8 @@ export const model = {
           z.string(),
           z.object({
             searchedAt: z.iso.datetime(),
+            lastSuccessfulAt: z.iso.datetime().optional(),
+            partial: z.boolean().optional(),
             nextSearchAt: z.iso.datetime(),
             outcome: z.enum([
               "no-match",
@@ -715,7 +717,8 @@ export const model = {
         }[];
         for (const kind of ["movie", "episode"]) {
           const prefix = kind === "movie" ? "m-" : "e-";
-          const items = queries.filter((q) => q.ok && q.key.startsWith(prefix)).map((q) => ({
+          const items = queries.filter((q) => q.key.startsWith(prefix) &&
+            (q.ok || Object.values(q.sources ?? {}).some((source) => source.ok))).map((q) => ({
             [idField(kind)]: Number(q.key.slice(2)),
             releases: q.results,
           }));
@@ -743,7 +746,9 @@ export const model = {
           );
           const failed = Object.values(query?.sources ?? {}).filter((source) => !source.ok);
           const auth = failed.some((source) => /\b(401|403)\b/.test(source.error ?? ""));
-          const degraded = failed.length > 0 || args.searchOk === false || !query?.ok;
+          const degraded = failed.length > 0 || !query?.ok;
+          const anySuccess = query?.ok || Object.values(query?.sources ?? {}).some((source) => source.ok);
+          const lastSuccessfulAt = anySuccess ? now.toISOString() : attempts[movie ? key : id]?.lastSuccessfulAt;
           const outcome = selected
             ? "selected"
             : auth
@@ -761,6 +766,8 @@ export const model = {
             : policyHours;
           attempts[movie ? key : id] = {
             searchedAt: now.toISOString(),
+            ...(lastSuccessfulAt ? { lastSuccessfulAt } : {}),
+            partial: Boolean(anySuccess && degraded),
             nextSearchAt: new Date(
               now.getTime() + hours * 3600000,
             ).toISOString(),

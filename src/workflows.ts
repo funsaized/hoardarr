@@ -244,6 +244,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       "search",
       {
         queries: expr('steps["search-plan"].outputs.queries'),
+        ...(config.providers.search === "torlink" ? { timeoutSeconds: config.search.timeoutSeconds } : {}),
         ...(config.torlink.interface ? { interface: config.torlink.interface } : {}),
       },
       "search-plan",

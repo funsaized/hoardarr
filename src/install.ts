@@ -316,7 +316,7 @@ async function installUnlocked(
   for (const [role, descriptor] of Object.entries(selected)) {
     const id = descriptor.id;
     const name = id === "torlink"
-      ? "torlink"
+      ? (role === "search" ? "torlink-search" : "torlink")
       : id === "tmdb"
       ? "movie-discovery"
       : id === "guest-nordvpn"
@@ -332,7 +332,7 @@ async function installUnlocked(
           binary: config.torlink.binary,
           baseUrl: config.torlink.baseUrl,
           allowInsecureRemote: config.torlink.allowInsecureRemote,
-          concurrency: config.download.concurrency,
+          concurrency: role === "search" ? config.search.concurrency : config.download.concurrency,
           ...(config.torlink.token ? { token: config.torlink.token } : {}),
         };
       }

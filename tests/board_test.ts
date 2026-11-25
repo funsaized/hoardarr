@@ -1,4 +1,4 @@
-import { cache, catalogResponse, transfers } from "../deploy/board/service.ts";
+import { cache, catalogResponse, rejectionSummary, transfers } from "../deploy/board/service.ts";
 Deno.test("queue ranks skip active items and seeds replace completed transfers", () => {
   const item = (id: string, status: string) => ({ id, name: id, status });
   const rows = transfers(
@@ -58,4 +58,8 @@ Deno.test("transfer polls reuse a catalog revision through a failed refresh", as
   if (!("rows" in catalogResponse(failed, "prior-service-revision"))) {
     throw Error("A client with an older revision must receive a full snapshot");
   }
+});
+
+Deno.test("catalog rejection details disclose only policy codes", () => {
+  if (rejectionSummary("no-acceptable-release: low-seeders,private-locator,year-mismatch") !== "low-seeders, year-mismatch") throw Error("Unexpected rejection details");
 });

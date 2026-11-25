@@ -21,7 +21,8 @@ export async function movieSummary(repo: string, query?: string) {
   const record = (spec: string) => results.find((r) => r.spec === spec)?.data;
   const attempts = (record("searchState")?.attempts ?? {}) as SearchState;
   const missed = (record("searchState")?.missed ?? {}) as Record<string, number>;
-  const search = record("search");
+  const search = results.filter((r) => r.spec === "search").map((r) => r.data)
+    .sort((a, b) => String(b.searchedAt).localeCompare(String(a.searchedAt)))[0];
   const issues: Record<string, { message: string; affected: string[]; observedAt: unknown }> = {};
   for (const q of (search?.queries ?? []) as Query[]) {
     for (const [source, result] of Object.entries(q.sources ?? {})) {

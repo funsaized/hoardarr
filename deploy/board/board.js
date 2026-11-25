@@ -61,7 +61,7 @@ function render() {
   const rows = live.rows.map((t) => {
     const c = byHash.get(t.id.toLowerCase());
     if (c) joined.add(c.id);
-    return { ...t, health: c?.health, id: c?.id ?? t.id, title: c?.title ?? t.title, release: t.title };
+    return { ...t, search: c?.search, health: c?.health, id: c?.id ?? t.id, title: c?.title ?? t.title, release: t.title };
   });
   rows.push(
     ...activeCatalog.filter((c) => !joined.has(c.id)).map((c) => ({
@@ -233,6 +233,10 @@ function render() {
         "Proposed action": item.health?.decision === "stall"
           ? "Check for an eligible alternate · observation only"
           : item.health ? "Continue observing" : null,
+        "Search outcome": item.search && (item.search.outcome + (item.search.partial ? " · partial provider response" : "")),
+        "Last successful search": item.search?.lastSuccessfulAt && new Date(item.search.lastSuccessfulAt).toLocaleString(),
+        "Ranked eligible releases": item.search?.rankedCount,
+        "Next search": item.state === "wanted" && item.search?.nextSearchAt ? new Date(item.search.nextSearchAt).toLocaleString() : null,
         Reason: item.reason,
         Delivered: item.delivered,
         Observed: minutes(item.release ? live.observed : catalog.observed),

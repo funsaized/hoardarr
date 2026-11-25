@@ -1,11 +1,12 @@
 // The browser only sees these projections. Provider responses can include private locators.
 const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity"])';
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState"])';
 const catalogFields = [
   "catalogId", "localId", "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "showName",
   "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
 ];
-const catalogProjection = 'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
+const catalogProjection = 'specName == "searchState" ? {"searchAttempts": attributes.attempts} : ' +
+  'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
   'specName == "transferObservation" ? {' +
   '"observationKey": name, "hash": attributes.sample.hash, "decision": attributes.decision, ' +
   '"observedAt": attributes.sample.observedAt, "idleMs": attributes.idleMs, ' +
@@ -16,7 +17,8 @@ const catalogProjection = 'specName == "catalogIdentity" ? {"catalogKey": attrib
     `"${field}": "${field}" in attributes ? attributes.${field} : null`
   ).concat(
     '"error": "error" in attributes && attributes.error != null && attributes.error != ""',
-    '"noMatchReason": "noMatchReason" in attributes && attributes.noMatchReason != null && attributes.noMatchReason != ""',
+    '"rankedCount": "rankedReleases" in attributes ? size(attributes.rankedReleases) : null',
+    '"noMatchReason": "noMatchReason" in attributes ? attributes.noMatchReason : null',
   ).join(", ") + "}";
 type Transfer = {
   id: string;
@@ -101,6 +103,26 @@ function matchingObservation(row: Record<string, unknown>, records: Map<string, 
   const { decision, observedAt, idleMs, byteRate } = health;
   return { decision, observedAt, idleMs, byteRate };
 }
+const rejectionCodes = new Set([
+  "no-releases", "no-acceptable-release", "identity-mismatch-rejected", "episode-token-mismatch",
+  "not-1080p-web", "cam-ts-tc", "executable-archive", "pack", "low-seeders", "too-large",
+  "source-not-allowed", "title-mismatch", "year-mismatch",
+]);
+export function rejectionSummary(value: unknown) {
+  if (typeof value !== "string" || !value) return null;
+  const codes = value.replace(/^no-acceptable-release: /, "").split(",").filter((code) => rejectionCodes.has(code));
+  return codes.length ? codes.join(", ") : "Waiting for an eligible release";
+}
+function searchDetails(attempt: Record<string, unknown> | undefined, rankedCount: unknown) {
+  if (!attempt) return undefined;
+  return {
+    outcome: attempt.outcome,
+    partial: attempt.partial === true,
+    lastSuccessfulAt: attempt.lastSuccessfulAt,
+    nextSearchAt: attempt.nextSearchAt,
+    rankedCount,
+  };
+}
 async function catalog() {
   const result = await new Deno.Command("/usr/local/bin/swamp", {
     args: ["data", "query", catalogPredicate, "--select", catalogProjection, "--json"],
@@ -122,14 +144,16 @@ async function catalog() {
   for (const row of results) {
     if (row.observationKey) observations.set(row.observationKey, row);
   }
+  const attempts = results.find((row: { searchAttempts?: unknown }) => row.searchAttempts)?.searchAttempts ?? {};
   return {
     shows,
-    rows: results.filter((r: Record<string, unknown>) => !r.shows && !r.observationKey && !r.catalogKey).map((
+    rows: results.filter((r: Record<string, unknown>) => !r.searchAttempts && !r.shows && !r.observationKey && !r.catalogKey).map((
       r: Record<string, unknown>,
     ) => ({
       id: r.localId ?? identities.get(r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`) ??
         (r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`),
       health: matchingObservation(r, observations),
+      search: searchDetails(attempts[String(r.tmdbEpisodeId ?? ("m-" + (r.catalogId ?? r.tmdbId)))], r.rankedCount),
       hash: r.infoHash,
       archived: !!r.archivedAt,
       showId: identities.get("s-" + r.showTmdbId) ?? r.showTmdbId,
@@ -146,9 +170,7 @@ async function catalog() {
       delivered: r.transferredAt,
       reason: r.error
         ? "Recorded error · inspect operator status"
-        : r.noMatchReason
-        ? "Waiting for an eligible release"
-        : null,
+        : rejectionSummary(r.noMatchReason),
     })),
   };
 }

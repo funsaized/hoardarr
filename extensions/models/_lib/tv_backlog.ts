@@ -8,6 +8,8 @@ export type EpisodeWork = {
 };
 export type SearchAttempt = {
   searchedAt: string;
+  lastSuccessfulAt?: string;
+  partial?: boolean;
   nextSearchAt: string;
   outcome: "no-match" | "no-releases" | "authentication-error" | "provider-error" | "selected";
 };
