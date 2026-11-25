@@ -1,11 +1,12 @@
 // The browser only sees these projections. Provider responses can include private locators.
 const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName == "transferObservation")';
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity"])';
 const catalogFields = [
   "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "showName",
   "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
 ];
-const catalogProjection = 'specName == "transferObservation" ? {' +
+const catalogProjection = 'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
+  'specName == "transferObservation" ? {' +
   '"observationKey": name, "hash": attributes.sample.hash, "decision": attributes.decision, ' +
   '"observedAt": attributes.sample.observedAt, "idleMs": attributes.idleMs, ' +
   '"byteRate": "byteRate" in attributes ? attributes.byteRate : null} : ' +
@@ -108,9 +109,13 @@ async function catalog() {
   }).output();
   if (!result.success) throw new Error("Catalog unavailable");
   const { results } = JSON.parse(new TextDecoder().decode(result.stdout));
+  const identities = new Map<string, string>();
+  for (const row of results) {
+    if (row.catalogKey) identities.set(row.catalogKey, row.localId);
+  }
   const configured = results.find((row: { shows?: unknown[] }) => Array.isArray(row.shows));
   const shows = (configured?.shows ?? []).map((s: { tmdbId: number; name: string }) => ({
-    id: s.tmdbId,
+    id: identities.get("s-" + s.tmdbId) ?? s.tmdbId,
     name: s.name,
   }));
   const observations = new Map<string, Record<string, unknown>>();
@@ -119,14 +124,15 @@ async function catalog() {
   }
   return {
     shows,
-    rows: results.filter((r: Record<string, unknown>) => !r.shows && !r.observationKey).map((
+    rows: results.filter((r: Record<string, unknown>) => !r.shows && !r.observationKey && !r.catalogKey).map((
       r: Record<string, unknown>,
     ) => ({
-      id: r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.tmdbId}`,
+      id: identities.get(r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.tmdbId}`) ??
+        (r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.tmdbId}`),
       health: matchingObservation(r, observations),
       hash: r.infoHash,
       archived: !!r.archivedAt,
-      showId: r.showTmdbId,
+      showId: identities.get("s-" + r.showTmdbId) ?? r.showTmdbId,
       show: r.showName,
       season: r.seasonNumber,
       episode: r.episodeNumber,

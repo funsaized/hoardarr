@@ -25,6 +25,7 @@ reports:
   - portable_run_summary.ts
   - migration_comparison.ts
 include:
+  - _lib/catalog_identity.ts
   - _lib/archive.ts
   - _lib/episode_identity.ts
   - _lib/tv_backlog.ts

@@ -77,7 +77,8 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   const observation: Node[] = [savedIngest("saved-movies", "movie")];
   observation.push(savedIngest("saved-episodes", "episode", "saved-movies"));
   observation.push(method("saved-requests", "requests", "ingest", owned, "saved-episodes"));
-  observation.push(call("snapshot", "download-provider", "sync", {}, "saved-requests", true));
+  observation.push(method("identities", "pipeline", "backfillIdentities", owned, "saved-requests"));
+  observation.push(call("snapshot", "download-provider", "sync", {}, "identities", true));
   observation.push(skip(
     method("reconcile", "pipeline", "reconcile", {
       ...owned,

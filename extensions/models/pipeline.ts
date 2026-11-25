@@ -30,6 +30,7 @@ import {
   TransferObservation,
   TransferSample,
 } from "./_lib/transfer_observation.ts";
+import { CatalogIdentity, identityIndex } from "./_lib/catalog_identity.ts";
 const Globals = z.object({
   requestModel: z.string().optional(),
   libraryRoot: z.string().optional(),
@@ -298,6 +299,13 @@ export const model = {
   }],
   globalArguments: Globals,
   resources: {
+    catalogIdentity: {
+      schema: CatalogIdentity,
+      description:
+        "Stable installation identity, catalog resource key and confirmed provider aliases",
+      lifetime: "infinite",
+      garbageCollection: 2,
+    },
     transferObservation: {
       schema: TransferObservation,
       description: "Latest transfer health decision and bounded decision history",
@@ -781,6 +789,42 @@ export const model = {
           }
         }
         return write(ctx, "summary", { ok: true });
+      },
+    },
+    backfillIdentities: {
+      description:
+        "Backfill stable local IDs and typed aliases while preserving legacy catalog links.",
+      arguments: Owned,
+      execute: async ({ owner }: z.infer<typeof Owned>, ctx: Context) => {
+        await assertLease(ctx.repoDir, owner);
+        const prior = await ctx.readModelData("pipeline", "catalogIdentity");
+        const index = identityIndex(prior.map((r) => CatalogIdentity.parse(r.attributes)));
+        function legacy(kind: "movie" | "series" | "episode", prefix: string, value: unknown) {
+          const id = z.number().int().positive().parse(value);
+          index.confirm(kind, prefix + id, { provider: "tmdb", value: String(id) });
+        }
+        for (const row of await rows(ctx, "movie")) legacy("movie", "m-", row.tmdbId);
+        for (const row of await rows(ctx, "episode")) {
+          legacy("series", "s-", row.showTmdbId);
+          legacy("episode", "e-", row.tmdbEpisodeId);
+        }
+        const lists = await ctx.readModelData(ctx.globalArgs.episodes, "showList");
+        for (const list of lists) {
+          for (
+            const show of z.array(z.object({ tmdbId: z.number().optional() })).parse(
+              list.attributes.shows,
+            )
+          ) {
+            if (show.tmdbId) legacy("series", "s-", show.tmdbId);
+          }
+        }
+        const handles = [];
+        for (const entity of index.changed.values()) {
+          handles.push(
+            await ctx.writeResource("catalogIdentity", "identity-" + entity.catalogKey, entity),
+          );
+        }
+        return { dataHandles: handles };
       },
     },
     sampleTransfers: {
