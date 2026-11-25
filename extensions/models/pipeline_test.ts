@@ -348,3 +348,74 @@ Deno.test("series layout remains stable across metadata changes and disambiguate
     await model.methods.prepare.execute({ owner, item, preview: true }, ctx);
     assert(saved.get("prepared-e-1")!.directory === "TV/Example (2020) [show-20]/Season 01");
   }));
+
+Deno.test("an expired detached switch gets a bounded search while new switches are disabled", () =>
+  temporary(async (root) => {
+    const owner = crypto.randomUUID();
+    const oldHash = "a".repeat(40);
+    const oldDate = new Date(Date.now() - 72 * 3600000).toISOString();
+    const journal = {
+      key: "m-1",
+      attemptId: crypto.randomUUID(),
+      owner,
+      oldHash,
+      oldName: "Partial",
+      bytes: 0,
+      session: crypto.randomUUID(),
+      partial: null,
+      phase: "retained",
+      candidate: {
+        infoHash: "b".repeat(40),
+        name: "Alternate",
+        rank: 2,
+        sizeBytes: 100,
+        selectedAt: oldDate,
+      },
+      createdAt: oldDate,
+      updatedAt: oldDate,
+    };
+    let attempts = {}, queries: unknown;
+    const ctx: Runtime & { globalArgs: ReturnType<typeof model.globalArguments.parse> } = {
+      repoDir: root,
+      signal: new AbortController().signal,
+      globalArgs: model.globalArguments.parse({ expectedInterface: "vpn0" }),
+      readModelData: async (name, spec) => {
+        if (name === "movie-catalog" && spec === "movie") {
+          return [1, 2].map((tmdbId) => ({
+            name: "catalog-movie-" + tmdbId,
+            attributes: {
+              tmdbId,
+              title: "Movie " + tmdbId,
+              year: 2026,
+              status: "downloading",
+              infoHash: tmdbId === 1 ? oldHash : "d".repeat(40),
+              releaseName: "Current",
+            },
+          }));
+        }
+        if (spec === "releaseSwitch") return [{ name: "switch-m-1", attributes: journal }];
+        if (spec === "searchState") {
+          return [{ name: "searchState-current", attributes: { attempts } }];
+        }
+        return [];
+      },
+      runModel: async () => ({ ok: true, resources: [] }),
+      writeResource: async (spec, name, attributes) => {
+        if (spec === "work") queries = attributes.queries;
+        return { name };
+      },
+    };
+    await coordinator.methods.acquire.execute({ owner }, ctx);
+    const plan = () => model.methods.plan.execute({ owner, phase: "acquisition" }, ctx);
+    await plan();
+    deepStrictEqual(queries, [{ key: "m-1", query: "Movie 1 2026", category: "movies" }]);
+    attempts = {
+      "m-1": {
+        searchedAt: new Date().toISOString(),
+        nextSearchAt: new Date(Date.now() + 3600000).toISOString(),
+        outcome: "provider-error",
+      },
+    };
+    await plan();
+    deepStrictEqual(queries, []);
+  }));
