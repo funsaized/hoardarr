@@ -543,7 +543,7 @@ tmdbKey: '${{ vault.get("hoardarr", "TMDB_API_KEY") }}'
 | `observation`                         | Minutes of zero growth for a stall and a separate metadata grace period                |
 | `switching`                           | Enable new switches for specific movie or episode keys, with a cooldown per stalled hash |
 | `movieReleaseFeeds`                   | Swamp behaviors that supply movie suggestions and dated regional digital releases       |
-| `reviewedTmdbAliases`                 | Confirmed mappings from local movie UUIDs to TMDB IDs                                   |
+| `reviewedTmdbAliases`                 | Confirmed mappings from local movie or episode UUIDs to TMDB IDs                                   |
 | `schedule`                            | Enabled flag and five-field cron expression                                            |
 | `torlink`                             | CLI binary, loopback API URL, optional vault token and tunnel interface                |
 | `tmdbKey`                             | Vault expression; default key is `hoardarr/TMDB_API_KEY`                               |
