@@ -1,3 +1,4 @@
+import { ReleaseEvidence } from "./release_feed.ts";
 import { hasMovieIdentity, movieCatalogId, MovieIdentityFields } from "./catalog_identity.ts";
 /** Hoardarr local movie catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4.5.1";
@@ -32,6 +33,7 @@ const MovieStatusSchema = z.enum([
 ]);
 
 const DiscoveryRecordSchema = z.object({
+  releaseEvidence: ReleaseEvidence.optional(),
   ...MovieIdentityFields,
   title: z.string().min(1).max(500),
   releaseDate: z
@@ -110,6 +112,7 @@ const ReconcileArgsSchema = z.object({
 const PlanArgsSchema = z.object({});
 
 const MovieSchema = z.object({
+  releaseEvidence: ReleaseEvidence.optional(),
   ...MovieIdentityFields,
   title: z.string().min(1).max(500),
   year: z.number().int().min(1800).max(2200).nullable(),
@@ -303,6 +306,7 @@ function createMovieFromDiscovery(discovery: DiscoveryRecord): Movie {
     ...(discovery.localId
       ? { localId: discovery.localId, catalogId: movieCatalogId(discovery) }
       : {}),
+    ...(discovery.releaseEvidence ? { releaseEvidence: discovery.releaseEvidence } : {}),
     title: discovery.title,
     year: discovery.year,
     infoHash: null,
@@ -844,6 +848,33 @@ export const definition = {
     },
   },
   methods: {
+    linkReviewedTmdb: {
+      description:
+        "Link an operator-reviewed provider identity while retaining the original catalog key.",
+      arguments: z.object({
+        id: z.number().int().positive(),
+        tmdbId: z.number().int().positive(),
+        localId: z.uuid(),
+      }),
+      execute: async (args: { id: number; tmdbId: number; localId: string }, context: Context) => {
+        const row = await loadMovie(context, args.id);
+        if (!row || row.localId !== args.localId || (row.tmdbId && row.tmdbId !== args.tmdbId)) {
+          throw new Error("Reviewed identity conflicts with catalog");
+        }
+        if (
+          (await loadAllMovies(context)).some((r) =>
+            movieCatalogId(r) !== args.id && r.tmdbId === args.tmdbId
+          )
+        ) {
+          throw new Error("Provider alias already claimed");
+        }
+        return {
+          dataHandles: row.tmdbId === args.tmdbId
+            ? []
+            : [await writeMovie(context, { ...row, tmdbId: args.tmdbId })],
+        };
+      },
+    },
     linkMovieAlias: {
       description: "Attach verified TMDB evidence to the same local movie and storage key.",
       arguments: z.object({

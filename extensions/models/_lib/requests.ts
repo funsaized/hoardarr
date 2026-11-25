@@ -64,6 +64,7 @@ export const MovieTarget = z.object({
 }).refine(hasMovieIdentity, "Media identity required");
 export const EpisodeTarget = z.object({
   mediaKind: z.literal("episode"),
+  catalogId: z.number().int().positive().optional(),
   tmdbEpisodeId: z.number().int().positive(),
   showTmdbId: z.number().int().positive(),
   showName: z.string().min(1).max(500),
@@ -116,7 +117,7 @@ export const fingerprint = (intent: Intent) =>
     category: intent.category,
   })).digest("hex");
 export const targetKey = (target: Target) =>
-  target.mediaKind === "movie" ? `m-${movieCatalogId(target)}` : `e-${target.tmdbEpisodeId}`;
+  target.mediaKind === "movie" ? `m-${movieCatalogId(target)}` : `e-${episodeCatalogId(target)}`;
 
 /** Reject provider evidence which would widen or change an accepted request. */
 export function validateTargets(request: MediaRequest, targets: Target[]): Target[] {
@@ -174,6 +175,10 @@ export function requestProgress(
   maxAttempts = { movie: 3, episode: 3 },
 ) {
   const rows = new Map<string, Row>([
+    ...movies.filter((row) => row.tmdbId).map((row) => [`m-${row.tmdbId}`, row] as const),
+    ...episodes.filter((row) => row.tmdbEpisodeId).map((row) =>
+      [`e-${row.tmdbEpisodeId}`, row] as const
+    ),
     ...movies.map((row) => [`m-${movieCatalogId(row)}`, row] as const),
     ...episodes.map((row) => [`e-${episodeCatalogId(row)}`, row] as const),
   ]);

@@ -1,11 +1,12 @@
 // The browser only sees these projections. Provider responses can include private locators.
 const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"]) || (modelName == "tracked-tv" && specName == "refreshStatus" && attributes.state != "ready")';
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"] && (!("resolved" in attributes) || !attributes.resolved)) || (modelName == "pipeline" && specName == "feedReview" && attributes.state == "pending") || (modelName == "tracked-tv" && specName == "refreshStatus" && attributes.state != "ready")';
 const catalogFields = [
   "catalogId", "localId", "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "seriesCatalogId", "seriesLocalId", "tvmazeSeriesId", "numbering", "showName",
   "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
 ];
 const catalogProjection = 'specName == "releaseSwitch" ? {"switchKey": attributes.key, "phase": attributes.phase, "oldHash": attributes.oldHash, "newHash": attributes.candidate.infoHash, "rank": attributes.candidate.rank, "updatedAt": attributes.updatedAt} : ' +
+  'specName == "feedReview" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason} : ' +
   'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
   'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
   'specName == "searchState" ? {"searchAttempts": attributes.attempts} : ' +
@@ -13,7 +14,9 @@ const catalogProjection = 'specName == "releaseSwitch" ? {"switchKey": attribute
   'specName == "transferObservation" ? {' +
   '"observationKey": name, "hash": attributes.sample.hash, "decision": attributes.decision, ' +
   '"observedAt": attributes.sample.observedAt, "idleMs": attributes.idleMs, ' +
-  '"byteRate": "byteRate" in attributes ? attributes.byteRate : null} : ' +
+  '"lastProgressAt": "lastProgressAt" in attributes ? attributes.lastProgressAt : null, ' +
+  '"etaSeconds": "etaSeconds" in attributes ? attributes.etaSeconds : null, ' +
+  '"metadataMs": "metadataMs" in attributes ? attributes.metadataMs : null, "byteRate": "byteRate" in attributes ? attributes.byteRate : null} : ' +
   'specName == "showList" ? {"shows": attributes.shows.map(show, ' +
   '{"tmdbId": show.tmdbId, "name": show.name})} : {' +
   catalogFields.map((field) =>
@@ -103,8 +106,8 @@ function matchingObservation(row: Record<string, unknown>, records: Map<string, 
   const suffix = row.showName ? `episode-${row.catalogId ?? row.tmdbEpisodeId}` : `movie-${row.catalogId ?? row.tmdbId}`;
   const health = records.get("transfer-health-" + suffix);
   if (!health || health.hash !== row.infoHash) return undefined;
-  const { decision, observedAt, idleMs, byteRate } = health;
-  return { decision, observedAt, idleMs, byteRate };
+  const { decision, observedAt, idleMs, byteRate, metadataMs, lastProgressAt, etaSeconds } = health;
+  return { decision, observedAt, idleMs, byteRate, metadataMs, lastProgressAt, etaSeconds };
 }
 const rejectionCodes = new Set([
   "no-releases", "no-acceptable-release", "identity-mismatch-rejected", "episode-token-mismatch",

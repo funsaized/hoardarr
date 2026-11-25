@@ -14,7 +14,13 @@ export type SearchAttempt = {
   lastSuccessfulAt?: string;
   partial?: boolean;
   nextSearchAt: string;
-  outcome: "no-match" | "no-releases" | "authentication-error" | "provider-error" | "selected";
+  outcome:
+    | "alternates-ranked"
+    | "no-match"
+    | "no-releases"
+    | "authentication-error"
+    | "provider-error"
+    | "selected";
 };
 export type SearchState = Record<string, SearchAttempt>;
 

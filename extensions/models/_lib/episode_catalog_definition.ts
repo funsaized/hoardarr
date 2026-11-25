@@ -1019,6 +1019,45 @@ export const definition = {
     },
   },
   methods: {
+    linkReviewedTmdb: {
+      description:
+        "Link an operator-reviewed provider identity while retaining the original catalog key.",
+      arguments: z.object({
+        id: z.number().int().positive(),
+        tmdbId: z.number().int().positive(),
+        localId: z.uuid(),
+        showTmdbId: z.number().int().positive(),
+      }),
+      execute: async (
+        args: { id: number; tmdbId: number; localId: string; showTmdbId: number },
+        context: Context,
+      ) => {
+        const row = await loadEpisode(context, args.id);
+        if (
+          !row || row.localId !== args.localId ||
+          (row.tmdbEpisodeId && row.tmdbEpisodeId !== args.tmdbId) ||
+          (row.showTmdbId && row.showTmdbId !== args.showTmdbId)
+        ) {
+          throw new Error("Reviewed identity conflicts with catalog");
+        }
+        if (
+          (await loadAllEpisodes(context)).some((r) =>
+            episodeCatalogId(r) !== args.id && r.tmdbEpisodeId === args.tmdbId
+          )
+        ) {
+          throw new Error("Provider alias already claimed");
+        }
+        return {
+          dataHandles: row.tmdbEpisodeId === args.tmdbId ? [] : [
+            await writeEpisode(context, {
+              ...row,
+              tmdbEpisodeId: args.tmdbId,
+              showTmdbId: args.showTmdbId,
+            }),
+          ],
+        };
+      },
+    },
     relocate: catalogRelocationMethod("episode-catalog", "episode", "tmdbEpisodeId", EpisodeSchema),
     commitAlternate: {
       description:
