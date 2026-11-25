@@ -23,7 +23,7 @@ const catalogProjection = 'specName == "releaseSwitch" ? {"switchKey": attribute
     `"${field}": "${field}" in attributes ? attributes.${field} : null`
   ).concat(
     '"error": "error" in attributes && attributes.error != null && attributes.error != ""',
-    '"rankedCount": "rankedReleases" in attributes ? size(attributes.rankedReleases) : null',
+    '"rankedCount": size("rankedReleases" in attributes ? attributes.rankedReleases : [])',
     '"noMatchReason": "noMatchReason" in attributes ? attributes.noMatchReason : null',
   ).join(", ") + "}";
 type Transfer = {
