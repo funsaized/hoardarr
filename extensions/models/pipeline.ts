@@ -34,7 +34,7 @@ import {
 } from "./_lib/transfer_observation.ts";
 import { CatalogIdentity, identityIndex, movieCatalogId } from "./_lib/catalog_identity.ts";
 import { airedEpisodes, TrackedEpisodeList, trackedKey, TrackedSeries } from "./_lib/tracked_tv.ts";
-import { ReleaseSwitch, SwitchPolicy } from "./_lib/switch_release.ts";
+import { needsCandidateRefresh, ReleaseSwitch, SwitchPolicy } from "./_lib/switch_release.ts";
 import { switchReleases } from "./_lib/switch_pipeline.ts";
 const Globals = z.object({
   switchPolicy: SwitchPolicy.prefault({}),
@@ -586,7 +586,7 @@ export const model = {
           ),
           ...tvSearch,
         ];
-        if (acquisition && !args.requestId && ctx.globalArgs.switchPolicy.enabled) {
+        if (acquisition && !args.requestId && ctx.globalArgs.expectedInterface) {
           const journal = (await ctx.readModelData("pipeline", "releaseSwitch")).map((r) =>
             ReleaseSwitch.parse(r.attributes)
           );
@@ -596,12 +596,15 @@ export const model = {
             ),
           );
           const next = all.filter((r) => {
-            if (
-              r.status !== "downloading" || !ctx.globalArgs.switchPolicy.titles.includes(r.key) ||
-              journal.some((j) => j.key === r.key && !["committed", "cancelled"].includes(j.phase))
-            ) return false;
-            const observation = health.get("transfer-health-" + r.mediaKind + "-" + r.id);
+            if (r.status !== "downloading") return false;
             const attempt = state[r.mediaKind === "movie" ? r.key : String(r.id)];
+            const pending = journal.find((j) => j.key === r.key && !["committed", "cancelled"].includes(j.phase));
+            if (pending) {
+              return needsCandidateRefresh(pending, Date.now(), ctx.globalArgs.switchPolicy.candidateMaxAgeHours) &&
+                (!attempt || attempt.searchedAt <= pending.candidate.selectedAt || attempt.nextSearchAt <= now);
+            }
+            if (!ctx.globalArgs.switchPolicy.enabled || !ctx.globalArgs.switchPolicy.titles.includes(r.key)) return false;
+            const observation = health.get("transfer-health-" + r.mediaKind + "-" + r.id);
             return observation?.decision === "stall" && observation.sample.hash === r.infoHash &&
               (!attempt ||
                 attempt.outcome === "selected" || attempt.nextSearchAt <= now);
@@ -1011,6 +1014,10 @@ export const model = {
           results: Row[];
           sources?: Record<string, { ok: boolean; error?: string }>;
         }[];
+        const recovering = new Set(ctx.globalArgs.expectedInterface
+          ? (await ctx.readModelData("pipeline", "releaseSwitch")).map((r) => ReleaseSwitch.parse(r.attributes))
+            .filter((r) => needsCandidateRefresh(r, Date.now(), ctx.globalArgs.switchPolicy.candidateMaxAgeHours)).map((r) => r.key)
+          : []);
         for (const kind of ["movie", "episode"]) {
           const prefix = kind === "movie" ? "m-" : "e-";
           const items = queries.filter((q) =>
@@ -1019,7 +1026,7 @@ export const model = {
           ).map((q) => ({
             [idField(kind)]: Number(q.key.slice(2)),
             releases: q.results,
-            refreshAlternates: ctx.globalArgs.switchPolicy.enabled &&
+            refreshAlternates: recovering.has(q.key) || ctx.globalArgs.switchPolicy.enabled &&
               ctx.globalArgs.switchPolicy.titles.includes(q.key),
           }));
           if (items.length) await invoke(ctx, catalog(ctx, kind), "select", { items });

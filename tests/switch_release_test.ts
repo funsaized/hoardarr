@@ -4,6 +4,7 @@ import {
   alternate,
   partialIdentity,
   retainPartial,
+  refreshedCandidate,
   type Switch,
 } from "../extensions/models/_lib/switch_release.ts";
 import { payload, temporary } from "./helpers.ts";
@@ -154,3 +155,20 @@ Deno.test("detached partials retain their inode and contents through replay", ()
     await rejects(() => retainPartial(root, j));
     strictEqual(await Deno.readTextFile(root + "/Partial"), "different owner");
   }));
+
+Deno.test("expired detached switches can use a fresh ranking and uncertain adds keep their hash", () => {
+  const pending = intent();
+  const later = Date.parse(now) + 72 * 3600000;
+  const other = { ...candidate, infoHash: "c".repeat(40), selectedAt: new Date(later).toISOString() };
+  const refreshed = { ...candidate, selectedAt: other.selectedAt };
+  const excluded = new Set([pending.oldHash]);
+  for (const phase of ["detached", "retained"] as const) {
+    const j = { ...pending, phase };
+    strictEqual(refreshedCandidate(j, [candidate], excluded, later, 48), undefined);
+    deepStrictEqual(refreshedCandidate(j, [other], excluded, later, 48), other);
+  }
+  const uncertain = { ...pending, phase: "adding" as const };
+  strictEqual(refreshedCandidate(uncertain, [other], excluded, later, 48), undefined);
+  deepStrictEqual(refreshedCandidate(uncertain, [other, refreshed], excluded, later, 48), refreshed);
+  strictEqual(refreshedCandidate(uncertain, [refreshed], new Set([newHash]), later, 48), undefined);
+});

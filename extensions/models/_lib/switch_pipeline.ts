@@ -2,11 +2,13 @@ import { z } from "npm:zod@4.5.1";
 import {
   advanceSwitch,
   alternate,
+  needsCandidateRefresh,
   partialIdentity,
   payloadName,
   ReleaseSwitch,
   retainPartial,
   type Switch,
+  refreshedCandidate,
   SwitchPolicy,
 } from "./switch_release.ts";
 import { assertLease, invoke, recordExternalIntent, type Runtime } from "./runtime.ts";
@@ -158,6 +160,18 @@ export async function switchReleases(ctx: Runtime, owner: string, opts: Options)
       });
       await save(journal);
     }
+    if (needsCandidateRefresh(journal, Date.now(), opts.policy.candidateMaxAgeHours)) {
+      const live = await sample();
+      const liveHashes = new Set([...live.torrents.map((r) => r.infoHash), ...live.seeds.map((r) => r.id)]);
+      if (!liveHashes.has(journal.oldHash) && !liveHashes.has(journal.candidate.infoHash)) {
+        const excluded = new Set([...blocked, ...liveHashes, journal.oldHash]);
+        const refreshed = refreshedCandidate(journal, ranked, excluded, Date.now(), opts.policy.candidateMaxAgeHours);
+        if (refreshed) {
+          journal = { ...journal, candidate: refreshed, updatedAt: new Date().toISOString() };
+          await save(journal);
+        }
+      }
+    }
     const j = journal, candidate = j.candidate;
     if (row.infoHash === candidate.infoHash && row.lastSwitch === j.attemptId) {
       await save({...j,phase:"committed",updatedAt:new Date().toISOString()});
@@ -238,6 +252,7 @@ export async function switchReleases(ctx: Runtime, owner: string, opts: Options)
           id,
           oldHash: j.oldHash,
           newHash: candidate.infoHash,
+          candidate,
           attemptId: j.attemptId,
           nextEligibleAt: new Date(Date.now() + opts.policy.cooldownHours * 3600000).toISOString(),
         });

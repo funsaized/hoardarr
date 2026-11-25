@@ -1,3 +1,4 @@
+import { SwitchCandidate } from "./switch_release.ts";
 /** Hoardarr local episode catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4.5.1";
 import { episodeCatalogId, EpisodeIdentityFields, hasEpisodeIdentity } from "./catalog_identity.ts";
@@ -1066,6 +1067,7 @@ export const definition = {
         id: z.number().int().positive(),
         oldHash: z.string(),
         newHash: z.string(),
+        candidate: SwitchCandidate.optional(),
         attemptId: z.uuid(),
         nextEligibleAt: z.iso.datetime(),
       }),
@@ -1074,6 +1076,7 @@ export const definition = {
           id: number;
           oldHash: string;
           newHash: string;
+          candidate?: z.infer<typeof SwitchCandidate>;
           attemptId: string;
           nextEligibleAt: string;
         },
@@ -1086,7 +1089,8 @@ export const definition = {
         if (
           !row || row.infoHash !== args.oldHash || row.status !== "downloading" || row.transferredAt
         ) throw new Error("Switch no longer owns this download");
-        const candidate = row.rankedReleases?.find((r) => r.infoHash === args.newHash);
+        const candidate = args.candidate ?? row.rankedReleases?.find((r) => r.infoHash === args.newHash);
+        if (candidate && candidate.infoHash !== args.newHash) throw new Error("Different alternate hash in saved intent");
         if (!candidate) throw new Error("Alternate no longer ranked");
         const stalled = z.record(z.string(), z.string()).parse(row.stalledReleases ?? {});
         return {

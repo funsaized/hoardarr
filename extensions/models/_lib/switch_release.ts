@@ -11,7 +11,7 @@ export const SwitchPolicy = z.object({
   candidateMaxAgeHours: z.number().int().min(1).max(168).default(48),
   cooldownHours: z.number().int().min(1).max(720).default(48),
 });
-const Candidate = z.object({
+export const SwitchCandidate = z.object({
   infoHash: Hash,
   name: z.string().min(1),
   sizeBytes: z.number().int().positive(),
@@ -25,7 +25,7 @@ export const ReleaseSwitch = z.object({
   attemptId: z.uuid(),
   oldHash: Hash,
   oldName: z.string().min(1),
-  candidate: Candidate,
+  candidate: SwitchCandidate,
   session: z.uuid(),
   bytes: z.number().int().nonnegative(),
   owner: z.uuid(),
@@ -43,6 +43,10 @@ export const ReleaseSwitch = z.object({
   updatedAt: z.iso.datetime(),
 });
 export type Switch = z.infer<typeof ReleaseSwitch>;
+export function needsCandidateRefresh(journal: Switch, now: number, maxAgeHours: number) {
+  return ["detached", "retained", "adding"].includes(journal.phase) &&
+    now - Date.parse(journal.candidate.selectedAt) > maxAgeHours * 3600000;
+}
 export function alternate(
   ranked: unknown[],
   excluded: Set<string>,
@@ -50,7 +54,7 @@ export function alternate(
   maxAgeHours: number,
 ) {
   for (const value of ranked.slice(0, 3)) {
-    const c = Candidate.safeParse(value);
+    const c = SwitchCandidate.safeParse(value);
     if (!c.success || excluded.has(c.data.infoHash)) continue;
     const age = now - Date.parse(c.data.selectedAt);
     if (age < 0 || age > maxAgeHours * 3600000) continue;
@@ -61,6 +65,14 @@ export function alternate(
     }
     return c.data;
   }
+}
+export function refreshedCandidate(journal: Switch, ranked: unknown[], occupied: Set<string>, now: number, maxAgeHours: number) {
+  if (!needsCandidateRefresh(journal, now, maxAgeHours)) return;
+  // An uncertain add can retry only its original hash. Earlier phases have issued no add.
+  const permitted = journal.phase === "adding"
+    ? ranked.filter((r) => SwitchCandidate.safeParse(r).data?.infoHash === journal.candidate.infoHash)
+    : ranked;
+  return alternate(permitted, occupied, now, maxAgeHours);
 }
 export function payloadName(name: string) {
   return !!name && name.length <= 255 && !name.startsWith(".") &&

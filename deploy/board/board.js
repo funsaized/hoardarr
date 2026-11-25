@@ -244,8 +244,9 @@ function render() {
         "Last confirmed growth": item.health?.lastProgressAt ? new Date(item.health.lastProgressAt).toLocaleString() : null,
         "Estimated time remaining": item.health?.etaSeconds != null ? Math.ceil(item.health.etaSeconds / 60) + " min at measured rate" : null,
         "Measured growth": item.health?.byteRate != null ? item.health.byteRate.toFixed(1) + " B/s" : null,
-        "Proposed action": item.health?.decision === "stall"
-          ? "Check for an eligible alternate · observation only"
+        "Proposed action": item.releaseSwitch && !["cancelled", "committed"].includes(item.releaseSwitch.phase)
+          ? "Resume the saved release switch"
+          : item.health?.decision === "stall" ? "Check for an eligible alternate"
           : item.health?.decision === "metadata-timeout" ? "Inspect peers and metadata availability"
           : item.health ? "Continue observing" : null,
         "Search outcome": item.search && (item.search.outcome + (item.search.partial ? " · partial provider response" : "")),
