@@ -70,3 +70,8 @@ export function airedEpisodes(list: z.infer<typeof TrackedEpisodeList>, now: num
   }
   return { aired, review };
 }
+
+export function resolutionKey(show: { name?: string; year?: number; tmdbId?: number }) {
+  return "resolved-show-" +
+    createHash("sha256").update(JSON.stringify([show.name, show.year, show.tmdbId])).digest("hex");
+}

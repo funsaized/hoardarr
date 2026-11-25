@@ -1,3 +1,4 @@
+import { resolutionKey as trackedResolutionKey } from "./_lib/tracked_tv.ts";
 /** Weekly TMDB digital-release discovery extension for Hoardarr. @module */
 import { z } from "npm:zod@4.5.1";
 
@@ -122,6 +123,10 @@ const AiredEpisodeRunSchema = z.object({
 });
 
 const ShowDetailsResponseSchema = z.object({
+  external_ids: z.object({
+    imdb_id: z.string().nullish(),
+    tvdb_id: z.number().int().positive().nullish(),
+  }).optional(),
   first_air_date: z.string().nullable().optional(),
   id: z.number().int().positive(),
   name: z.string().min(1),
@@ -355,16 +360,7 @@ async function executeAiredEpisodes(
 
   const resolutionHandles: Array<{ name: string }> = [];
   for (const show of args.shows) {
-    const resolutionKey = `resolved-show-${
-      Array.from(
-        new Uint8Array(
-          await crypto.subtle.digest(
-            "SHA-256",
-            new TextEncoder().encode(JSON.stringify([show.name, show.year, show.tmdbId])),
-          ),
-        ),
-      ).map((b) => b.toString(16).padStart(2, "0")).join("")
-    }`;
+    const resolutionKey = trackedResolutionKey(show);
     const prior = await context.readResource(resolutionKey);
     let id = show.tmdbId ?? (prior?.tmdbId as number | null);
     if (!id && show.name) {
@@ -393,7 +389,7 @@ async function executeAiredEpisodes(
         (!show.year || c.first_air_date?.startsWith(String(show.year)))
       );
       matches.sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0) || a.id - b.id);
-      id = matches[0]?.id;
+      id = matches.length === 1 ? matches[0].id : null;
     }
     if (!id) {
       resolutionHandles.push(
@@ -410,15 +406,20 @@ async function executeAiredEpisodes(
       continue;
     }
     const details = await tmdbGet(
-      `/tv/${id}`,
+      `/tv/${id}?append_to_response=external_ids`,
       apiKey,
       ShowDetailsResponseSchema,
       context.signal,
       deps,
     );
+    if (details.id !== id) throw new Error("Series lookup returned a conflicting TMDB identity");
+    const imdbId = details.external_ids?.imdb_id ?? (prior?.tmdbId === id ? prior.imdbId : null);
+    const tvdbId = details.external_ids?.tvdb_id ?? (prior?.tmdbId === id ? prior.tvdbId : null);
     resolutionHandles.push(
       await context.writeResource("resolvedShow", resolutionKey, {
         requestedName: show.name ?? details.name,
+        ...(typeof imdbId === "string" && /^tt\d{7,12}$/.test(imdbId) ? { imdbId } : {}),
+        ...(typeof tvdbId === "number" ? { tvdbId } : {}),
         tmdbId: id,
         title: details.name,
         year: details.first_air_date ? Number(details.first_air_date.slice(0, 4)) : null,
@@ -635,6 +636,8 @@ export const extension = {
       description: "Persisted automatic series identity or pending lookup",
       schema: z.object({
         requestedName: z.string(),
+        imdbId: z.string().optional(),
+        tvdbId: z.number().int().positive().optional(),
         tmdbId: z.number().nullable(),
         title: z.string().nullable(),
         year: z.number().nullable(),

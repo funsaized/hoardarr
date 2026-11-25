@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   Episode,
   RefreshStatus as status,
+  resolutionKey,
   Show,
   type ShowConfig,
   TrackedEpisodeList as cache,
@@ -13,6 +14,10 @@ import {
 type Context = {
   signal: AbortSignal;
   globalArgs: { shows: ShowConfig[] };
+  readModelData(
+    name: string,
+    spec: string,
+  ): Promise<{ name: string; attributes: Record<string, unknown> }[]>;
   readResource(name: string): Promise<Record<string, unknown> | null>;
   writeResource(
     spec: string,
@@ -111,12 +116,28 @@ export const model = {
           if (!response.ok) throw new Error("TVmaze request failed");
           return await response.json();
         }
+        const aliases = new Map(
+          (await ctx.readModelData("movie-discovery", "resolvedShow")).map(
+            (r) => [r.name, r.attributes],
+          ),
+        );
         const due = [];
         for (const tracked of ctx.globalArgs.shows) {
           const key = trackedKey(tracked);
           const prior = await ctx.readResource(key + "-status");
           const next = Date.parse(String(prior?.retryAt)) || 0;
-          if (next <= Date.now()) due.push({ tracked, key, next });
+          if (next > Date.now()) continue;
+          const saved = aliases.get(resolutionKey(tracked));
+          const identity = saved?.status === "resolved" && saved.tmdbId &&
+              (!tracked.tmdbId || tracked.tmdbId === saved.tmdbId)
+            ? TrackedSeries.parse({
+              tmdbId: saved.tmdbId,
+              imdbId: saved.imdbId,
+              tvdbId: saved.tvdbId,
+              ...tracked,
+            })
+            : tracked;
+          due.push({ tracked: identity, key, next });
         }
         for (const { tracked, key } of due.sort((a, b) => a.next - b.next).slice(0, 12)) {
           let outcome: z.infer<typeof status>, limited = false;
