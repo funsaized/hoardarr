@@ -1,3 +1,10 @@
+import {
+  decisionName,
+  episodeRevision,
+  OperatorDecision,
+  Resolution,
+  resolveAttention,
+} from "./_lib/attention.ts";
 /** Catalog-facing batch operations. Swamp workflows own phase ordering and recovery. */
 import { FeedName, FeedReview, ingestReleaseFeeds } from "./_lib/release_feed.ts";
 import { z } from "npm:zod@4.5.1";
@@ -137,13 +144,14 @@ async function fairness(ctx: Context): Promise<RequestFairness> {
   return ((await ctx.readModelData("pipeline", "requestFairness"))[0]?.attributes ??
     { search: {}, submit: {} }) as RequestFairness;
 }
-async function recordTransferHealth(ctx: Context, fallback?: Row) {
+async function recordTransferHealth(ctx: Context, fallback?: Row, only?: string) {
   let snapshot = fallback;
   if (ctx.globalArgs.expectedInterface && ctx.globalArgs.downloadProvider === "torlink") {
     const result = await ctx.runModel({ definition: "torlink", method: "sampleTransfers" });
     snapshot = result.ok
       ? result.resources.find((r) => r.name === "telemetry-current")?.attributes
       : undefined;
+    if (only && !snapshot) throw Error("Downloader telemetry unavailable");
     // Close the interval on failure. A subsequent healthy reading starts a new baseline.
     snapshot ??= { torrents: [], capturedAt: new Date().toISOString() };
   }
@@ -159,6 +167,7 @@ async function recordTransferHealth(ctx: Context, fallback?: Row) {
   const observations = [];
   for (const kind of ["movie", "episode"] as const) {
     for (const row of await rows(ctx, kind)) {
+      if (only && only !== (kind === "movie" ? "m-" : "e-") + catalogNumber(row, kind)) continue;
       const torrent = samples.get(row.infoHash);
       const key = `transfer-health-${kind}-${catalogNumber(row, kind)}`;
       const saved = TransferObservation.safeParse(previous.get(key)).data;
@@ -347,7 +356,7 @@ async function itemRow(ctx: Context, item: Item): Promise<Row> {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.25.3",
+  version: "2026.11.25.4",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -389,6 +398,10 @@ export const model = {
     toVersion: "2026.11.25.3",
     description: "Keep existing reviews while recording typed provider references",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.25.4",
+    description: "Preserve catalog settings for operator resolutions",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
   resources: {
@@ -409,6 +422,12 @@ export const model = {
       description: "Configured movie feed identity and regional release evidence",
       lifetime: "infinite",
       garbageCollection: 2,
+    },
+    operatorDecision: {
+      description: "Latest recorded item resolution and its reviewed evidence",
+      schema: OperatorDecision,
+      lifetime: "infinite",
+      garbageCollection: 20,
     },
     episodeReview: {
       schema: z.object({
@@ -864,6 +883,13 @@ export const model = {
         };
       },
     },
+    resolveAttention: {
+      description:
+        "Apply a scoped episode review, retry a saved search or resume a paused transfer",
+      arguments: Resolution,
+      execute: (input: z.infer<typeof Resolution>, ctx: Context) =>
+        resolveAttention(input, ctx, (key) => recordTransferHealth(ctx, undefined, key)),
+    },
     ingestTracked: {
       description:
         "Admit aired tracked episodes from confirmed TVmaze series under installation ownership.",
@@ -876,6 +902,11 @@ export const model = {
         const saved = await ctx.readModelData("pipeline", "catalogIdentity");
         const index = identityIndex(saved.map((r) => CatalogIdentity.parse(r.attributes)));
         const existing = await rows(ctx, "episode");
+        const decisions = new Map(
+          (await ctx.readModelData("pipeline", "operatorDecision")).map(
+            (r) => [r.name, r.attributes],
+          ),
+        );
         for (const record of await ctx.readModelData("tracked-tv", "episodeList")) {
           if (!tracked.has(record.name)) continue;
           const list = TrackedEpisodeList.parse(record.attributes);
@@ -934,6 +965,10 @@ export const model = {
           }
           const discoveries = [];
           for (const ep of aired) {
+            const decision = decisions.get(decisionName("review-" + record.name, ep.id));
+            if (
+              decision?.action === "exclude" && decision.revision === episodeRevision(show.id, ep)
+            ) continue;
             if (existing.some((r) => r.tvmazeEpisodeId === ep.id)) continue;
             if (
               existing.some((r) =>
@@ -977,8 +1012,14 @@ export const model = {
             await invoke(ctx, ctx.globalArgs.episodes, "ingest", { discoveries: batch });
             existing.push(...batch);
           }
-          if (review.length) {
-            await recordReview(review, "Confirm episode numbering, identity or air date");
+          const outstanding = review.filter((id) => {
+            const decision = decisions.get(decisionName("review-" + record.name, id));
+            const ep = list.episodes.find((e) => e.id === id);
+            return !ep || decision?.action !== "exclude" ||
+              decision.revision !== episodeRevision(show.id, ep);
+          });
+          if (outstanding.length) {
+            await recordReview(outstanding, "Confirm episode numbering, identity or air date");
           } else if (
             (await ctx.readModelData("pipeline", "episodeReview")).some((r) =>
               r.name === "review-" + record.name && !r.attributes.resolved

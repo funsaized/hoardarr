@@ -12,7 +12,7 @@ import {
   rankEligible,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.16.1";
+const MODEL_VERSION = "2026.11.25.4";
 const SPEC_EPISODE = "episode";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -996,6 +996,10 @@ export const definition = {
     toVersion: "2026.11.16.1",
     description: "Retain optional local archival timestamps without changing completed status",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.25.4",
+    description: "Preserve catalog slots when linking TVmaze episodes",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: GlobalArgumentsSchema,
   resources: {
@@ -1020,6 +1024,41 @@ export const definition = {
     },
   },
   methods: {
+    linkReviewedTvmaze: {
+      description: "Link an operator-reviewed TVmaze episode to an existing catalog slot",
+      arguments: z.object({
+        id: z.number().int().positive(),
+        series: z.number().int().positive(),
+        candidate: z.number().int().positive(),
+        season: z.number().int().positive(),
+        episode: z.number().int().positive(),
+      }),
+      execute: async (
+        args: { id: number; series: number; candidate: number; season: number; episode: number },
+        context: Context,
+      ) => {
+        const row = await loadEpisode(context, args.id);
+        if (
+          !row || row.seasonNumber !== args.season || row.episodeNumber !== args.episode ||
+          row.tvmazeSeriesId && row.tvmazeSeriesId !== args.series ||
+          row.tvmazeEpisodeId && row.tvmazeEpisodeId !== args.candidate
+        ) throw Error("Episode identity changed");
+        if (
+          (await loadAllEpisodes(context)).some((r) =>
+            episodeCatalogId(r) !== args.id && r.tvmazeEpisodeId === args.candidate
+          )
+        ) throw Error("Episode already linked");
+        return {
+          dataHandles: row.tvmazeEpisodeId === args.candidate ? [] : [
+            await writeEpisode(context, {
+              ...row,
+              tvmazeSeriesId: args.series,
+              tvmazeEpisodeId: args.candidate,
+            }),
+          ],
+        };
+      },
+    },
     linkReviewedTmdb: {
       description:
         "Link an operator-reviewed provider identity while retaining the original catalog key.",

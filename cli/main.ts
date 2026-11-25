@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-all
+import { Resolution } from "../extensions/models/_lib/attention.ts";
 import { movieSummary } from "../src/movies.ts";
 /** Hoardarr operator CLI. All scheduled execution remains a Swamp workflow. */
 import { ARCHIVE_HELP, archiveCommand } from "../src/archive.ts";
@@ -47,6 +48,7 @@ Usage: hoardarr <command> [--dir PATH] [--config PATH] [--json]
 init       Prepare and install a demo or compose-vpn-local profile (--profile NAME).
 apply      Generate and validate definitions from the selected configuration.
 doctor     Check runtime, extension loading and configured filesystem paths.
+resolve    exclude|link|retry|resume|reseed|recheck --target KEY --revision VALUE [--candidate ID] [--match ID].
 plan       Preview catalog work; --refresh also refreshes discovery.
 run        Reconcile discovery, downloads, verified delivery and cleanup.
 archive    Preview, submit, inspect or cancel removal of exported local copies (archive help for options).
@@ -204,6 +206,27 @@ async function mainUnlocked(argv: string[]): Promise<void> {
       throw new Error("Use movies [explain TITLE_OR_TMDB_ID]");
     }
     output(await movieSummary(repo, args.length ? args.slice(1).join(" ") : undefined));
+    return;
+  }
+  if (action === "resolve") {
+    if (!config.guest) throw Error("Resolution requires an enrolled installation");
+    await assertCommissioned(config, repo);
+    const data = Resolution.parse({
+      action: argv[1],
+      target: option("--target"),
+      revision: option("--revision"),
+      ...(option("--candidate") ? { candidate: Number(option("--candidate")) } : {}),
+      ...(option("--match") ? { match: Number(option("--match")) } : {}),
+    });
+    const result = await jsonCommand<Record<string, unknown>>([
+      "model",
+      "method",
+      "run",
+      "pipeline",
+      "resolveAttention",
+      ...Object.entries(data).flatMap(([k, v]) => ["--input", k + "=" + v]),
+    ], repo);
+    output({ status: "succeeded", runId: result.runId ?? result.id });
     return;
   }
   if (action === "confirm-series") {
@@ -526,6 +549,7 @@ export async function main(argv: string[]): Promise<void> {
     "recover",
     "recover-apply",
     "confirm-series",
+    "resolve",
     "recover-maintenance",
     "admit",
   ].includes(action);
