@@ -704,20 +704,24 @@ queue order and peers. Select a title for its episode name, observed condition a
 phone, Back returns to the row you opened.
 
 **Library** searches movie titles, shows, episode names and codes such as `S02E13`. Combine a media
-type with Wanted, Available locally or Archived. Open a show to browse its seasons. **Attention**
-groups identity decisions, provider problems and transfer problems. Provider records include names,
-numbering and dates when available.
+type with Wanted, Available locally or Archived. Open a show to browse its seasons.
 
 The **Swamp feed** beside Downlink shows recent behavior and workflow runs. Open a run for its steps
-and available log lines. **Activity** has the longer feed and filters. A title’s **Item timeline**
-combines saved catalog changes, search results, transfer observations and delivery timestamps.
-Select a recorded step to inspect its workflow. Pause the feed to read a busy run.
+and available log lines. **Activity** has the longer feed and filters. In a title’s **Item
+timeline**, choose **Newest first** for recent changes or **Oldest first** to follow the title
+through delivery. Dates and times are local. A starting byte count gives the downloader a baseline.
+Two comparable readings with the same byte count produce a “No new bytes” entry.
 
-**Attention** groups episode conflicts, transfer problems and failed searches. Compare the provider
-name, episode number and catalog title before linking an episode. Exclude a provider episode to
-leave its catalog slot alone. Changed provider details reopen the decision. Retry search makes a
-title eligible for the next acquisition run. A provider sign-in error needs a working credential
-first. Paused downloads and paused seeds have separate resume commands.
+**Attention** explains how to handle each group of issues. Hover over an episode action or focus it
+with the keyboard to read its effect. On a phone, tap it to review the same explanation before
+confirming. Link a provider record when its title, number and air date identify the catalog episode.
+Exclude it to skip the record while that evidence stays the same. Fix provider sign-in before
+retrying a failed search. For a second opinion, open **Resolution guide & agent help** and copy the
+question into a guest `hoardarr-agent` session.
+
+**Reference** lists operator commands by task and explains their effects. Choose **Workflow steps**
+to see which commands the installed workflows use for discovery, acquisition, delivery and recovery.
+Search either list by command name or purpose.
 
 Each resolution calls the Swamp method `pipeline.resolveAttention`. For example, to retry a specific
 failed search from the operator CLI, use the item key and search timestamp from the dashboard’s

@@ -30,6 +30,16 @@
       </div>
       <footer><span id="torlink">Downloader · connecting</span><span id="catalog">Catalog · connecting</span></footer>
     </main>
+    <div id="action-hint" class="action-hint" aria-hidden="true" hidden></div>
+    <dialog id="review-dialog" aria-labelledby="decision-title" aria-describedby="decision-effect">
+      <p class="kicker" id="decision-item"></p>
+      <h2 id="decision-title"></h2>
+      <p id="decision-effect"></p>
+      <form method="dialog" class="dialog-actions">
+        <button class="small" autofocus>Cancel</button>
+        <button class="primary" type="button" id="apply-decision"></button>
+      </form>
+    </dialog>
     <div class="sr" id="announce" role="status"></div>
   </body>
 </html>

@@ -587,3 +587,33 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
     base("hoardarr-recovery", [job(recovery)]),
   ];
 }
+
+// Project the installed DAG into labels for the board. Inputs can contain installation data.
+export function workflowReference(config: Config) {
+  type ReferenceStep = {
+    name: string;
+    forEach?: unknown;
+    task: {
+      type: string;
+      modelIdOrName?: string;
+      workflowIdOrName?: string;
+      methodName?: string;
+      inputs?: { operation?: string };
+    };
+  };
+  return workflowDefinitions(config, {}).map((workflow) => ({
+    name: String(workflow.name),
+    steps: (workflow.jobs as { name: string; steps: ReferenceStep[] }[]).flatMap((job) =>
+      job.steps.map((step) => {
+        const task = step.task;
+        const operation = task.methodName === "invoke" ? task.inputs?.operation : task.methodName;
+        return {
+          job: job.name,
+          name: step.forEach ? "deliver each title" : step.name,
+          command: task.workflowIdOrName ??
+            (operation ? task.modelIdOrName + "." + operation : task.type),
+        };
+      })
+    ),
+  }));
+}

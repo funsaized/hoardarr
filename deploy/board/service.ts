@@ -341,6 +341,7 @@ if (import.meta.main) {
         "board.js",
         "text/javascript",
       ],
+      ["/reference.js", "reference.js", "text/javascript"],
       ["/mesh.js", "mesh.js", "text/javascript"],
       ["/board.css", "board.css", "text/css"],
     ]
@@ -505,6 +506,15 @@ if (import.meta.main) {
       return Response.json(operation, { status: 202, headers });
     }
     if (req.method !== "GET") return new Response(null, { status: 405, headers });
+    if (route === "/api/reference/workflows") {
+      try {
+        return new Response(await Deno.readTextFile("assets/native/workflow-reference.json"), {
+          headers: { ...headers, "Content-Type": "application/json" },
+        });
+      } catch {
+        return new Response(null, { status: 503, headers });
+      }
+    }
     if (route === "/api/feed/stream") return stream(headers);
     if (route === "/api/feed") {
       const item = url.searchParams.get("item"), run = url.searchParams.get("run");

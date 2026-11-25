@@ -1,5 +1,6 @@
 /** Native guest assets and execution boundary. No host networking or service activation here. */
 import { dirname, join, resolve } from "node:path";
+import { workflowReference } from "./workflows.ts";
 import type { Config } from "./config.ts";
 import { assertStorage } from "../extensions/models/_lib/storage.ts";
 import { assertDirectEnvironment } from "../extensions/models/guest_network.ts";
@@ -265,6 +266,10 @@ export async function guestAssets(config: Config, repo: string, output?: string)
   const g = config.guest!;
   const path = output ?? join(repo, "assets/native");
   await Deno.mkdir(path, { recursive: true });
+  await Deno.writeTextFile(
+    join(path, "workflow-reference.json"),
+    JSON.stringify(workflowReference(config)),
+  );
   await Deno.writeTextFile(
     join(path, "hoardarr-maintenance-status.socket"),
     `[Unit]\nDescription=Hoardarr read-only maintenance observation\n[Socket]\nListenStream=/run/hoardarr/maintenance-status.sock\nAccept=yes\nSocketUser=${g.user}\nSocketMode=0600\nDirectoryMode=0755\n[Install]\nWantedBy=sockets.target\n`,

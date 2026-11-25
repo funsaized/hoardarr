@@ -42,12 +42,13 @@ import {
   InventorySchema,
 } from "../src/migration_inventory.ts";
 
-const HELP = `Hoardarr 0.2.0
+const HELP = `Hoardarr operator
 Usage: hoardarr <command> [--dir PATH] [--config PATH] [--json]
 
 init       Prepare and install a demo or compose-vpn-local profile (--profile NAME).
 apply      Generate and validate definitions from the selected configuration.
 doctor     Check runtime, extension loading and configured filesystem paths.
+confirm-series Choose a TVmaze series (--review KEY --id ID --revision TIME).
 resolve    exclude|link|retry|resume|reseed|recheck --target KEY --revision VALUE [--candidate ID] [--match ID].
 plan       Preview catalog work; --refresh also refreshes discovery.
 run        Reconcile discovery, downloads, verified delivery and cleanup.
@@ -62,6 +63,7 @@ schedule   enable|disable the generated schedule.
 backup     Archive installation definitions and state outside the installation.
 movies [explain TITLE_OR_TMDB_ID]   Show saved movie progress, archive counts and search problems.
 native-init Initialize a fresh, root-identified guest installation; admissions stay inhibited.
+native-service-check Check commissioning and guest readiness at service startup.
 native-check Assert commissioning, storage, admission, downloader state and guest readiness.
 inhibit    Persistently inhibit new media admissions; current owner may finish/recover.
 admit      Reopen native admissions after commissioning and maintenance verification.

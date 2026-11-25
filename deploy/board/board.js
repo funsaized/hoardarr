@@ -1,10 +1,12 @@
 import "./mesh.js";
+import { commandGroups, stepDescriptions, workflowDescriptions } from "./reference.js";
 const $ = (id) => document.getElementById(id);
 const views = {
   transfers: "Transfers",
   library: "Library",
   attention: "Attention",
   activity: "Activity",
+  reference: "Reference",
 };
 const stages = {
   downloading: ["Downloading", "↓", "receive"],
@@ -36,8 +38,8 @@ const words = {
   stall: "No recent growth",
   progress: "Receiving data",
   inactive: "Inactive",
-  baseline: "First sample",
-  idle: "Waiting for data",
+  baseline: "Starting byte count recorded",
+  idle: "No new bytes since the last check",
   uncertain: "Measuring progress",
   "provider-error": "Provider unavailable",
   "authentication-error": "Provider sign-in failed",
@@ -189,6 +191,8 @@ function restore() {
   scrollTo(0, h.y || 0);
 }
 function navigate(changes, { replace = false, reset = false } = {}) {
+  if (dialog.open) dialog.close();
+  hideHint();
   remember();
   const url = new URL(location.href);
   if (reset) url.search = "";
@@ -216,6 +220,8 @@ function navigate(changes, { replace = false, reset = false } = {}) {
   if (reset) scrollTo(0, 0);
 }
 window.addEventListener("popstate", () => {
+  if (dialog.open) dialog.close();
+  hideHint();
   render();
   restore();
 });
@@ -533,15 +539,31 @@ function library(s) {
     ),
   );
 }
+const attentionGuides = {
+  "Identity decisions":
+    "Compare provider records with your catalog, then link the match or skip it.",
+  "Transfer problems":
+    "Open a transfer to check progress, resume it, or ask the agent to investigate.",
+  "Provider problems":
+    "Inspect the last provider response and check whether discovery can reach it.",
+  "Search problems": "Check the search result, fix any sign-in issue, then retry.",
+};
 function attention() {
   draw("tools", titlebar("Attention", review.length + " items"));
   draw(
     "results",
-    ["Identity decisions", "Transfer problems", "Provider problems", "Search problems"].map(
+    Object.keys(attentionGuides).map(
       (group) => {
         const list = review.filter((r) => issue(r) === group);
-        return list.length && field(
-          group,
+        return list.length && tag(
+          "section",
+          "panel",
+          tag(
+            "div",
+            "attention-heading",
+            tag("h2", "", group),
+            tag("p", "", attentionGuides[group]),
+          ),
           list.map((r) =>
             row(r, {
               sub: group === "Search problems"
@@ -668,9 +690,9 @@ function loadFeed(key, query) {
   });
   pendingFeeds.set(key, request);
 }
-function feedRow(e, openRun = true) {
+function feedRow(e, openRun = true, journey = false) {
   const title = e.item && rows.find((r) => r.key === e.item);
-  const name = title ? pretty(title) : "";
+  const name = title && !journey ? pretty(title) : "";
   const attrs = { class: "event", "data-key": "event-" + e.id };
   const contents = [
     el(
@@ -794,17 +816,44 @@ function globalFeed(full = false) {
     ),
   );
 }
+const readingMeaning = {
+  baseline:
+    "Hoardarr can compare the next byte count with this reading. A restart or a long gap starts a new comparison.",
+  idle: "Two comparable readings had the same downloaded-byte count.",
+  progress: "The downloader reported more bytes than at its previous check.",
+  metadata: "The downloader is asking peers for the release’s file information.",
+  "metadata-timeout": "Release information was still missing after the configured grace period.",
+  stall: "The byte count stayed unchanged throughout the configured stall period.",
+  uncertain: "The available byte counts could not be compared reliably.",
+  inactive: "The transfer was inactive or its network connection was unavailable.",
+};
+let oldestFirst = false;
+try {
+  oldestFirst = localStorage.getItem("hoardarr.timeline.order") === "oldest";
+} catch { /* private storage */ }
+const localDay = new Intl.DateTimeFormat(undefined, { dateStyle: "long" });
 function itemTimeline(r) {
   const data = r.key ? feeds.get(r.key) : null;
   if (r.key) loadFeed(r.key, "?item=" + encodeURIComponent(r.key));
-  const entries = [...(data?.entries ?? [])];
-  function add(at, source, text) {
+  const entries = (data?.entries ?? []).map((e) => ({
+    ...e,
+    label: e.source === "Catalog" ? label(e.label.replaceAll(" ", "-")) : e.label,
+  }));
+  function add(at, source, text, detail) {
     if (at && Number.isFinite(new Date(at).getTime())) {
-      entries.push({ id: source + at + text, at: new Date(at).toISOString(), source, label: text });
+      entries.push({
+        id: source + at + text,
+        at: new Date(at).toISOString(),
+        source,
+        label: text,
+        detail,
+      });
     }
   }
   add(r.search?.searchedAt, "Search", label(r.search?.outcome));
-  for (const e of r.health?.events ?? []) add(e.at, "Downloader", label(e.decision));
+  for (const e of r.health?.events ?? []) {
+    add(e.at, "Downloader", label(e.decision), readingMeaning[e.decision]);
+  }
   add(r.delivered, "Delivery", "Delivery verified");
   add(r.cleaned, "Staging", "Staging cleaned");
   for (const d of snapshot.catalog.decisions ?? []) {
@@ -817,14 +866,48 @@ function itemTimeline(r) {
       add(run.finished ?? run.started, "Operation", run.status);
     }
   }
-  entries.sort((a, b) => b.at.localeCompare(a.at));
+  entries.sort((a, b) => (Date.parse(b.at) - Date.parse(a.at)) * (oldestFirst ? -1 : 1));
+  const days = new Map();
+  for (const entry of entries) {
+    const day = localDay.format(new Date(entry.at));
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(entry);
+  }
   return el(
     "div",
-    { class: "detail-part", "data-key": "journey-" + r.id },
-    tag("h3", "", "Item timeline"),
+    { class: "detail-part journey", "data-key": "journey-" + r.id },
+    tag(
+      "div",
+      "journey-head",
+      tag("h3", "", "Item timeline"),
+      el(
+        "select",
+        { id: "timeline-order", "aria-label": "Timeline order" },
+        opts(
+          [["newest", "Newest first"], ["oldest", "Oldest first"]],
+          oldestFirst ? "oldest" : "newest",
+        ),
+      ),
+    ),
+    tag(
+      "p",
+      "journey-caption",
+      "Recorded changes in your local time. Downloader entries appear when its reading changes.",
+    ),
     data?.stale && empty("Catalog history unavailable. Retrying…"),
     entries.length
-      ? tag("div", "feed-list", entries.map((e) => feedRow(e)))
+      ? el(
+        "div",
+        { class: "journey-list", "data-key": "order-" + oldestFirst },
+        [...days].map(([day, events]) =>
+          el(
+            "div",
+            { class: "journey-day", "data-key": day },
+            tag("h4", "", day),
+            el("ol", {}, events.map((e) => el("li", { "data-key": e.id }, feedRow(e, true, true)))),
+          )
+        ),
+      )
       : empty(r.key && !data ? "Reading item history…" : "No recorded changes yet."),
   );
 }
@@ -862,25 +945,145 @@ const resolutionLabels = {
   reseed: "Resume seeding",
   recheck: "Recheck transfer health",
 };
-function resolutionButton(action, text, c) {
-  return btn("resolve-choice", text, {
-    "data-id": action,
-    "data-candidate": c?.id,
-    class: "small",
-  });
+function actionHelp(action, r, c) {
+  switch (action) {
+    case "link":
+      return "Record “" + c.name + "” from " + c.provider + " as the same episode as “" +
+        c.match.title + "” (" + c.number + ") in " + pretty(r) +
+        ". This resolves the numbering conflict.";
+    case "exclude":
+      return "Skip “" + c.name +
+        "” in this provider review. Your library files stay in place. Hoardarr will reconsider it if the provider changes its details.";
+    case "retry":
+      return "Make this title eligible for the next acquisition run. Provider sign-in problems need a working credential first.";
+    case "reseed":
+      return "Restart sharing this completed transfer with peers.";
+    case "resume":
+      return "Ask the downloader to continue receiving this paused transfer.";
+    case "recheck":
+      return "Take a fresh reading of this transfer and update its health history.";
+    case "series":
+      return "Use “" + c.name + "” as the TVmaze series for future episode discovery.";
+  }
 }
-function resolutionPrompt(r, c) {
-  if (!decision || decision.item !== r.id || decision.input.candidate !== c?.id) return null;
+function resolutionButton(action, text, r, c) {
+  const hint = actionHelp(action, r, c), ref = "hint-" + action + "-" + (c?.id ?? r.id);
   return tag(
-    "div",
-    "answer",
-    el("b", {}, decision.prompt),
-    btn("do-resolve", "Confirm", { class: "primary", disabled: busy }),
-    btn("cancel-resolution", "Cancel", { class: "small" }),
+    "span",
+    "action-slot",
+    btn("resolve-choice", text, {
+      "data-id": action,
+      "data-candidate": c?.id,
+      "data-hint": hint,
+      "aria-describedby": ref,
+      class: "small",
+    }),
+    el("span", { class: "sr", id: ref }, hint),
   );
 }
-let decision;
-
+function agentBrief(r) {
+  const group = issue(r);
+  const problem = r.reason ||
+    (group === "Search problems" ? label(r.search?.outcome) : condition(r));
+  return "Please investigate " +
+    JSON.stringify([r.show, code(r), pretty(r)].filter(Boolean).join(" · ")) +
+    " in Hoardarr. " + group + " — " + problem + ". Reference " + (r.key ?? r.id) +
+    ". Check its saved evidence and explain the next step before changing anything.";
+}
+function guidance(r) {
+  const group = issue(r);
+  const advice = group === "Identity decisions"
+    ? "Compare the episode title, number and air date. Link only when both records describe the same episode."
+    : group === "Search problems"
+    ? (r.search?.outcome === "authentication-error"
+      ? "Restore the provider’s sign-in, then choose Retry search."
+      : "Check provider availability, then choose Retry search.")
+    : group === "Provider problems"
+    ? "Check provider availability. Discovery can reuse the last successful list."
+    : r.state === "paused"
+    ? "Check why this transfer was paused before resuming it."
+    : ["stall", "metadata-timeout"].includes(r.health?.decision)
+    ? "Check peers and the latest reading. Recheck transfer health to sample it again."
+    : "Compare the catalog state with the downloader. The agent can inspect its saved reports.";
+  return el(
+    "details",
+    { class: "agent-guide", "data-key": "help-" + r.id },
+    el("summary", {}, "Resolution guide & agent help"),
+    tag("p", "", advice),
+    tag(
+      "p",
+      "",
+      "For help, open ",
+      el("code", {}, "hoardarr-agent"),
+      " in the guest shell and paste this question.",
+    ),
+    tag("p", "agent-question", agentBrief(r)),
+    btn("copy-brief", "Copy agent question", { class: "small" }),
+    el("output", { role: "status", "aria-live": "polite" }),
+  );
+}
+let pendingReview;
+function askForDecision(r, c, action) {
+  const dialog = $("review-dialog");
+  const payload = action === "series" ? { review: r.id, id: c.id, revision: r.reviewRevision } : {
+    action,
+    target: c ? r.id : r.key,
+    revision: c?.revision ?? (action === "retry" ? r.search?.searchedAt : r.hash ?? r.id),
+    ...(c ? { candidate: c.id } : {}),
+    ...(action === "link" ? { match: c.match.id } : {}),
+  };
+  pendingReview = { mode: action === "series" ? "confirm" : "resolve", payload, item: r.id };
+  $("decision-title").textContent = action === "series"
+    ? "Confirm series match?"
+    : resolutionLabels[action] + "?";
+  $("decision-item").textContent = pretty(r);
+  $("decision-effect").textContent = actionHelp(action, r, c);
+  $("apply-decision").textContent = action === "series"
+    ? "Confirm series"
+    : resolutionLabels[action];
+  hideHint();
+  dialog.showModal();
+}
+const bubble = $("action-hint");
+let hintAnchor;
+function hideHint() {
+  hintAnchor = null;
+  bubble.hidden = true;
+}
+function showHint(anchor) {
+  if (!anchor || anchor === hintAnchor) return;
+  hideHint();
+  hintAnchor = anchor;
+  bubble.textContent = anchor.dataset.hint;
+  bubble.hidden = false;
+  const rect = anchor.getBoundingClientRect(), box = bubble.getBoundingClientRect();
+  bubble.style.left =
+    Math.max(8, Math.min(innerWidth - box.width - 8, rect.left + (rect.width - box.width) / 2)) +
+    "px";
+  bubble.style.top = (rect.top >= box.height + 12 ? rect.top - box.height - 7 : rect.bottom + 7) +
+    "px";
+}
+document.addEventListener("pointerover", (e) => {
+  if (e.pointerType !== "touch") showHint(e.target.closest("[data-hint]"));
+});
+document.addEventListener("pointerout", (e) => {
+  if (hintAnchor && !hintAnchor.contains(e.relatedTarget)) hideHint();
+});
+document.addEventListener("focusin", (e) => showHint(e.target.closest("[data-hint]")));
+document.addEventListener("focusout", hideHint);
+document.addEventListener("scroll", hideHint, true);
+window.addEventListener("resize", hideHint);
+const dialog = $("review-dialog");
+dialog.addEventListener("close", () => {
+  pendingReview = null;
+});
+$("apply-decision").addEventListener("click", () => {
+  const pending = pendingReview;
+  dialog.close();
+  if (pending && state().id === pending.item && canOperate()) {
+    void operate(pending.mode, pending.payload);
+  }
+});
 function standby() {
   const speed = incoming.reduce((s, r) => s + (r.speed || 0), 0),
     live = Boolean(speed && !offline && !snapshot.live.stale);
@@ -946,24 +1149,26 @@ function seriesContents(g, s) {
   ];
 }
 function candidate(c, r) {
-  return tag(
+  return el(
     "div",
-    "candidate",
+    { class: "candidate", "data-key": "candidate-" + c.kind + "-" + c.id },
     el("b", {}, c.name || "Name unavailable"),
     el("small", {}, [c.provider, c.kind, c.number, c.date].filter(Boolean).join(" · ")),
     c.note && tag("p", "", c.note),
+    c.match &&
+      tag("p", "match-name", "Catalog match · ", el("strong", {}, c.match.title), " · ", c.number),
     c.url && el("a", { href: c.url }, "Provider record ↗"),
     c.revision && c.kind === "episode" && /^review-tracked-/.test(r.id) && canOperate() &&
-      [
-        c.match && resolutionButton("link", "Link to " + c.match.title, c),
-        resolutionButton("exclude", "Exclude this episode", c),
-        resolutionPrompt(r, c),
-      ],
+      tag(
+        "div",
+        "candidate-actions",
+        c.match && resolutionButton("link", "Link episode", r, c),
+        resolutionButton("exclude", "Exclude from review", r, c),
+      ),
     r.canConfirm && canOperate() &&
-      btn("choose", "Review this match", { class: "small", "data-id": c.id }),
+      tag("div", "candidate-actions", resolutionButton("series", "Review series match", r, c)),
   );
 }
-let proposed;
 function itemContents(r) {
   const h = r.health || {}, search = r.search || {}, sw = r.releaseSwitch || {};
   const reason = r.reason?.split(", ").map((v) => words[v] || v).join(" · ");
@@ -985,11 +1190,24 @@ function itemContents(r) {
   return [
     tag("h2", "title", pretty(r)),
     tag("p", "", context(r) || (!r.review && r.year ? String(r.year) : "")),
-    tag("div", "answer", el("b", {}, condition(r)), tag("p", "", nextStep(r))),
+    tag(
+      "div",
+      "answer",
+      tag("small", "current-status", "Current status"),
+      el("b", {}, condition(r)),
+      tag("p", "", nextStep(r)),
+      h.observedAt && !r.archived &&
+        tag("small", "", "Last downloader check · " + when(h.observedAt)),
+    ),
+    review.some((item) => item.id === r.id) && guidance(r),
     r.key && r.live && ["stall", "metadata-timeout"].includes(h.decision) && canOperate() &&
-    resolutionButton("recheck", "Recheck transfer health"),
+    resolutionButton("recheck", "Recheck transfer health", r),
     r.state === "paused" && r.key && canOperate() &&
-    resolutionButton(r.seed ? "reseed" : "resume", r.seed ? "Resume seeding" : "Resume download"),
+    resolutionButton(
+      r.seed ? "reseed" : "resume",
+      r.seed ? "Resume seeding" : "Resume download",
+      r,
+    ),
     r.key && ["wanted", "failed"].includes(r.state) &&
     ["authentication-error", "provider-error", "no-match", "no-releases"].includes(
       search.outcome,
@@ -997,9 +1215,8 @@ function itemContents(r) {
     [
       search.outcome === "authentication-error" &&
       tag("p", "", "Update the provider credential before retrying."),
-      resolutionButton("retry", "Retry search"),
+      resolutionButton("retry", "Retry search", r),
     ],
-    resolutionPrompt(r),
     r.candidates?.length > 0 &&
     tag(
       "div",
@@ -1043,29 +1260,9 @@ function itemContents(r) {
       ["Search details", r.review ? null : reason],
       ["Observed", age(r.live ? snapshot.live.observed : snapshot.catalog.observed)],
     ]),
-    proposed?.review === r.id &&
-    tag(
-      "div",
-      "answer",
-      el("b", {}, "Confirm " + proposed.name + "?"),
-      tag("p", "", "Future discovery will use this TVmaze series for " + r.title + "."),
-      btn("confirm", "Confirm series match", { class: "primary", disabled: busy }),
-      btn("cancel", "Cancel", { class: "small" }),
-    ),
     message && el("output", { role: "status" }, message),
     r.sourceUrl && /^https:\/\/www\.tvmaze\.com\/shows\/\d+$/.test(r.sourceUrl) &&
     el("a", { class: "source", href: r.sourceUrl }, r.source + " ↗"),
-    h.events?.length > 0 &&
-    el(
-      "details",
-      { "data-key": "samples" },
-      el("summary", {}, "Observation history"),
-      tag(
-        "ul",
-        "timeline",
-        h.events.map((e) => el("li", {}, when(e.at) + " · " + label(e.decision))),
-      ),
-    ),
     el(
       "details",
       { "data-key": "tech" },
@@ -1076,6 +1273,14 @@ function itemContents(r) {
     !r.review && r.live !== true && state().view !== "library" &&
     btn("in-library", "View in library", { class: "small" }),
   ];
+}
+function inspectorReset() {
+  document.body.classList.remove("inspecting");
+  $("inspector").removeAttribute("role");
+  $("inspector").removeAttribute("aria-modal");
+  for (const n of document.querySelectorAll("header,.horizon,#views,#listing,footer")) {
+    n.inert = false;
+  }
 }
 function inspector(s) {
   const g = series.get(s.id),
@@ -1153,10 +1358,154 @@ function inspector(s) {
     panel.removeAttribute("aria-modal");
   }
 }
+let installedWorkflows, referenceLoading = false, referenceError = false;
+async function readWorkflows() {
+  if (referenceLoading) return;
+  referenceLoading = true;
+  referenceError = false;
+  try {
+    const response = await fetch("/api/reference/workflows", {
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!response.ok) throw Error();
+    installedWorkflows = await response.json();
+  } catch {
+    referenceError = true;
+  } finally {
+    referenceLoading = false;
+    if (state().view === "reference") render();
+  }
+}
+function reference(s) {
+  const workflows = s.kind === "workflows", query = s.q.toLowerCase().trim();
+  if (workflows && !installedWorkflows && !referenceError && !referenceLoading) {
+    void readWorkflows();
+  }
+  const groups = workflows
+    ? (installedWorkflows ?? []).map((w) => [
+      w.name === "media" ? "Media run" : label(w.name.replace(/^hoardarr-/, "")),
+      w.steps.map((step) => [
+        step.command,
+        stepDescriptions[step.name] ?? stepDescriptions[step.command] ??
+          workflowDescriptions[step.command] ?? "Run this configured Swamp step.",
+        step.job + " / " + step.name,
+      ]),
+      (workflowDescriptions[w.name] ?? "") + " Workflow: " + w.name + ".",
+    ])
+    : commandGroups;
+  const visible = groups.map(([name, entries, info]) => [
+    name,
+    entries.filter((entry) => [name, info, ...entry].join(" ").toLowerCase().includes(query)),
+    info,
+  ]).filter(([, entries]) => entries.length);
+  const guidance = workflows
+    ? tag(
+      "p",
+      "",
+      "Each group comes from the installed Swamp workflow definition. Jobs can overlap, and steps run when their conditions are met.",
+    )
+    : tag(
+      "p",
+      "",
+      "In the guest shell, prefix operator commands with ",
+      el("code", {}, "sudo hoardarr-operator"),
+      ". Run the native tools directly. Replace uppercase arguments with your values. For guided help, start ",
+      el("code", {}, "hoardarr-agent"),
+      ".",
+    );
+  draw(
+    "tools",
+    titlebar("Command reference", ""),
+    tag(
+      "div",
+      "ref-tabs",
+      [["commands", "Operator commands"], ["workflows", "Workflow steps"]].map(([id, text]) =>
+        btn("ref-tab", text, {
+          "data-id": id,
+          "aria-pressed": String((workflows ? "workflows" : "commands") === id),
+        })
+      ),
+    ),
+    el("input", {
+      type: "search",
+      id: "ref-search",
+      value: s.q,
+      placeholder: workflows ? "Find a workflow, step or action" : "Find a command or task",
+      "aria-label": "Search reference",
+    }),
+    mobile.matches &&
+      el(
+        "details",
+        { class: "ref-mobile-help", "data-key": "ref-help" },
+        el("summary", {}, workflows ? "How to read workflow steps" : "How to run a command"),
+        guidance.cloneNode(true),
+      ),
+  );
+  draw(
+    "results",
+    workflows && referenceError
+      ? field(
+        "Workflow steps unavailable",
+        empty("The board could not read the installed workflow definitions."),
+        btn("ref-retry", "Try again", { class: "small" }),
+      )
+      : workflows && !installedWorkflows
+      ? empty("Reading installed workflows…")
+      : !visible.length
+      ? field(
+        "No matches",
+        empty("Try a different command or task."),
+        btn("ref-clear", "Clear search", { class: "small" }),
+      )
+      : visible.map(([name, entries, info], i) =>
+        el(
+          "section",
+          { class: "panel ref-group", id: "ref-group-" + i, "data-key": name },
+          tag("div", "panel-head", tag("h3", "", name)),
+          info && tag("p", "ref-summary", info),
+          el(
+            "dl",
+            {},
+            entries.map(([command, description, step]) =>
+              tag(
+                "div",
+                "ref-entry",
+                el("dt", {}, step && el("small", {}, step), el("code", {}, command)),
+                el("dd", {}, description),
+              )
+            ),
+          ),
+        )
+      ),
+  );
+  draw(
+    "inspector",
+    field(
+      mobile.matches
+        ? "Jump to a group"
+        : (workflows ? "Reading the workflow" : "Running commands"),
+      !mobile.matches && guidance,
+      visible.length > 0 &&
+        tag(
+          "div",
+          "ref-index",
+          visible.map(([name], i) => btn("ref-group", name, { "data-id": i, class: "small" })),
+        ),
+    ),
+  );
+}
+
 let listStamp;
 function render() {
   const s = state();
   nav(s);
+  if (s.view === "reference") {
+    listStamp = null;
+    inspectorReset();
+    reference(s);
+    if (snapshot) freshness();
+    return;
+  }
   if (!snapshot) {
     draw("tools", titlebar(views[s.view], ""));
     draw("results", empty(offline ? "Board unavailable. Reconnecting…" : "Tuning in…"));
@@ -1248,11 +1597,10 @@ async function operate(which, payload) {
       : res.status === 409
       ? "Another operation or review update took precedence. Refresh and check its status."
       : res.status === 403
-      ? "Open the configured private dashboard."
+      ? "The private command route denied this request. Use the agent guide or check the host proxy."
       : "Operation unavailable.";
     if (res.ok) {
       snapshot.operation = await res.json();
-      proposed = null;
     }
   } catch {
     message = "Connection lost. Check Activity before retrying.";
@@ -1264,7 +1612,6 @@ async function operate(which, payload) {
 }
 function closePanel() {
   const s = state();
-  proposed = null;
   if (history.state?.from && new URL(history.state.from).origin === location.origin) history.back();
   else navigate({ item: s.parent, parent: null }, { replace: true });
 }
@@ -1272,45 +1619,39 @@ document.addEventListener("click", async (event) => {
   const b = event.target.closest("button[data-action]");
   if (!b) return;
   const a = b.dataset.action, id = b.dataset.id, s = state();
-  if (a !== "choose" && a !== "confirm") proposed = null;
-  if (!["do-resolve", "resolve-choice"].includes(a)) decision = null;
   switch (a) {
-    case "resolve-choice": {
-      const r = byId.get(s.id),
-        c = r?.candidates?.find((c) => String(c.id) === b.dataset.candidate);
-      if (!r) return;
-      const input = {
-        action: id,
-        target: c ? r.id : r.key,
-        revision: c?.revision ?? (id === "retry" ? r.search?.searchedAt : r.hash ?? r.id),
-        ...(c ? { candidate: c.id } : {}),
-        ...(id === "link" ? { match: c.match.id } : {}),
-      };
-      decision = {
-        item: r.id,
-        input,
-        prompt: id === "link"
-          ? "Identify " + c.name + " as " + c.match.title + " at " + c.number + "?"
-          : id === "exclude"
-          ? "Exclude " + c.name + " from this review while its provider details stay the same?"
-          : id === "retry"
-          ? "Make " + pretty(r) + " eligible for search on the next acquisition run?"
-          : resolutionLabels[id] + " for " + pretty(r) + "?",
-      };
+    case "ref-tab":
+      navigate({ kind: id, q: null, item: null });
+      break;
+    case "ref-group":
+      $("ref-group-" + id)?.scrollIntoView({ block: "start" });
+      break;
+    case "ref-clear":
+      navigate({ q: null }, { replace: true });
+      $("ref-search")?.focus();
+      break;
+    case "ref-retry":
+      void readWorkflows();
       render();
       break;
-    }
-    case "cancel-resolution":
-      decision = null;
-      render();
-      break;
-    case "do-resolve":
-      if (decision) {
-        const input = decision.input;
-        decision = null;
-        await operate("resolve", input);
+    case "copy-brief": {
+      const output = b.parentElement.querySelector("output");
+      try {
+        await navigator.clipboard.writeText(agentBrief(byId.get(s.id)));
+        output.textContent = "Question copied";
+      } catch {
+        output.textContent = "Select the question above to copy it.";
       }
       break;
+    }
+    case "resolve-choice": {
+      const r = byId.get(s.id);
+      if (!r || !canOperate()) break;
+      const c = r.candidates?.find((c) => String(c.id) === b.dataset.candidate);
+      if (["series", "link", "exclude"].includes(id) && !c) break;
+      askForDecision(r, c, id);
+      break;
+    }
     case "all-events":
       navigate({ view: "activity" }, { reset: true });
       break;
@@ -1363,25 +1704,6 @@ document.addEventListener("click", async (event) => {
     case "execute":
       await operate(mode);
       break;
-    case "choose": {
-      const r = byId.get(s.id), c = r.candidates.find((c) => String(c.id) === id);
-      proposed = { review: r.id, name: c.name, id: c.id, revision: r.reviewRevision };
-      render();
-      break;
-    }
-    case "confirm":
-      if (proposed) {
-        await operate("confirm", {
-          review: proposed.review,
-          id: proposed.id,
-          revision: proposed.revision,
-        });
-      }
-      break;
-    case "cancel":
-      proposed = null;
-      render();
-      break;
     case "copy":
       try {
         await navigator.clipboard.writeText(b.closest("details").querySelector("dl").innerText);
@@ -1394,9 +1716,17 @@ document.addEventListener("click", async (event) => {
   }
 });
 document.addEventListener("input", (e) => {
+  if (e.target.id === "ref-search") navigate({ q: e.target.value }, { replace: true });
   if (e.target.id === "filter") navigate({ q: e.target.value, item: null }, { replace: true });
 });
 document.addEventListener("change", (e) => {
+  if (e.target.id === "timeline-order") {
+    oldestFirst = e.target.value === "oldest";
+    try {
+      localStorage.setItem("hoardarr.timeline.order", e.target.value);
+    } catch { /* private storage */ }
+    render();
+  }
   if (e.target.id === "kind") navigate({ kind: e.target.value, item: null });
   if (e.target.id === "mode") {
     mode = e.target.value;
@@ -1404,13 +1734,23 @@ document.addEventListener("change", (e) => {
   }
 });
 document.addEventListener("keydown", (e) => {
+  if (dialog.open) return;
+  if (hintAnchor && e.key === "Escape") {
+    hideHint();
+    e.preventDefault();
+    return;
+  }
   if (!state().id) return;
   if (e.key === "Escape") {
     e.preventDefault();
     closePanel();
   }
   if (e.key === "Tab" && mobile.matches) {
-    const focusable = [...$("inspector").querySelectorAll("button:not(:disabled),a,summary")]
+    const focusable = [
+      ...$("inspector").querySelectorAll(
+        "button:not(:disabled),a,summary,select:not(:disabled),input:not(:disabled)",
+      ),
+    ]
       .filter((n) => n.getClientRects().length);
     const first = focusable[0], last = focusable.at(-1);
     if (
