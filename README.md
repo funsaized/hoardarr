@@ -704,16 +704,15 @@ return to the full library.
 The operating mode controls run the same commands as the guest CLI. **Preview plan** calculates the
 next plan and shows the titles selected for acquisition or delivery, along with the time of the
 catalog reading. **Refresh discovery** updates the catalog, and **Run media pipeline** processes
-deliveries and acquisitions. To start an operation, read the key with
-`sudo cat /run/hoardarr-board/operator.key` in the guest and enter it in the board. The key rotates
-when the board service restarts. The board shows the result and accepts one operation at a time.
+deliveries and acquisitions. Open `http://127.0.0.1:9184/` on the host to start an operation.
+The board accepts one operation at a time and shows its result.
 Workflow history and the guest journal retain the details.
 
 Transfer readings refresh every 15 seconds while downloads are active or queued, and every minute
 when idle. Catalog readings refresh once a minute. Open screens share a cache. The service reads
 sources on demand, and hidden tabs suspend requests.
 
-To expose the board on an enrolled host with the standard inventory, install the user tunnel unit
+To open the board on an enrolled host with the standard inventory, install the user tunnel unit
 and select the enrolled VM. Run these commands on the host after provisioning the image.
 
 ```sh
@@ -722,12 +721,18 @@ install -Dm644 deploy/devvm/hoardarr-board-tunnel@.service \
 systemctl --user daemon-reload
 board_vm=$(jq -r .vm "$HOME/.hoardarr-host/production-deployment.json")
 systemctl --user enable --now "hoardarr-board-tunnel@$board_vm.service"
-tailscale serve --bg --https=9185 http://127.0.0.1:9184
 ```
 
-Open the HTTPS address printed by Tailscale on a device connected to your Tailscale network. The
-tunnel binds only to host loopback. For unattended startup, enable lingering for the host operator
-account. Custom DevVM inventory paths require the corresponding SSH config path in the tunnel unit.
+The tunnel listens on host loopback and forwards to the private board socket in the guest. For
+unattended startup, enable lingering for the host operator account. Custom DevVM inventory paths
+require the corresponding SSH config path in the tunnel unit.
+
+When upgrading a host that used Tailscale Serve, inspect `tailscale serve status --json` before
+installing the keyless image. If the board was the only handler on HTTPS port 9185, remove that
+listener with `tailscale serve --https=9185 off`. If it shares a listener, remove only the board
+handler. Verify the remaining routes against the original list. From another device on your Tailscale network,
+check that the former board URL is unreachable. Confirm the local URL still works before updating
+the appliance.
 
 ## Storage
 

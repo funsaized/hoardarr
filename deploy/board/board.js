@@ -306,12 +306,11 @@ byId("commands").onsubmit = async (event) => {
     const mode = byId("commands").elements.workflow.value;
     const res = await fetch("/api/operate/" + mode, {
       method: "POST",
-      headers: { Authorization: "Bearer " + byId("key").value.trim() },
     });
     byId("feedback").textContent = res.ok
       ? modes[mode].label + " accepted."
       : res.status === 403
-      ? "Operator key rejected."
+      ? "Open the board at http://127.0.0.1:9184/ to start an operation."
       : res.status === 409
       ? "Another operation is running."
       : "Operation unavailable.";

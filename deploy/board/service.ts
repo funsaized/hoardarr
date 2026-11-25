@@ -227,6 +227,10 @@ export function catalogResponse(
     shows: "shows" in saved ? saved.shows : [],
   };
 }
+export function localCommandRequest(headers: Headers) {
+  return headers.get("host") === "127.0.0.1:9184" &&
+    headers.get("origin") === "http://127.0.0.1:9184";
+}
 if (import.meta.main) {
   const readLive = cache(
     live,
@@ -243,8 +247,6 @@ if (import.meta.main) {
   ) {
     assets.set(route, { body: await Deno.readFile(new URL(file, import.meta.url)), type });
   }
-  const key = crypto.randomUUID();
-  await Deno.writeTextFile("/run/hoardarr-board/operator.key", key + "\n", { mode: 0o600 });
   let preview: { observed: string; acquisitions: string[]; deliveries: string[] } | null = null;
   let operation = { mode: "", status: "Idle", started: 0 };
   async function operate(mode: string) {
@@ -288,7 +290,7 @@ if (import.meta.main) {
       if (!["preview", "discover", "run"].includes(mode)) {
         return new Response(null, { status: 404, headers });
       }
-      if (req.headers.get("authorization") !== "Bearer " + key) {
+      if (!localCommandRequest(req.headers)) {
         return new Response(null, { status: 403, headers });
       }
       if (operation.status === "Running") return new Response(null, { status: 409, headers });

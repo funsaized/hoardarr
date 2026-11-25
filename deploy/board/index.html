@@ -50,15 +50,9 @@
             <label><input type="radio" name="workflow" value="discover"><b>Refresh discovery</b><span>Update tracked titles</span></label>
             <label><input type="radio" name="workflow" value="run"><b>Run media pipeline</b><span>Acquire and deliver</span></label>
           </fieldset>
-          <label>Operator key<input required id="key" type="password" autocomplete="off" placeholder="Guest operator key" aria-describedby="key-help"></label>
           <button id="execute" type="submit" disabled>Start preview</button>
         </form>
         <p id="mode-help"></p>
-        <details>
-          <summary>Operator access</summary>
-          <p
-            id="key-help">Read the current key from <code>/run/hoardarr-board/operator.key</code> in the guest. It rotates when the board restarts.</p>
-        </details>
         <output id="feedback" role="status"></output>
         <section id="preview" hidden aria-label="Last successful preview">
           <h2>Last successful preview</h2>
