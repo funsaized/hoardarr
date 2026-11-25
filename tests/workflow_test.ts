@@ -62,7 +62,7 @@ Deno.test("all deployment modes reconcile in-flight work without waiting or swit
   }
   const acquisitionNames = (graph: Record<string, unknown>[]) =>
     steps(graph.find((w) => w.name === "hoardarr-acquisition")!).map((s) => s.name)
-      .filter((name) => name !== "binding");
+      .filter((name) => !["binding", "switch-releases"].includes(name));
   deepStrictEqual(acquisitionNames(graphs[1]), acquisitionNames(graphs[2]));
 });
 
@@ -122,7 +122,9 @@ Deno.test("native sampling fits the telemetry gap without scheduling acquisition
   const graph = workflowDefinitions(config, {});
   const sampling = graph.find((w) => w.name === "hoardarr-transfer-sampling")!;
   deepStrictEqual(sampling.trigger, {
-    schedule: "*/5 * * * *", inputs: {}, catchUp: { policy: "none" },
+    schedule: "*/5 * * * *",
+    inputs: {},
+    catchUp: { policy: "none" },
   });
   deepStrictEqual(steps(sampling).map((s) => s.name), ["sample"]);
   assert(!JSON.stringify(sampling).includes("control"));

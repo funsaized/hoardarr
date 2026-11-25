@@ -549,3 +549,79 @@ index 047f594..8ebb465 100644
    getItems(): QueueItem[] {
      return [...this.items.values()].sort((a, b) => b.addedAt - a.addedAt);
    }
+diff --git a/src/daemon/serve.ts b/src/daemon/serve.ts
+--- a/src/daemon/serve.ts
++++ b/src/daemon/serve.ts
+@@ -328,6 +328,30 @@
+     const outcome = await addInput(runtime, magnet, addOptions);
+     if (outcome === "invalid") return { status: 400, body: { error: "invalid magnet or info hash" } };
+     return { status: 200, body: { ok: true, outcome } };
++  }
++  if (method === "POST" && urlPath === "/detach-stalled") {
++    let claim;
++    try { claim = JSON.parse(bodyText); } catch { return { status: 400, body: { error: "invalid claim" } }; }
++    if (!claim || typeof claim.id !== "string" || typeof claim.name !== "string" ||
++        typeof claim.interface !== "string" || !Number.isSafeInteger(claim.downloadedBytes)) {
++      return { status: 400, body: { error: "missing detach preconditions" } };
++    }
++    const q = runtime.queue;
++    const item = q.getItems().find(it => it.id === claim.id);
++    const net = q.networkStatus();
++    const reading = q.transferReading(claim.id);
++    if (claim.session !== telemetrySession || net.interface !== claim.interface || !net.online || !net.address ||
++        item?.status !== "downloading" || item.name !== claim.name || item.dir !== runtime.downloadDir ||
++        !reading.metadataReady || reading.downloadedBytes !== claim.downloadedBytes ||
++        reading.totalBytes === undefined || reading.downloadedBytes! >= reading.totalBytes ||
++        q.getSeed(claim.id) || q.getHistory().some(it => it.id === claim.id)) {
++      return { status: 409, body: { detached: false } };
++    }
++    // remove drops the live engine handle and queue entry before its first await.
++    // Keep payload files and acknowledge only after the removal is durable.
++    await q.remove(claim.id, { deleteFiles: false });
++    q.persistSync();
++    return { status: 200, body: { detached: true } };
+   }
+   if (method === "POST" && urlPath === "/control") {
+     const req = parseControl(bodyText);
+diff --git a/src/daemon/serve.test.ts b/src/daemon/serve.test.ts
+--- a/src/daemon/serve.test.ts
++++ b/src/daemon/serve.test.ts
+@@ -109,6 +109,27 @@
+     const res = await handleApi(runtime, null, "GET", "/downloads", undefined, "");
+     expect(res.status).toBe(200);
+     expect(res.body).toMatchObject({ downloads: [], seeds: [] });
++  });
++
++  it("detaches only an unchanged incomplete transfer in the same session without deleting payloads", async () => {
++    const item={id:HASH,name:"fixture",dir,status:"downloading",progress:50};
++    let bytes=100;
++    const remove=vi.fn(async()=>true), persistSync=vi.fn();
++    Object.assign(runtime.queue,{getItems:()=>[item], getSeed:()=>undefined, remove, persistSync,
++      transferReading:()=>({metadataReady:true,downloadedBytes:bytes,totalBytes:200})});
++    const status=await handleApi(runtime,null,"GET","/downloads",undefined,"");
++    const claim={session:status.body.telemetrySession,id:HASH,name:item.name,interface:"wg0",downloadedBytes:100};
++    const detach=(data:unknown)=>handleApi(runtime,null,"POST","/detach-stalled",undefined,JSON.stringify(data));
++    expect((await detach({...claim,session:"different"})).status).toBe(409);
++    bytes=101;
++    expect((await detach(claim)).status).toBe(409);
++    bytes=200;
++    expect((await detach({...claim,downloadedBytes:200})).status).toBe(409);
++    expect(remove).not.toHaveBeenCalled();
++    bytes=100;
++    expect((await detach(claim)).status).toBe(200);
++    expect(remove).toHaveBeenCalledWith(HASH,{deleteFiles:false});
++    expect(persistSync).toHaveBeenCalledTimes(1);
+   });
+ 
+   it("404s an unknown route", async () => {
+diff --git a/src/daemon/runtime.ts b/src/daemon/runtime.ts
+--- a/src/daemon/runtime.ts
++++ b/src/daemon/runtime.ts
+@@ -82,6 +82,7 @@
+   if (!parsed) return "invalid";
+   if (runtime.queue.has(parsed.infoHash)) return "duplicate";
+   await fs.mkdir(runtime.downloadDir, { recursive: true }).catch(() => {});
++  if (runtime.queue.has(parsed.infoHash)) return "duplicate";
+   runtime.queue.add(
+     {
+       id: parsed.infoHash,

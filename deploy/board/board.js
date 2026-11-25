@@ -61,7 +61,7 @@ function render() {
   const rows = live.rows.map((t) => {
     const c = byHash.get(t.id.toLowerCase());
     if (c) joined.add(c.id);
-    return { ...t, source: c?.source, sourceUrl: c?.sourceUrl, search: c?.search, health: c?.health, id: c?.id ?? t.id, title: c?.title ?? t.title, release: t.title };
+    return { ...t, releaseSwitch: c?.releaseSwitch, source: c?.source, sourceUrl: c?.sourceUrl, search: c?.search, health: c?.health, id: c?.id ?? t.id, title: c?.title ?? t.title, release: t.title };
   });
   rows.push(
     ...activeCatalog.filter((c) => !joined.has(c.id)).map((c) => ({
@@ -233,6 +233,10 @@ function render() {
         State: describe(item),
         Release: item.release,
         Peers: item.peers,
+        "Release switch": item.releaseSwitch?.phase,
+        "Previous hash": item.releaseSwitch?.oldHash,
+        "Alternate hash": item.releaseSwitch?.newHash,
+        "Alternate rank": item.releaseSwitch?.rank,
         "Transfer observation": item.health?.decision,
         "Sample time": item.health && new Date(item.health.observedAt).toLocaleString(),
         "Observed without growth": item.health && Math.floor(item.health.idleMs / 60000) + " min",

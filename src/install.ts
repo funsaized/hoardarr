@@ -404,6 +404,13 @@ async function installUnlocked(
   });
   await define("pipeline", "@funsaized/hoardarr/pipeline", {
     requestModel: "requests",
+    ...(config.guest
+      ? {
+        switchPolicy: config.switching,
+        stagingRoot: config.paths.staging,
+        minFreeBytes: config.download.minFreeBytes,
+      }
+      : {}),
     ...(config.providers.discovery === "tmdb" ? { trackedShows: config.interests.shows } : {}),
     destination: actual.destination,
     ...(config.providers.destination === "local" ? { libraryRoot: config.paths.library } : {}),
@@ -452,7 +459,9 @@ async function installUnlocked(
   for (
     const name of [
       "media",
-      ...(config.guest && config.providers.downloader === "torlink" ? ["hoardarr-transfer-sampling"] : []),
+      ...(config.guest && config.providers.downloader === "torlink"
+        ? ["hoardarr-transfer-sampling"]
+        : []),
       "hoardarr-observation",
       "hoardarr-discovery",
       "hoardarr-acquisition",

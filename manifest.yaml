@@ -33,6 +33,8 @@ include:
   - _lib/tv_backlog.ts
   - _lib/tv_progress.ts
   - _lib/requests.ts
+  - _lib/switch_pipeline.ts
+  - _lib/switch_release.ts
   - _lib/transfer_observation.ts
   - _lib/request_metadata.ts
   - _lib/fixture_request_metadata.ts

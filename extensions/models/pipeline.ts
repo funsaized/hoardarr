@@ -33,7 +33,12 @@ import {
 } from "./_lib/transfer_observation.ts";
 import { CatalogIdentity, identityIndex, movieCatalogId } from "./_lib/catalog_identity.ts";
 import { airedEpisodes, TrackedEpisodeList, trackedKey, TrackedSeries } from "./_lib/tracked_tv.ts";
+import { ReleaseSwitch, SwitchPolicy } from "./_lib/switch_release.ts";
+import { switchReleases } from "./_lib/switch_pipeline.ts";
 const Globals = z.object({
+  switchPolicy: SwitchPolicy.prefault({}),
+  stagingRoot: z.string().optional(),
+  minFreeBytes: z.number().int().nonnegative().default(20 * 1024 ** 3),
   trackedShows: z.array(TrackedSeries).optional(),
   requestModel: z.string().optional(),
   libraryRoot: z.string().optional(),
@@ -308,6 +313,12 @@ export const model = {
   }],
   globalArguments: Globals,
   resources: {
+    releaseSwitch: {
+      schema: ReleaseSwitch,
+      description: "Crash-recoverable release switch journal",
+      lifetime: "infinite",
+      garbageCollection: 20,
+    },
     episodeReview: {
       schema: z.object({
         title: z.string(),
@@ -556,6 +567,31 @@ export const model = {
           ),
           ...tvSearch,
         ];
+        if (acquisition && !args.requestId && ctx.globalArgs.switchPolicy.enabled) {
+          const journal = (await ctx.readModelData("pipeline", "releaseSwitch")).map((r) =>
+            ReleaseSwitch.parse(r.attributes)
+          );
+          const health = new Map(
+            (await ctx.readModelData("pipeline", "transferObservation")).map(
+              (r) => [r.name, TransferObservation.parse(r.attributes)],
+            ),
+          );
+          const next = all.find((r) => {
+            if (
+              r.status !== "downloading" || !ctx.globalArgs.switchPolicy.titles.includes(r.key) ||
+              journal.some((j) => j.key === r.key && !["committed", "cancelled"].includes(j.phase))
+            ) return false;
+            const observation = health.get("transfer-health-" + r.mediaKind + "-" + r.id);
+            const attempt = state[r.mediaKind === "movie" ? r.key : String(r.id)];
+            return observation?.decision === "stall" && observation.sample.hash === r.infoHash &&
+              (!attempt ||
+                attempt.outcome === "selected" || attempt.nextSearchAt <= now);
+          });
+          if (
+            next && searchable.length < ctx.globalArgs.batchLimit && (next.mediaKind === "movie" ||
+              tvSearch.length < ctx.globalArgs.episodeSearchLimit)
+          ) searchable.push(next);
+        }
         const selectedEpisodes = new Set(
           prioritizeEpisodes(
             episodeRows.filter((r) => r.status === "selected") as unknown as EpisodeWork[],
@@ -868,6 +904,8 @@ export const model = {
           ).map((q) => ({
             [idField(kind)]: Number(q.key.slice(2)),
             releases: q.results,
+            refreshAlternates: ctx.globalArgs.switchPolicy.enabled &&
+              ctx.globalArgs.switchPolicy.titles.includes(q.key),
           }));
           if (items.length) await invoke(ctx, catalog(ctx, kind), "select", { items });
         }
@@ -1053,6 +1091,29 @@ export const model = {
         return { dataHandles: handles };
       },
     },
+    switchReleases: {
+      description:
+        "Reconcile a pending release switch or start one on an explicitly enabled title.",
+      arguments: Owned,
+      execute: async ({ owner }: z.infer<typeof Owned>, ctx: Context) => {
+        const g = ctx.globalArgs;
+        if (g.expectedInterface && g.stagingRoot && g.downloadProvider === "torlink") {
+          await switchReleases(ctx, owner, {
+            policy: g.switchPolicy,
+            expectedInterface: g.expectedInterface,
+            stagingRoot: g.stagingRoot,
+            minFreeBytes: g.minFreeBytes,
+            maxGapMs: g.transferSampleMaxGapMinutes * 60000,
+            seedTime: g.seedTime,
+            movies: g.movies,
+            episodes: g.episodes,
+            movieLimit: g.maxMovieAttempts,
+            episodeLimit: g.maxEpisodeAttempts,
+          });
+        }
+        return write(ctx, "summary", { ok: true });
+      },
+    },
     sampleTransfers: {
       description:
         "Observe active transfer counters between media runs without issuing control commands.",
@@ -1080,8 +1141,16 @@ export const model = {
           progress: r.progress ?? null,
         }));
         const present = new Set(snapshots.map((torrent) => torrent.infoHash));
+        const pendingSwitches = ctx.globalArgs.stagingRoot
+          ? (await ctx.readModelData("pipeline", "releaseSwitch")).map((r) =>
+            ReleaseSwitch.parse(r.attributes)
+          ).filter((s) => !["cancelled", "committed"].includes(s.phase)).map((s) => s.oldHash)
+          : [];
         for (const kind of ["movie", "episode"] as const) {
-          await invoke(ctx, catalog(ctx, kind), "reconcile", { snapshots });
+          await invoke(ctx, catalog(ctx, kind), "reconcile", {
+            snapshots,
+            ...(pendingSwitches.length ? { pendingSwitches } : {}),
+          });
           // Reconcile a remove that succeeded before its acknowledgement was persisted.
           for (const row of await rows(ctx, kind)) {
             if (row.status === "seed-stopped" && row.infoHash && !present.has(row.infoHash)) {

@@ -228,8 +228,18 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   discovery.push(savedIngest("ingest-episodes", "episode", "episodes"));
 
   if (config.providers.discovery === "tmdb" && config.interests.shows.length) {
-    discovery.push(skip(method("tracked-tv-refresh", "tracked-tv", "refresh", {}, "ingest-episodes"), 'inputs.requestId != ""'));
-    discovery.push(skip(method("tracked-tv-ingest", "pipeline", "ingestTracked", owned, "tracked-tv-refresh"), 'inputs.requestId != ""'));
+    discovery.push(
+      skip(
+        method("tracked-tv-refresh", "tracked-tv", "refresh", {}, "ingest-episodes"),
+        'inputs.requestId != ""',
+      ),
+    );
+    discovery.push(
+      skip(
+        method("tracked-tv-ingest", "pipeline", "ingestTracked", owned, "tracked-tv-refresh"),
+        'inputs.requestId != ""',
+      ),
+    );
   }
 
   const acquisition: Node[] = [call("health", "download-provider", "health")];
@@ -240,7 +250,12 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       ? expr("steps.health.outputs.records + steps.binding.outputs.records")
       : records("health"),
   }, native ? "binding" : "health"));
-  acquisition.push(plan("search-plan", "acquisition", "capabilities"));
+  if (native) {
+    acquisition.push(
+      method("switch-releases", "pipeline", "switchReleases", owned, "capabilities"),
+    );
+  }
+  acquisition.push(plan("search-plan", "acquisition", native ? "switch-releases" : "capabilities"));
   const noSearch = 'size(steps["search-plan"].outputs.queries) == 0';
   acquisition.push(skip(
     call(
@@ -249,7 +264,9 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       "search",
       {
         queries: expr('steps["search-plan"].outputs.queries'),
-        ...(config.providers.search === "torlink" ? { timeoutSeconds: config.search.timeoutSeconds } : {}),
+        ...(config.providers.search === "torlink"
+          ? { timeoutSeconds: config.search.timeoutSeconds }
+          : {}),
         ...(config.torlink.interface ? { interface: config.torlink.interface } : {}),
       },
       "search-plan",

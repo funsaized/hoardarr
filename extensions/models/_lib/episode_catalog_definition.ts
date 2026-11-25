@@ -78,6 +78,7 @@ const ReleaseSchema = z.object({
 });
 
 const SelectItemSchema = z.object({
+  refreshAlternates: z.boolean().optional(),
   tmdbEpisodeId: z.number().int().positive(),
   releases: z.array(ReleaseSchema).max(200),
 });
@@ -121,6 +122,7 @@ const TorrentSnapshotSchema = z.object({
 });
 
 const ReconcileArgsSchema = z.object({
+  pendingSwitches: z.array(z.string()).max(16).optional(),
   snapshots: z.array(TorrentSnapshotSchema).max(500),
 });
 
@@ -762,7 +764,9 @@ async function executeIngest(
   let preserved = 0;
   for (const discovery of args.discoveries) {
     const existing = await loadEpisode(context, episodeCatalogId(discovery));
-    if (existing && existing.localId !== discovery.localId && (existing.localId || discovery.localId)) {
+    if (
+      existing && existing.localId !== discovery.localId && (existing.localId || discovery.localId)
+    ) {
       throw new Error("Conflicting episode ownership at this catalog key");
     }
     if (existing && TERMINAL_STATUSES.has(existing.status)) {
@@ -802,7 +806,8 @@ async function executeSelect(
       missing++;
       continue;
     }
-    if (!isSelectable(existing, context.globalArgs?.policy ?? episodePolicy)) {
+    const active = item.refreshAlternates === true && existing.status === "downloading";
+    if (!active && !isSelectable(existing, context.globalArgs?.policy ?? episodePolicy)) {
       ineligible++;
       continue;
     }
@@ -817,6 +822,10 @@ async function executeSelect(
       selectedAt,
       ranking: (context.globalArgs?.policy ?? episodePolicy).ranking,
     }));
+    if (active) {
+      handles.push(await writeEpisode(context, { ...existing, rankedReleases }));
+      continue;
+    }
     let next: Episode;
     if (result.release) {
       next = {
@@ -883,7 +892,7 @@ async function executeTransition(
 }
 
 async function executeReconcile(
-  args: { snapshots: TorrentSnapshot[] },
+  args: { snapshots: TorrentSnapshot[]; pendingSwitches?: string[] },
   context: Context,
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
   context.logger.info("reconcile starting", {
@@ -899,6 +908,7 @@ async function executeReconcile(
   for (const episode of allEpisodes) {
     if (!episode.infoHash) continue;
     const snapshot = byHash.get(episode.infoHash.toLowerCase());
+    if (!snapshot && args.pendingSwitches?.includes(episode.infoHash.toLowerCase())) continue;
     const next = advanceFromSnapshot(withShowYear(episode, context), snapshot, now);
     if (!next) continue;
     handles.push(await writeEpisode(context, next));
@@ -1010,6 +1020,53 @@ export const definition = {
   },
   methods: {
     relocate: catalogRelocationMethod("episode-catalog", "episode", "tmdbEpisodeId", EpisodeSchema),
+    commitAlternate: {
+      description:
+        "Record a confirmed alternate without resetting release ownership or delivery history.",
+      arguments: z.object({
+        id: z.number().int().positive(),
+        oldHash: z.string(),
+        newHash: z.string(),
+        attemptId: z.uuid(),
+        nextEligibleAt: z.iso.datetime(),
+      }),
+      execute: async (
+        args: {
+          id: number;
+          oldHash: string;
+          newHash: string;
+          attemptId: string;
+          nextEligibleAt: string;
+        },
+        context: Context,
+      ) => {
+        const row = await loadEpisode(context, args.id);
+        if (row?.infoHash === args.newHash && row.lastSwitch === args.attemptId) {
+          return { dataHandles: [] };
+        }
+        if (
+          !row || row.infoHash !== args.oldHash || row.status !== "downloading" || row.transferredAt
+        ) throw new Error("Switch no longer owns this download");
+        const candidate = row.rankedReleases?.find((r) => r.infoHash === args.newHash);
+        if (!candidate) throw new Error("Alternate no longer ranked");
+        const stalled = z.record(z.string(), z.string()).parse(row.stalledReleases ?? {});
+        return {
+          dataHandles: [
+            await writeEpisode(context, {
+              ...row,
+              infoHash: args.newHash,
+              releaseName: candidate.name,
+              acquisitionLocator: candidate.magnet ?? args.newHash,
+              bytes: candidate.sizeBytes,
+              lastSwitch: args.attemptId,
+              attempts: row.attempts + 1,
+              error: null,
+              stalledReleases: { ...stalled, [args.oldHash]: args.nextEligibleAt },
+            }),
+          ],
+        };
+      },
+    },
     recordAdd: {
       description:
         "Apply successful per-item add evidence; leave ambiguous results for reconciliation.",

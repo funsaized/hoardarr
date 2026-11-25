@@ -1,11 +1,12 @@
 // The browser only sees these projections. Provider responses can include private locators.
 const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "episodeReview", "identityReview"]) || (modelName == "tracked-tv" && specName == "refreshStatus" && attributes.state != "ready")';
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"]) || (modelName == "tracked-tv" && specName == "refreshStatus" && attributes.state != "ready")';
 const catalogFields = [
   "catalogId", "localId", "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "seriesCatalogId", "seriesLocalId", "tvmazeSeriesId", "numbering", "showName",
   "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
 ];
-const catalogProjection = 'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
+const catalogProjection = 'specName == "releaseSwitch" ? {"switchKey": attributes.key, "phase": attributes.phase, "oldHash": attributes.oldHash, "newHash": attributes.candidate.infoHash, "rank": attributes.candidate.rank, "updatedAt": attributes.updatedAt} : ' +
+  'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
   'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
   'specName == "searchState" ? {"searchAttempts": attributes.attempts} : ' +
   'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
@@ -146,6 +147,7 @@ async function catalog() {
   for (const row of results) {
     if (row.observationKey) observations.set(row.observationKey, row);
   }
+  const switches = new Map(results.filter((r: {switchKey?: string}) => r.switchKey).map((r: {switchKey:string})=>[r.switchKey,r]));
   const attempts = results.find((row: { searchAttempts?: unknown }) => row.searchAttempts)?.searchAttempts ?? {};
   return {
     shows,
@@ -155,12 +157,13 @@ async function catalog() {
         r.reason === "unavailable" ? "TVmaze unavailable · retaining last successful episode list" : r.reason,
       providers: Array.isArray(r.choices) ? r.choices.map(c => c.name + " (" + (c.premiered ?? "unknown premiere") + ") · TVmaze " + c.id).join(", ") :
         Array.isArray(r.ids) ? r.ids.slice(0, 24).join(", ") : undefined,
-    })), ...results.filter((r: Record<string, unknown>) => !r.reviewKey && !r.searchAttempts && !r.shows && !r.observationKey && !r.catalogKey).map((
+    })), ...results.filter((r: Record<string, unknown>) => !r.switchKey && !r.reviewKey && !r.searchAttempts && !r.shows && !r.observationKey && !r.catalogKey).map((
       r: Record<string, unknown>,
     ) => ({
       id: r.localId ?? identities.get(r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`) ??
         (r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`),
       health: matchingObservation(r, observations),
+      releaseSwitch: switches.get(r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`),
       search: searchDetails(attempts[String(r.showName ? r.catalogId ?? r.tmdbEpisodeId : "m-" + (r.catalogId ?? r.tmdbId))], r.rankedCount),
       hash: r.infoHash,
       archived: !!r.archivedAt,

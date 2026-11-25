@@ -1,5 +1,6 @@
 /** User-owned configuration. Generated Swamp definitions are an implementation detail. */
 import { z } from "npm:zod@4.5.1";
+import { SwitchPolicy } from "../extensions/models/_lib/switch_release.ts";
 import { StorageSchema } from "../extensions/models/_lib/storage.ts";
 import { parse, stringify } from "npm:yaml@2.8.1";
 import { episodePolicy, moviePolicy, PolicySchema } from "../extensions/models/_lib/policy.ts";
@@ -69,6 +70,7 @@ export const ConfigSchema = z.object({
     movie: PolicySchema.default(moviePolicy),
     episode: PolicySchema.default(episodePolicy),
   }).strict().default({ movie: moviePolicy, episode: episodePolicy }),
+  switching: SwitchPolicy.prefault({}),
   search: z.object({
     concurrency: z.number().int().min(1).max(16).default(4),
     timeoutSeconds: z.number().int().min(1).max(300).default(45),
