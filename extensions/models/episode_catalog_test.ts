@@ -1,5 +1,6 @@
 /// <reference lib="deno.ns" />
 import { model, testing } from "./episode_catalog.ts";
+import { model as publicModel } from "./public_episode_catalog.ts";
 
 Deno.test("episode transitions retain unknown source evidence", async () => {
   const retained = { source: { receiptVersion: 7, authority: "original-destination" } };
@@ -335,7 +336,9 @@ Deno.test("identity: tmdbEpisodeId must be a positive integer and instance name 
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/episode-catalog", "model type");
-  assertEquals(model.version, "2026.11.16.1", "model version");
+  const version = model.upgrades.at(-1)?.toVersion;
+  assertEquals(model.version, version, "local catalog version matches its latest upgrade");
+  assertEquals(publicModel.version, version, "public catalog version matches its latest upgrade");
   assert("episode" in model.resources, "episode spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
