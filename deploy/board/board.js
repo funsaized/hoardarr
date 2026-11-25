@@ -372,7 +372,10 @@ function transferRow(r) {
   const s = stages[r.state];
   return row(r, {
     symbol: s?.[1],
-    kind: s?.[2],
+    kind: (s?.[2] || "") +
+      (r.state === "downloading" && r.speed > 0 && !offline && !snapshot.live.stale
+        ? " receiving"
+        : ""),
     sub: [context(r), condition(r), r.rank && "Queue #" + r.rank].filter(Boolean).join(" · "),
     metric: r.progress != null ? Math.round(r.progress) + "%" : null,
     progress: r.state === "downloading" ? r.progress : null,
@@ -711,6 +714,13 @@ function itemContents(r) {
     tag("h2", "title", pretty(r)),
     tag("p", "", context(r) || (!r.review && r.year ? String(r.year) : "")),
     tag("div", "answer", el("b", {}, condition(r)), tag("p", "", nextStep(r))),
+    r.candidates?.length > 0 &&
+    tag(
+      "div",
+      "detail-part",
+      el("h3", {}, "Provider records"),
+      r.candidates.map((c) => candidate(c, r)),
+    ),
     facts([
       ["Progress", r.progress != null ? r.progress + "%" : null],
       [
@@ -743,16 +753,9 @@ function itemContents(r) {
       ["Release change", sw.phase && label(sw.phase)],
       ["Verified delivery", when(r.delivered)],
       ["Staging cleanup", when(r.cleaned)],
-      ["Search details", !r.review && reason],
+      ["Search details", r.review ? null : reason],
       ["Observed", age(r.live ? snapshot.live.observed : snapshot.catalog.observed)],
     ]),
-    r.candidates?.length > 0 &&
-    tag(
-      "div",
-      "detail-part",
-      el("h3", {}, "Provider records"),
-      r.candidates.map((c) => candidate(c, r)),
-    ),
     proposed?.review === r.id &&
     tag(
       "div",

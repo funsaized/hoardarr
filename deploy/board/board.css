@@ -853,3 +853,40 @@ footer {
   height: 17%;
   animation-delay: -2603ms!important;
 }
+@media (prefers-reduced-motion: no-preference) {
+  .stars::after {
+    content: "";
+    position: absolute;
+    top: 19%;
+    left: 57%;
+    width: 42px;
+    height: 1px;
+    background: linear-gradient(90deg,transparent,#ffe1bd);
+    opacity: 0;
+    animation: shooting-star 19s ease-out infinite;
+  }
+  .glyph.receiving {
+    animation: receiver 1.8s ease-in-out infinite;
+  }
+}
+@keyframes shooting-star {
+  0%,
+  87%,
+  100% {
+    opacity: 0;
+    transform: translate(-32px,-10px) rotate(18deg);
+  }
+  89% {
+    opacity: .9;
+  }
+  94% {
+    opacity: 0;
+    transform: translate(95px,28px) rotate(18deg);
+  }
+}
+@keyframes receiver {
+  50% {
+    box-shadow: inset 0 -2px var(--mint);
+    color: #fff;
+  }
+}
