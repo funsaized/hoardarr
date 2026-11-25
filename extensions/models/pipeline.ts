@@ -11,6 +11,7 @@ import {
   type Runtime,
 } from "./_lib/runtime.ts";
 import { ReceiptSchema, TransferSchema } from "./_lib/contracts.ts";
+import { episodeCatalogId, seriesCatalogId } from "./_lib/catalog_identity.ts";
 import { type EpisodeWork, prioritizeEpisodes, type SearchState } from "./_lib/tv_backlog.ts";
 import { tvProgress } from "./_lib/tv_progress.ts";
 import { libraryNames, type MediaNames, namePart } from "./_lib/library_naming.ts";
@@ -31,7 +32,9 @@ import {
   TransferSample,
 } from "./_lib/transfer_observation.ts";
 import { CatalogIdentity, identityIndex, movieCatalogId } from "./_lib/catalog_identity.ts";
+import { airedEpisodes, TrackedEpisodeList, trackedKey, TrackedSeries } from "./_lib/tracked_tv.ts";
 const Globals = z.object({
+  trackedShows: z.array(TrackedSeries).optional(),
   requestModel: z.string().optional(),
   libraryRoot: z.string().optional(),
   destination: z.string().default("local-destination"),
@@ -110,7 +113,7 @@ const catalog = (ctx: Context, kind: string) =>
   kind === "movie" ? ctx.globalArgs.movies : ctx.globalArgs.episodes;
 const idField = (kind: string) => kind === "movie" ? "tmdbId" : "tmdbEpisodeId";
 const catalogNumber = (row: Row, kind: string) =>
-  kind === "movie" ? movieCatalogId(row) : Number(row.tmdbEpisodeId);
+  kind === "movie" ? movieCatalogId(row) : episodeCatalogId(row);
 async function rows(ctx: Context, kind: string): Promise<Row[]> {
   return (await ctx.readModelData(catalog(ctx, kind), kind)).map((r) => r.attributes);
 }
@@ -229,7 +232,7 @@ const LayoutSchema = z.object({
 
 async function layoutFor(ctx: Context, row: Row, kind: "movie" | "episode") {
   const id = `${kind === "movie" ? "movie" : "show"}-${
-    kind === "movie" ? movieCatalogId(row) : row.showTmdbId
+    kind === "movie" ? movieCatalogId(row) : seriesCatalogId(row)
   }`;
   const saved = (await ctx.readModelData("pipeline", "layout")).map((r) =>
     LayoutSchema.parse(r.attributes)
@@ -305,6 +308,17 @@ export const model = {
   }],
   globalArguments: Globals,
   resources: {
+    episodeReview: {
+      schema: z.object({
+        title: z.string(),
+        reason: z.string(),
+        provider: z.enum(["tvmaze", "tmdb"]),
+        ids: z.array(z.number().int().positive()),
+      }),
+      description: "Tracked episodes awaiting numbering or identity confirmation",
+      lifetime: "infinite",
+      garbageCollection: 2,
+    },
     identityReview: {
       schema: z.object({
         tmdbId: z.number().int().positive(),
@@ -496,11 +510,11 @@ export const model = {
           new Date(),
         );
         const searchableEpisodes = ordered.filter((r) =>
-          eligible.has(`e-${r.tmdbEpisodeId}`) &&
+          eligible.has(`e-${episodeCatalogId(r)}`) &&
           !episodeRows.some((row) =>
-            row.tmdbEpisodeId === r.tmdbEpisodeId && row.status === "selected"
+            episodeCatalogId(row) === episodeCatalogId(r) && row.status === "selected"
           )
-        ).map((row) => all.find((r) => r.key === `e-${row.tmdbEpisodeId}`)!);
+        ).map((row) => all.find((r) => r.key === `e-${episodeCatalogId(row)}`)!);
         const now = new Date().toISOString();
         const requested = new Set(
           requestRows.filter((r) => r.id === args.requestId)
@@ -550,7 +564,7 @@ export const model = {
             new Date(),
             ((await ctx.readModelData("pipeline", "submissionState"))[0]?.attributes.shows ??
               {}) as Record<string, string>,
-          ).map((r) => r.tmdbEpisodeId),
+          ).map(episodeCatalogId),
         );
         const tvSelected = prioritizeRequests(
           [...selectedEpisodes].map((id) => all.find((r) => r.key === `e-${id}`)!)
@@ -636,8 +650,118 @@ export const model = {
           movieAliases: movieRows.filter((r) => r.localId && r.imdbId && !r.tmdbId).slice(0, 20)
             .map(({ localId, catalogId, imdbId }) => ({ localId, catalogId, imdbId })),
           movieIds: movieRows.flatMap((r) => typeof r.tmdbId === "number" ? [r.tmdbId] : []),
-          episodeIds: episodeRows.map((r) => r.tmdbEpisodeId),
+          episodeIds: episodeRows.flatMap((r) =>
+            typeof r.tmdbEpisodeId === "number" ? [r.tmdbEpisodeId] : []
+          ),
         });
+      },
+    },
+    ingestTracked: {
+      description:
+        "Admit aired tracked episodes from confirmed TVmaze series under installation ownership.",
+      arguments: Owned,
+      execute: async ({ owner }: z.infer<typeof Owned>, ctx: Context) => {
+        await assertLease(ctx.repoDir, owner);
+        const tracked = new Set(
+          (ctx.globalArgs.trackedShows ?? []).map((show) => trackedKey(show) + "-episodes"),
+        );
+        const saved = await ctx.readModelData("pipeline", "catalogIdentity");
+        const index = identityIndex(saved.map((r) => CatalogIdentity.parse(r.attributes)));
+        const existing = await rows(ctx, "episode");
+        for (const record of await ctx.readModelData("tracked-tv", "episodeList")) {
+          if (!tracked.has(record.name)) continue;
+          const list = TrackedEpisodeList.parse(record.attributes);
+          const show = list.show;
+          const prior = existing.find((r) => r.tvmazeSeriesId === show.id);
+          const seriesId = prior
+            ? seriesCatalogId(prior)
+            : list.tracked.tmdbId ?? 2 ** 52 + show.id;
+          const seriesKey = "s-" + seriesId;
+          const { aired, review } = airedEpisodes(list, Date.now());
+          const recordReview = async (ids: number[], reason: string) => {
+            await ctx.writeResource("episodeReview", "review-" + record.name, {
+              title: show.name,
+              ids,
+              reason,
+              provider: "tvmaze",
+            });
+          };
+          if (
+            !prior && !list.tracked.tmdbId &&
+            existing.some((r) => String(r.showName).toLowerCase() === show.name.toLowerCase())
+          ) {
+            await recordReview([show.id], "Confirm series alias against the existing catalog");
+            continue;
+          }
+          const series = index.confirm("series", seriesKey, {
+            provider: "tvmaze",
+            value: String(show.id),
+          });
+          if (list.tracked.tmdbId) {
+            index.confirm("series", seriesKey, {
+              provider: "tmdb",
+              value: String(list.tracked.tmdbId),
+            });
+          }
+          if (show.externals.imdb) {
+            index.confirm("series", seriesKey, { provider: "imdb", value: show.externals.imdb });
+          }
+          if (show.externals.thetvdb) {
+            index.confirm("series", seriesKey, {
+              provider: "tvdb",
+              value: String(show.externals.thetvdb),
+            });
+          }
+          const discoveries = [];
+          for (const ep of aired) {
+            if (existing.some((r) => r.tvmazeEpisodeId === ep.id)) continue;
+            if (
+              existing.some((r) =>
+                seriesCatalogId(r) === seriesId && r.seasonNumber === ep.season &&
+                r.episodeNumber === ep.number
+              )
+            ) {
+              review.push(ep.id);
+              continue;
+            }
+            const catalogId = 2 ** 52 + ep.id;
+            const entity = index.confirm("episode", "e-" + catalogId, {
+              provider: "tvmaze",
+              value: String(ep.id),
+            });
+            discoveries.push({
+              catalogId,
+              localId: entity.id,
+              seriesCatalogId: seriesId,
+              seriesLocalId: series.id,
+              tvmazeSeriesId: show.id,
+              tvmazeEpisodeId: ep.id,
+              numbering: "tvmaze-aired",
+              showTmdbId: list.tracked.tmdbId,
+              showName: show.name,
+              showYear: list.tracked.year,
+              category: list.tracked.category,
+              episodeTitle: ep.name,
+              seasonNumber: ep.season,
+              episodeNumber: ep.number,
+              airDate: ep.airdate,
+              discoveredAt: list.observedAt,
+            });
+          }
+          for (const entity of index.changed.values()) {
+            await ctx.writeResource("catalogIdentity", "identity-" + entity.catalogKey, entity);
+          }
+          index.changed.clear();
+          for (let offset = 0; offset < discoveries.length; offset += 500) {
+            const batch = discoveries.slice(offset, offset + 500);
+            await invoke(ctx, ctx.globalArgs.episodes, "ingest", { discoveries: batch });
+            existing.push(...batch);
+          }
+          if (review.length) {
+            await recordReview(review, "Confirm episode numbering, identity or air date");
+          }
+        }
+        return write(ctx, "summary", { ok: true });
       },
     },
     linkMovieAliases: {
@@ -678,6 +802,27 @@ export const model = {
         const missing = [];
         for (const discovery of discoveries) {
           if (existing.has(discovery[idField(args.mediaKind)])) continue;
+          if (
+            args.mediaKind === "episode" && catalogRows.some((r) =>
+              r.tvmazeEpisodeId &&
+              (r.showTmdbId === discovery.showTmdbId ||
+                String(r.showName).toLowerCase() === String(discovery.showName).toLowerCase()) &&
+              r.seasonNumber === discovery.seasonNumber &&
+              r.episodeNumber === discovery.episodeNumber
+            )
+          ) {
+            await ctx.writeResource(
+              "episodeReview",
+              "review-tmdb-episode-" + discovery.tmdbEpisodeId,
+              {
+                title: discovery.showName,
+                ids: [discovery.tmdbEpisodeId],
+                provider: "tmdb",
+                reason: "Confirm numbering against a TVmaze episode",
+              },
+            );
+            continue;
+          }
           const matches = args.mediaKind === "movie"
             ? catalogRows.filter((r) =>
               r.localId && !r.tmdbId && r.year === discovery.year &&
@@ -717,8 +862,10 @@ export const model = {
         }[];
         for (const kind of ["movie", "episode"]) {
           const prefix = kind === "movie" ? "m-" : "e-";
-          const items = queries.filter((q) => q.key.startsWith(prefix) &&
-            (q.ok || Object.values(q.sources ?? {}).some((source) => source.ok))).map((q) => ({
+          const items = queries.filter((q) =>
+            q.key.startsWith(prefix) &&
+            (q.ok || Object.values(q.sources ?? {}).some((source) => source.ok))
+          ).map((q) => ({
             [idField(kind)]: Number(q.key.slice(2)),
             releases: q.results,
           }));
@@ -747,8 +894,11 @@ export const model = {
           const failed = Object.values(query?.sources ?? {}).filter((source) => !source.ok);
           const auth = failed.some((source) => /\b(401|403)\b/.test(source.error ?? ""));
           const degraded = failed.length > 0 || !query?.ok;
-          const anySuccess = query?.ok || Object.values(query?.sources ?? {}).some((source) => source.ok);
-          const lastSuccessfulAt = anySuccess ? now.toISOString() : attempts[movie ? key : id]?.lastSuccessfulAt;
+          const anySuccess = query?.ok ||
+            Object.values(query?.sources ?? {}).some((source) => source.ok);
+          const lastSuccessfulAt = anySuccess
+            ? now.toISOString()
+            : attempts[movie ? key : id]?.lastSuccessfulAt;
           const outcome = selected
             ? "selected"
             : auth
@@ -827,8 +977,8 @@ export const model = {
               {}) as Record<string, string>;
           const episodes = await rows(ctx, "episode");
           for (const result of results as { key: string; ok: boolean }[]) {
-            const row = episodes.find((e) => result.key === `e-${e.tmdbEpisodeId}`);
-            if (row && result.ok) shows[String(row.showTmdbId)] = new Date().toISOString();
+            const row = episodes.find((e) => result.key === `e-${episodeCatalogId(e)}`);
+            if (row && result.ok) shows[String(seriesCatalogId(row))] = new Date().toISOString();
           }
           await ctx.writeResource("submissionState", "submissionState-current", { shows });
           if (ctx.globalArgs.requestModel) {
@@ -871,8 +1021,18 @@ export const model = {
           }
         }
         for (const row of await rows(ctx, "episode")) {
-          legacy("series", "s-", row.showTmdbId);
-          legacy("episode", "e-", row.tmdbEpisodeId);
+          const seriesKey = "s-" + seriesCatalogId(row), episodeKey = "e-" + episodeCatalogId(row);
+          if (row.seriesLocalId) index.reserve("series", seriesKey, String(row.seriesLocalId));
+          if (row.localId) index.reserve("episode", episodeKey, String(row.localId));
+          for (
+            const [provider, show, episode] of [
+              ["tmdb", row.showTmdbId, row.tmdbEpisodeId],
+              ["tvmaze", row.tvmazeSeriesId, row.tvmazeEpisodeId],
+            ] as const
+          ) {
+            if (show) index.confirm("series", seriesKey, { provider, value: String(show) });
+            if (episode) index.confirm("episode", episodeKey, { provider, value: String(episode) });
+          }
         }
         const lists = await ctx.readModelData(ctx.globalArgs.episodes, "showList");
         for (const list of lists) {

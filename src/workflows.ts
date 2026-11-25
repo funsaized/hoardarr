@@ -227,6 +227,11 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   ));
   discovery.push(savedIngest("ingest-episodes", "episode", "episodes"));
 
+  if (config.providers.discovery === "tmdb" && config.interests.shows.length) {
+    discovery.push(skip(method("tracked-tv-refresh", "tracked-tv", "refresh", {}, "ingest-episodes"), 'inputs.requestId != ""'));
+    discovery.push(skip(method("tracked-tv-ingest", "pipeline", "ingestTracked", owned, "tracked-tv-refresh"), 'inputs.requestId != ""'));
+  }
+
   const acquisition: Node[] = [call("health", "download-provider", "health")];
   if (native) acquisition.push(call("binding", "download-provider", "network", {}, "health"));
   acquisition.push(method("capabilities", "pipeline", "health", {

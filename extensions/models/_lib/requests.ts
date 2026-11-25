@@ -1,3 +1,4 @@
+import { episodeCatalogId } from "./catalog_identity.ts";
 import { hasMovieIdentity, movieCatalogId, MovieIdentityFields } from "./catalog_identity.ts";
 /** Durable request contracts and deterministic progress/priority calculations. */
 import { z } from "npm:zod@4.5.1";
@@ -174,7 +175,7 @@ export function requestProgress(
 ) {
   const rows = new Map<string, Row>([
     ...movies.map((row) => [`m-${movieCatalogId(row)}`, row] as const),
-    ...episodes.map((row) => [`e-${row.tmdbEpisodeId}`, row] as const),
+    ...episodes.map((row) => [`e-${episodeCatalogId(row)}`, row] as const),
   ]);
   const items = (request.targets ?? []).map((target) => {
     const key = targetKey(target), row = rows.get(key);

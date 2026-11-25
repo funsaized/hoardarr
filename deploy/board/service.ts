@@ -1,11 +1,13 @@
 // The browser only sees these projections. Provider responses can include private locators.
 const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState"])';
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "episodeReview", "identityReview"]) || (modelName == "tracked-tv" && specName == "refreshStatus" && attributes.state != "ready")';
 const catalogFields = [
-  "catalogId", "localId", "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "showName",
+  "catalogId", "localId", "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "seriesCatalogId", "seriesLocalId", "tvmazeSeriesId", "numbering", "showName",
   "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
 ];
-const catalogProjection = 'specName == "searchState" ? {"searchAttempts": attributes.attempts} : ' +
+const catalogProjection = 'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
+  'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
+  'specName == "searchState" ? {"searchAttempts": attributes.attempts} : ' +
   'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
   'specName == "transferObservation" ? {' +
   '"observationKey": name, "hash": attributes.sample.hash, "decision": attributes.decision, ' +
@@ -97,7 +99,7 @@ async function live() {
   return transfers(downloads, seeds, saved);
 }
 function matchingObservation(row: Record<string, unknown>, records: Map<string, Record<string, unknown>>) {
-  const suffix = row.tmdbEpisodeId ? `episode-${row.tmdbEpisodeId}` : `movie-${row.catalogId ?? row.tmdbId}`;
+  const suffix = row.showName ? `episode-${row.catalogId ?? row.tmdbEpisodeId}` : `movie-${row.catalogId ?? row.tmdbId}`;
   const health = records.get("transfer-health-" + suffix);
   if (!health || health.hash !== row.infoHash) return undefined;
   const { decision, observedAt, idleMs, byteRate } = health;
@@ -147,16 +149,23 @@ async function catalog() {
   const attempts = results.find((row: { searchAttempts?: unknown }) => row.searchAttempts)?.searchAttempts ?? {};
   return {
     shows,
-    rows: results.filter((r: Record<string, unknown>) => !r.searchAttempts && !r.shows && !r.observationKey && !r.catalogKey).map((
+    rows: [...results.filter((r: Record<string, unknown>) => r.reviewKey).map((r: Record<string, unknown>) => ({
+      id: r.reviewKey, title: r.title, state: "blocked",
+      reason: r.reason === "confirm-series" ? "Confirm a TVmaze series in tracked show settings" :
+        r.reason === "unavailable" ? "TVmaze unavailable · retaining last successful episode list" : r.reason,
+      providers: Array.isArray(r.choices) ? r.choices.map(c => c.name + " (" + (c.premiered ?? "unknown premiere") + ") · TVmaze " + c.id).join(", ") :
+        Array.isArray(r.ids) ? r.ids.slice(0, 24).join(", ") : undefined,
+    })), ...results.filter((r: Record<string, unknown>) => !r.reviewKey && !r.searchAttempts && !r.shows && !r.observationKey && !r.catalogKey).map((
       r: Record<string, unknown>,
     ) => ({
-      id: r.localId ?? identities.get(r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`) ??
-        (r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`),
+      id: r.localId ?? identities.get(r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`) ??
+        (r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`),
       health: matchingObservation(r, observations),
-      search: searchDetails(attempts[String(r.tmdbEpisodeId ?? ("m-" + (r.catalogId ?? r.tmdbId)))], r.rankedCount),
+      search: searchDetails(attempts[String(r.showName ? r.catalogId ?? r.tmdbEpisodeId : "m-" + (r.catalogId ?? r.tmdbId))], r.rankedCount),
       hash: r.infoHash,
       archived: !!r.archivedAt,
-      showId: identities.get("s-" + r.showTmdbId) ?? r.showTmdbId,
+      showId: r.seriesLocalId ?? identities.get("s-" + (r.seriesCatalogId ?? r.showTmdbId)) ?? r.showTmdbId,
+      ...(r.tvmazeSeriesId ? { source: "TVmaze · aired order", sourceUrl: "https://www.tvmaze.com/shows/" + r.tvmazeSeriesId } : {}),
       show: r.showName,
       season: r.seasonNumber,
       episode: r.episodeNumber,
@@ -171,7 +180,7 @@ async function catalog() {
       reason: r.error
         ? "Recorded error · inspect operator status"
         : rejectionSummary(r.noMatchReason),
-    })),
+    })),],
   };
 }
 export function cache<T>(load: () => Promise<T>, interval: (value: T) => number) {

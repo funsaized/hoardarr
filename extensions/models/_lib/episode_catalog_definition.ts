@@ -1,5 +1,6 @@
 /** Hoardarr local episode catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4.5.1";
+import { episodeCatalogId, EpisodeIdentityFields, hasEpisodeIdentity } from "./catalog_identity.ts";
 import { episodeIdentityMatches } from "./episode_identity.ts";
 import { catalogRelocationMethod } from "./migration_actions.ts";
 import {
@@ -53,8 +54,7 @@ const ShowListSchema = z.object({
 });
 
 const DiscoveryRecordSchema = z.object({
-  tmdbEpisodeId: z.number().int().positive(),
-  showTmdbId: z.number().int().positive(),
+  ...EpisodeIdentityFields,
   showName: z.string().min(1).max(500),
   showYear: z.number().int().min(1800).max(3000).optional(),
   seasonNumber: z.number().int().nonnegative(),
@@ -66,7 +66,7 @@ const DiscoveryRecordSchema = z.object({
     .nullable(),
   discoveredAt: z.iso.datetime(),
   category: CategorySchema,
-});
+}).refine(hasEpisodeIdentity);
 
 const ReleaseSchema = z.object({
   infoHash: z.string().min(1).max(200),
@@ -127,8 +127,7 @@ const ReconcileArgsSchema = z.object({
 const PlanArgsSchema = z.object({});
 
 const EpisodeSchema = z.object({
-  tmdbEpisodeId: z.number().int().positive(),
-  showTmdbId: z.number().int().positive(),
+  ...EpisodeIdentityFields,
   showName: z.string().min(1).max(500),
   showYear: z.number().int().min(1800).max(3000).optional(),
   seasonNumber: z.number().int().nonnegative(),
@@ -164,7 +163,7 @@ const EpisodeSchema = z.object({
   transferredAt: z.iso.datetime().nullable(),
   localCleanedAt: z.iso.datetime().nullable(),
   error: z.string().nullable(),
-}).passthrough();
+}).passthrough().refine(hasEpisodeIdentity);
 
 const PlanSchema = z.object({
   generatedAt: z.iso.datetime(),
@@ -396,8 +395,7 @@ function isSelectable(episode: Episode, policy: Policy = episodePolicy): boolean
 
 function createEpisodeFromDiscovery(discovery: DiscoveryRecord): Episode {
   return {
-    tmdbEpisodeId: discovery.tmdbEpisodeId,
-    showTmdbId: discovery.showTmdbId,
+    ...discovery,
     showName: discovery.showName,
     showYear: discovery.showYear,
     seasonNumber: discovery.seasonNumber,
@@ -690,19 +688,19 @@ function computePlan(episodes: ReadonlyArray<Episode>, policy: Policy = episodeP
   const cleanupPending: number[] = [];
   for (const episode of episodes) {
     if (episode.status === "wanted" || episode.status === "selected") {
-      wanted.push(episode.tmdbEpisodeId);
+      wanted.push(episodeCatalogId(episode));
     } else if (episode.status === "failed" && isSelectable(episode, policy)) {
-      retryable.push(episode.tmdbEpisodeId);
+      retryable.push(episodeCatalogId(episode));
     } else if (episode.status === "downloading") {
-      downloading.push(episode.tmdbEpisodeId);
+      downloading.push(episodeCatalogId(episode));
     } else if (episode.status === "seeding") {
-      seeding.push(episode.tmdbEpisodeId);
+      seeding.push(episodeCatalogId(episode));
     } else if (episode.status === "seed-stopped") {
-      seedStopped.push(episode.tmdbEpisodeId);
+      seedStopped.push(episodeCatalogId(episode));
     } else if (episode.status === "transfer-ready") {
-      transferReady.push(episode.tmdbEpisodeId);
+      transferReady.push(episodeCatalogId(episode));
     } else if (episode.status === "cleanup-pending") {
-      cleanupPending.push(episode.tmdbEpisodeId);
+      cleanupPending.push(episodeCatalogId(episode));
     }
   }
   const uniqueSort = (ids: number[]) => [...new Set(ids)].sort((a, b) => a - b);
@@ -727,7 +725,7 @@ async function loadEpisode(context: Context, tmdbEpisodeId: number): Promise<Epi
 async function writeEpisode(context: Context, episode: Episode): Promise<{ name: string }> {
   return await context.writeResource(
     SPEC_EPISODE,
-    episodeInstanceName(episode.tmdbEpisodeId),
+    episodeInstanceName(episodeCatalogId(episode)),
     episode,
   );
 }
@@ -763,7 +761,10 @@ async function executeIngest(
   const handles: Array<{ name: string }> = [];
   let preserved = 0;
   for (const discovery of args.discoveries) {
-    const existing = await loadEpisode(context, discovery.tmdbEpisodeId);
+    const existing = await loadEpisode(context, episodeCatalogId(discovery));
+    if (existing && existing.localId !== discovery.localId && (existing.localId || discovery.localId)) {
+      throw new Error("Conflicting episode ownership at this catalog key");
+    }
     if (existing && TERMINAL_STATUSES.has(existing.status)) {
       preserved++;
       continue;
@@ -989,7 +990,7 @@ export const definition = {
   resources: {
     [SPEC_EPISODE]: {
       description:
-        "One catalog episode record keyed by TMDB episode id, identity is always the TMDB episode id.",
+        "One episode under its stable catalog storage key, with confirmed external identities.",
       schema: EpisodeSchema,
       lifetime: "infinite" as const,
       garbageCollection: 200,

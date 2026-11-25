@@ -84,3 +84,30 @@ export function hasMovieIdentity(value: { tmdbId?: number; catalogId?: number; l
   return value.tmdbId !== undefined ||
     (value.catalogId !== undefined && value.localId !== undefined);
 }
+
+export function episodeCatalogId(row: { catalogId?: unknown; tmdbEpisodeId?: unknown }) {
+  return z.number().int().positive().parse(row.catalogId ?? row.tmdbEpisodeId);
+}
+export function seriesCatalogId(row: { seriesCatalogId?: unknown; showTmdbId?: unknown }) {
+  return z.number().int().positive().parse(row.seriesCatalogId ?? row.showTmdbId);
+}
+export const EpisodeIdentityFields = {
+  tmdbEpisodeId: z.number().int().positive().optional(),
+  showTmdbId: z.number().int().positive().optional(),
+  localId: z.uuid().optional(),
+  catalogId: z.number().int().positive().optional(),
+  seriesLocalId: z.uuid().optional(),
+  seriesCatalogId: z.number().int().positive().optional(),
+  tvmazeEpisodeId: z.number().int().positive().optional(),
+  tvmazeSeriesId: z.number().int().positive().optional(),
+  numbering: z.literal("tvmaze-aired").optional(),
+};
+export function hasEpisodeIdentity(
+  row: Partial<Record<keyof typeof EpisodeIdentityFields, unknown>>,
+) {
+  return Boolean(
+    row.tmdbEpisodeId && row.showTmdbId || row.localId && row.seriesLocalId &&
+        row.catalogId && row.seriesCatalogId && row.tvmazeEpisodeId && row.tvmazeSeriesId &&
+        row.numbering,
+  );
+}

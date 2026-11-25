@@ -61,7 +61,7 @@ function render() {
   const rows = live.rows.map((t) => {
     const c = byHash.get(t.id.toLowerCase());
     if (c) joined.add(c.id);
-    return { ...t, search: c?.search, health: c?.health, id: c?.id ?? t.id, title: c?.title ?? t.title, release: t.title };
+    return { ...t, source: c?.source, sourceUrl: c?.sourceUrl, search: c?.search, health: c?.health, id: c?.id ?? t.id, title: c?.title ?? t.title, release: t.title };
   });
   rows.push(
     ...activeCatalog.filter((c) => !joined.has(c.id)).map((c) => ({
@@ -221,6 +221,13 @@ function render() {
     detail.querySelector("h3").textContent = item.title;
     const dl = detail.querySelector("dl");
     dl.replaceChildren();
+    if (item.sourceUrl && /^https:\/\/www\.tvmaze\.com\/shows\/\d+$/.test(item.sourceUrl)) {
+      const link = element("a", item.source);
+      link.href = item.sourceUrl;
+      const value = element("dd", "");
+      value.append(link);
+      dl.append(element("dt", "Episode source"), value);
+    }
     for (
       const [k, v] of Object.entries({
         State: describe(item),
@@ -238,6 +245,7 @@ function render() {
         "Ranked eligible releases": item.search?.rankedCount,
         "Next search": item.state === "wanted" && item.search?.nextSearchAt ? new Date(item.search.nextSearchAt).toLocaleString() : null,
         Reason: item.reason,
+        "Provider identities": item.providers || null,
         Delivered: item.delivered,
         Observed: minutes(item.release ? live.observed : catalog.observed),
       })

@@ -311,6 +311,9 @@ async function installUnlocked(
     "@funsaized/hoardarr/coordinator",
     config.guest ? { storage: config.guest.storage } : {},
   );
+  if (config.providers.discovery === "tmdb") {
+    await define("tracked-tv", "@funsaized/hoardarr/tracked-tv", { shows: config.interests.shows });
+  }
   const actual: Record<string, string> = {};
   const defined = new Set<string>();
   for (const [role, descriptor] of Object.entries(selected)) {
@@ -401,6 +404,7 @@ async function installUnlocked(
   });
   await define("pipeline", "@funsaized/hoardarr/pipeline", {
     requestModel: "requests",
+    ...(config.providers.discovery === "tmdb" ? { trackedShows: config.interests.shows } : {}),
     destination: actual.destination,
     ...(config.providers.destination === "local" ? { libraryRoot: config.paths.library } : {}),
     maxMovieAttempts: config.policies.movie.maxAttempts,

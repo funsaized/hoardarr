@@ -64,6 +64,7 @@ Deno.test("pipeline plans every ready delivery and pending cleanup beyond the ac
     const row = (id: number, status: string, localCleanedAt?: string) => ({
       tmdbId: id,
       tmdbEpisodeId: id,
+      showTmdbId: 1,
       title: "Fixture",
       showName: "Fixture Series",
       seasonNumber: 1,

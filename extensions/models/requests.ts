@@ -1,3 +1,4 @@
+import { episodeCatalogId } from "./_lib/catalog_identity.ts";
 /** Durable user intent; only the owned media workflow may ingest acquisition targets. */
 import { movieCatalogId } from "./_lib/catalog_identity.ts";
 import { z } from "npm:zod@4.5.1";
@@ -369,7 +370,7 @@ export const model = {
         );
         const episodes = new Set(
           (await ctx.readModelData(ctx.globalArgs.episodes, "episode")).map((r) =>
-            `e-${r.attributes.tmdbEpisodeId}`
+            `e-${episodeCatalogId(r.attributes)}`
           ),
         );
         let count = 0;

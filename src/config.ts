@@ -45,6 +45,9 @@ export const ConfigSchema = z.object({
     shows: z.array(
       z.object({
         tmdbId: z.number().int().positive().optional(),
+        tvmazeId: z.number().int().positive().optional(),
+        tvdbId: z.number().int().positive().optional(),
+        imdbId: z.string().regex(/^tt\d{7,12}$/).optional(),
         year: z.number().int().min(1900).max(2200).optional(),
         name: z.string().min(1),
         category: z.enum(["tv", "anime"]).default("tv"),

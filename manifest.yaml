@@ -17,6 +17,7 @@ models:
   - public_network_session.ts
   - public_guest_network.ts
   - torlink_migration.ts
+  - tracked_tv.ts
   - torlink_telemetry.ts
   - public_movie_catalog.ts
   - public_episode_catalog.ts
@@ -25,6 +26,7 @@ reports:
   - portable_run_summary.ts
   - migration_comparison.ts
 include:
+  - _lib/tracked_tv.ts
   - _lib/catalog_identity.ts
   - _lib/archive.ts
   - _lib/episode_identity.ts

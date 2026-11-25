@@ -1,15 +1,19 @@
+import { episodeCatalogId, seriesCatalogId } from "./catalog_identity.ts";
 /** Non-sensitive per-series progress from durable catalog and search records. */
 import type { SearchState } from "./tv_backlog.ts";
 export function tvProgress(rows: Record<string, unknown>[], attempts: SearchState) {
   const groups = new Map<number, Record<string, unknown>[]>();
   for (const row of rows) {
-    const id = Number(row.showTmdbId);
+    const id = seriesCatalogId(row);
     groups.set(id, [...(groups.get(id) ?? []), row]);
   }
   return [...groups].sort(([a], [b]) => a - b).map(([id, episodes]) => ({
-    tmdbId: id,
+    catalogId: id,
+    tmdbId: episodes[0].showTmdbId,
     title: String(episodes[0].showName),
-    url: `https://www.themoviedb.org/tv/${id}`,
+    url: episodes[0].showTmdbId
+      ? `https://www.themoviedb.org/tv/${episodes[0].showTmdbId}`
+      : `https://www.tvmaze.com/shows/${episodes[0].tvmazeSeriesId}`,
     total: episodes.length,
     completed:
       episodes.filter((e) => ["transferred", "cleanup-pending"].includes(String(e.status))).length,
@@ -32,16 +36,16 @@ export function tvProgress(rows: Record<string, unknown>[], attempts: SearchStat
     rejected: episodes.filter((e) => e.error === "identity-mismatch").length,
     unavailable: episodes.filter((e) =>
       e.status === "wanted" &&
-      ["no-match", "no-releases"].includes(attempts[String(e.tmdbEpisodeId)]?.outcome)
+      ["no-match", "no-releases"].includes(attempts[String(episodeCatalogId(e))]?.outcome)
     ).length,
     failed: episodes.filter((e) => e.status === "failed").length,
     retries: episodes.filter((e) =>
-      ["wanted", "failed"].includes(String(e.status)) && attempts[String(e.tmdbEpisodeId)]
+      ["wanted", "failed"].includes(String(e.status)) && attempts[String(episodeCatalogId(e))]
     ).map((e) => ({
-      episodeId: e.tmdbEpisodeId,
+      episodeId: episodeCatalogId(e),
       season: e.seasonNumber,
       episode: e.episodeNumber,
-      ...attempts[String(e.tmdbEpisodeId)],
+      ...attempts[String(episodeCatalogId(e))],
     })),
   }));
 }

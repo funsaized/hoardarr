@@ -1,3 +1,4 @@
+import { episodeCatalogId, seriesCatalogId } from "./catalog_identity.ts";
 import { movieCatalogId } from "./catalog_identity.ts";
 /** User-directed local removal. Export is the operator's responsibility. */
 import { z } from "npm:zod@4.5.1";
@@ -59,7 +60,7 @@ export async function archive(
       if (!movies.some((r) => movieCatalogId(r) === id)) throw new Error(`Unknown movie ID: ${id}`);
     }
     for (const id of args.showIds) {
-      if (!episodes.some((r) => r.showTmdbId === id)) throw new Error(`Unknown show ID: ${id}`);
+      if (!episodes.some((r) => seriesCatalogId(r) === id)) throw new Error(`Unknown show ID: ${id}`);
     }
     const manifests = await ctx.readModelData(ctx.globalArgs.files, "manifest");
     const saved = await ctx.readModelData("pipeline", "archiveIntent");
@@ -77,13 +78,13 @@ export async function archive(
           key: `m-${movieCatalogId(row)}`,
         })),
       ...episodes.filter((r) =>
-        args.all === "tv" || args.all === "both" || args.showIds.includes(Number(r.showTmdbId))
+        args.all === "tv" || args.all === "both" || args.showIds.includes(seriesCatalogId(r))
       )
         .map((row) => ({
           row,
           kind: "episode",
-          id: Number(row.tmdbEpisodeId),
-          key: `e-${row.tmdbEpisodeId}`,
+          id: episodeCatalogId(row),
+          key: `e-${episodeCatalogId(row)}`,
         })),
     ];
     const results: Row[] = [];
