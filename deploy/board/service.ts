@@ -8,7 +8,9 @@ const catalogFields = [
 const catalogProjection = 'specName == "transferObservation" ? {' +
   '"observationKey": name, "hash": attributes.sample.hash, "decision": attributes.decision, ' +
   '"observedAt": attributes.sample.observedAt, "idleMs": attributes.idleMs, ' +
-  '"byteRate": "byteRate" in attributes ? attributes.byteRate : null} : ' +
+  '"lastProgressAt": "lastProgressAt" in attributes ? attributes.lastProgressAt : null, ' +
+  '"etaSeconds": "etaSeconds" in attributes ? attributes.etaSeconds : null, ' +
+  '"metadataMs": "metadataMs" in attributes ? attributes.metadataMs : null, "byteRate": "byteRate" in attributes ? attributes.byteRate : null} : ' +
   'specName == "showList" ? {"shows": attributes.shows.map(show, ' +
   '{"tmdbId": show.tmdbId, "name": show.name})} : {' +
   catalogFields.map((field) =>
@@ -97,8 +99,8 @@ function matchingObservation(row: Record<string, unknown>, records: Map<string, 
   const suffix = row.tmdbEpisodeId ? `episode-${row.tmdbEpisodeId}` : `movie-${row.tmdbId}`;
   const health = records.get("transfer-health-" + suffix);
   if (!health || health.hash !== row.infoHash) return undefined;
-  const { decision, observedAt, idleMs, byteRate } = health;
-  return { decision, observedAt, idleMs, byteRate };
+  const { decision, observedAt, idleMs, byteRate, metadataMs, lastProgressAt, etaSeconds } = health;
+  return { decision, observedAt, idleMs, byteRate, metadataMs, lastProgressAt, etaSeconds };
 }
 async function catalog() {
   const result = await new Deno.Command("/usr/local/bin/swamp", {

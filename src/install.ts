@@ -400,6 +400,7 @@ async function installUnlocked(
       : {}),
   });
   await define("pipeline", "@funsaized/hoardarr/pipeline", {
+    ...config.observation,
     requestModel: "requests",
     destination: actual.destination,
     ...(config.providers.destination === "local" ? { libraryRoot: config.paths.library } : {}),

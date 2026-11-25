@@ -229,9 +229,13 @@ function render() {
         "Transfer observation": item.health?.decision,
         "Sample time": item.health && new Date(item.health.observedAt).toLocaleString(),
         "Observed without growth": item.health && Math.floor(item.health.idleMs / 60000) + " min",
+        "Waiting for metadata": item.health?.metadataMs != null ? Math.floor(item.health.metadataMs / 60000) + " min" : null,
+        "Last confirmed growth": item.health?.lastProgressAt ? new Date(item.health.lastProgressAt).toLocaleString() : null,
+        "Estimated time remaining": item.health?.etaSeconds != null ? Math.ceil(item.health.etaSeconds / 60) + " min at measured rate" : null,
         "Measured growth": item.health?.byteRate != null ? item.health.byteRate.toFixed(1) + " B/s" : null,
         "Proposed action": item.health?.decision === "stall"
           ? "Check for an eligible alternate · observation only"
+          : item.health?.decision === "metadata-timeout" ? "Inspect peers and metadata availability"
           : item.health ? "Continue observing" : null,
         Reason: item.reason,
         Delivered: item.delivered,
