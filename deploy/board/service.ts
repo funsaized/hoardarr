@@ -1,6 +1,18 @@
 // The browser only sees these projections. Provider responses can include private locators.
 const catalogPredicate =
   '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"])';
+const catalogFields = [
+  "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "showName",
+  "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
+];
+const catalogProjection = 'specName == "showList" ? {"shows": attributes.shows.map(show, ' +
+  '{"tmdbId": show.tmdbId, "name": show.name})} : {' +
+  catalogFields.map((field) =>
+    `"${field}": "${field}" in attributes ? attributes.${field} : null`
+  ).concat(
+    '"error": "error" in attributes && attributes.error != null && attributes.error != ""',
+    '"noMatchReason": "noMatchReason" in attributes && attributes.noMatchReason != null && attributes.noMatchReason != ""',
+  ).join(", ") + "}";
 type Transfer = {
   id: string;
   name: string;
@@ -79,7 +91,7 @@ async function live() {
 }
 async function catalog() {
   const result = await new Deno.Command("/usr/local/bin/swamp", {
-    args: ["data", "query", catalogPredicate, "--select", "attributes", "--json"],
+    args: ["data", "query", catalogPredicate, "--select", catalogProjection, "--json"],
     signal: AbortSignal.timeout(600000),
     stderr: "null",
   }).output();
@@ -121,15 +133,17 @@ async function catalog() {
 export function cache<T>(load: () => Promise<T>, interval: (value: T) => number) {
   let data: T | undefined,
     observed: number | null = null,
+    revision: string | null = null,
     stale = true,
     next = 0,
     pending: Promise<void> | undefined;
   return async (waitForReading = true) => {
     if (Date.now() >= next && !pending) {
-      pending = (async () => {
+      pending = Promise.resolve().then(async () => {
         try {
           const value = await load();
           data = value;
+          revision = crypto.randomUUID();
           observed = Date.now();
           stale = false;
           next = observed + interval(value);
@@ -139,10 +153,22 @@ export function cache<T>(load: () => Promise<T>, interval: (value: T) => number)
         } finally {
           pending = undefined;
         }
-      })();
+      });
     }
     if (waitForReading) await pending;
-    return { rows: data ?? [], observed, stale, refreshing: !!pending };
+    return { rows: data ?? [], revision, observed, stale, refreshing: !!pending };
+  };
+}
+export function catalogResponse(
+  reading: Awaited<ReturnType<ReturnType<typeof cache<Awaited<ReturnType<typeof catalog>>>>>>,
+  knownRevision: string | null,
+) {
+  const { rows: saved, ...status } = reading;
+  if (status.revision && status.revision === knownRevision) return status;
+  return {
+    ...status,
+    rows: "rows" in saved ? saved.rows : [],
+    shows: "shows" in saved ? saved.shows : [],
   };
 }
 if (import.meta.main) {
@@ -199,7 +225,8 @@ if (import.meta.main) {
       "Content-Security-Policy":
         "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
     };
-    const route = new URL(req.url).pathname;
+    const url = new URL(req.url);
+    const route = url.pathname;
     if (route.startsWith("/api/operate/") && req.method === "POST") {
       const mode = route.slice("/api/operate/".length);
       if (!["preview", "discover", "run"].includes(mode)) {
@@ -215,14 +242,9 @@ if (import.meta.main) {
     if (req.method !== "GET") return new Response(null, { status: 405, headers });
     if (route === "/api/board") {
       const [live, catalog] = await Promise.all([readLive(), readCatalog(false)]);
-      const saved = catalog.rows;
       return Response.json({
         live,
-        catalog: {
-          ...catalog,
-          rows: "rows" in saved ? saved.rows : [],
-          shows: "shows" in saved ? saved.shows : [],
-        },
+        catalog: catalogResponse(catalog, url.searchParams.get("catalog")),
         operation,
         preview,
       }, { headers });

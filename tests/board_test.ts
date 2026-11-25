@@ -1,4 +1,4 @@
-import { cache, transfers } from "../deploy/board/service.ts";
+import { cache, catalogResponse, transfers } from "../deploy/board/service.ts";
 Deno.test("queue ranks skip active items and seeds replace completed transfers", () => {
   const item = (id: string, status: string) => ({ id, name: id, status });
   const rows = transfers(
@@ -39,4 +39,23 @@ Deno.test("a cold catalog does not block live transfer updates", async () => {
   load.resolve([7]);
   const warm = await read();
   if (warm.rows[0] !== 7 || warm.stale || warm.refreshing) throw Error("Expected fresh catalog");
+});
+Deno.test("transfer polls reuse a catalog revision through a failed refresh", async () => {
+  let calls = 0;
+  const read = cache(() => {
+    if (++calls === 2) throw Error("Unavailable");
+    return Promise.resolve({ rows: [], shows: [] });
+  }, () => 0);
+  const first = await read();
+  if (!first.revision || !("rows" in catalogResponse(first, null))) {
+    throw Error("Missing initial catalog");
+  }
+  const failed = await read();
+  const warm = catalogResponse(failed, first.revision);
+  if (!warm.stale || "rows" in warm || warm.revision !== first.revision) {
+    throw Error("Failed refresh invalidated the reusable catalog");
+  }
+  if (!("rows" in catalogResponse(failed, "prior-service-revision"))) {
+    throw Error("A client with an older revision must receive a full snapshot");
+  }
 });

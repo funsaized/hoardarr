@@ -461,9 +461,16 @@ async function update() {
   if (document.hidden || loading) return;
   loading = true;
   try {
-    const r = await fetch("/api/board", { signal: AbortSignal.timeout(55000) });
+    const url = new URL("/api/board", location.href);
+    if (snapshot?.catalog.revision) url.searchParams.set("catalog", snapshot.catalog.revision);
+    const r = await fetch(url, { signal: AbortSignal.timeout(55000) });
     if (!r.ok) throw Error();
-    snapshot = await r.json();
+    const updated = await r.json();
+    if (!("rows" in updated.catalog)) {
+      updated.catalog.rows = snapshot.catalog.rows;
+      updated.catalog.shows = snapshot.catalog.shows;
+    }
+    snapshot = updated;
     offline = false;
     render();
   } catch {
