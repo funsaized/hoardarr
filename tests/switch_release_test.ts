@@ -6,7 +6,9 @@ import {
   retainPartial,
   type Switch,
 } from "../extensions/models/_lib/switch_release.ts";
-import { temporary } from "./helpers.ts";
+import { payload, temporary } from "./helpers.ts";
+import { fileHash, model as destination } from "../extensions/models/local_destination.ts";
+import { ReceiptSchema } from "../extensions/models/_lib/contracts.ts";
 const now = new Date().toISOString(), oldHash = "a".repeat(40), newHash = "b".repeat(40);
 const candidate = {
   infoHash: newHash,
@@ -36,7 +38,7 @@ Deno.test("switch journal recovers before stop, after stop, after an uncertain a
       alt = false,
       adds = 0,
       retains = 0,
-      delivered = 0,
+      commits = 0,
       crashed = false;
     const once = (point: string) => {
       if (!crashed && point === interrupt) {
@@ -44,7 +46,7 @@ Deno.test("switch journal recovers before stop, after stop, after an uncertain a
         throw Error("interrupted");
       }
     };
-    const receipts = new Set<string>();
+
     const ops = {
       read: async () => ({
         old: old ? "active" as const : "absent" as const,
@@ -71,14 +73,35 @@ Deno.test("switch journal recovers before stop, after stop, after an uncertain a
       },
       commit: async () => {
         strictEqual(alt, true);
-        receipts.add(newHash);
-        delivered = receipts.size;
+        commits++;
       },
     };
     await rejects(() => advanceSwitch(journal, ops));
     await advanceSwitch(journal, ops);
     await advanceSwitch(journal, ops);
-    deepStrictEqual([journal.phase, adds, retains, delivered], ["committed", 1, 1, 1]);
+    deepStrictEqual([journal.phase, adds, retains, commits], ["committed", 1, 1, 1]);
+    await temporary(async (root) => {
+      const transfer = await payload(root);
+      const verified: string[] = [];
+      await destination.methods.deliver.execute(transfer, {
+        signal: new AbortController().signal,
+        globalArgs: { stagingRoot: root + "/staging", libraryRoot: root + "/library" },
+        writeResource: async (spec, name, record) => {
+          strictEqual(spec, "receipt");
+          const receipt = ReceiptSchema.parse(record);
+          strictEqual(receipt.manifestSha256, transfer.aggregateSha256);
+          strictEqual(
+            await fileHash(receipt.destination + "/movie.mkv"),
+            transfer.entries[0].sha256,
+          );
+          verified.push(name);
+          return { name };
+        },
+      });
+      await advanceSwitch(journal, ops);
+      deepStrictEqual(verified, ["receipt-1"]);
+      strictEqual(commits, 1);
+    });
   }
 });
 Deno.test("switch refuses changed readings and low space without stopping the transfer", async () => {
