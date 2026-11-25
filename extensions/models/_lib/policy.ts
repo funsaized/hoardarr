@@ -32,6 +32,20 @@ export function compareRelease(
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+/** The caller has already applied title identity, rejection and quality checks. */
+export function rankEligible<T extends Parameters<typeof compareRelease>[0]>(
+  eligible: T[],
+  policy: Policy,
+): T[] {
+  const chosen = new Map<string, T>();
+  for (const release of eligible.sort((a, b) => compareRelease(a, b, policy))) {
+    const hash = release.infoHash.toLowerCase();
+    if (!chosen.has(hash)) chosen.set(hash, release);
+    if (chosen.size === 3) break;
+  }
+  return [...chosen.values()];
+}
+
 export const AddResultsSchema = z.object({
   results: z.array(
     z.object({

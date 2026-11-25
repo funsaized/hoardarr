@@ -218,6 +218,18 @@ Deno.test("pickBest chooses the highest-seeded acceptable release with stable ti
     },
   ]);
   assertEquals(picked.release!.infoHash, "b", "highest seeders wins");
+  const distinct = testing.pickBest(movie, [
+    ...picked.ranked,
+    { ...picked.release!, infoHash: "B", source: "other", seeders: 20 },
+    { ...picked.release!, infoHash: "d", seeders: 10 },
+    { ...picked.release!, infoHash: "e", name: "Other.Movie.1080p.WEB-DL", seeders: 1000 },
+  ]);
+  assertEquals(
+    distinct.ranked.map((r) => r.infoHash).join(","),
+    "b,c,a",
+    "three distinct eligible hashes",
+  );
+
   const tiedPick = testing.pickBest(movie, [
     {
       infoHash: "z",

@@ -4,10 +4,10 @@ import { episodeIdentityMatches } from "./episode_identity.ts";
 import { catalogRelocationMethod } from "./migration_actions.ts";
 import {
   AddResultsSchema,
-  compareRelease,
   episodePolicy,
   type Policy,
   PolicySchema,
+  rankEligible,
 } from "./policy.ts";
 
 const MODEL_VERSION = "2026.11.16.1";
@@ -141,6 +141,11 @@ const EpisodeSchema = z.object({
   category: CategorySchema,
   infoHash: z.string().nullable(),
   acquisitionLocator: z.string().max(32000).nullable().optional(),
+  rankedReleases: z.array(ReleaseSchema.extend({
+    rank: z.number().int().min(1).max(3),
+    selectedAt: z.iso.datetime(),
+    ranking: PolicySchema.shape.ranking,
+  })).max(3).optional(),
   downloadProvider: z.string().optional(),
   policyVersion: z.number().int().optional(),
   rejectedReleases: z.array(
@@ -344,24 +349,15 @@ function pickBest(
   },
   releases: ReadonlyArray<Release>,
   policy: Policy = episodePolicy,
-): { release: Release | null; reasons: string[] } {
-  if (releases.length === 0) return { release: null, reasons: ["no-releases"] };
-  const acceptable = releases
-    .map((release) => ({ release, evaluation: evaluateRelease(episode, release, policy) }))
-    .filter((entry) => entry.evaluation.ok);
-  if (acceptable.length === 0) {
-    const first = releases[0];
-    if (!first) return { release: null, reasons: ["no-releases"] };
-    const evalResult = evaluateRelease(episode, first, policy);
-    return { release: null, reasons: evalResult.reasons };
-  }
-  // ponytail: stable tie-break on name then infoHash so identical inputs
-  // always pick the same release across runs (reproducible workflow log).
-  acceptable.sort((a, b) => compareRelease(a.release, b.release, policy));
-  const first = acceptable[0];
-  return first
-    ? { release: first.release, reasons: [] }
-    : { release: null, reasons: ["no-acceptable"] };
+): { release: Release | null; ranked: Release[]; reasons: string[] } {
+  const eligible = releases.filter((release) => evaluateRelease(episode, release, policy).ok);
+  const ranked = rankEligible(eligible, policy);
+  const reasons = ranked.length
+    ? []
+    : releases.length
+    ? evaluateRelease(episode, releases[0], policy).reasons
+    : ["no-releases"];
+  return { release: ranked[0] ?? null, ranked, reasons };
 }
 
 function summarizeNoMatch(
@@ -812,10 +808,19 @@ async function executeSelect(
     const rejected = new Set(existing.rejectedReleases.map((r) => r.infoHash.toLowerCase()));
     const candidates = item.releases.filter((r) => !rejected.has(r.infoHash.toLowerCase()));
     const result = pickBest(existing, candidates, context.globalArgs?.policy ?? episodePolicy);
+    const selectedAt = new Date().toISOString();
+    const rankedReleases = result.ranked.map((release, index) => ({
+      ...release,
+      infoHash: release.infoHash.toLowerCase(),
+      rank: index + 1,
+      selectedAt,
+      ranking: (context.globalArgs?.policy ?? episodePolicy).ranking,
+    }));
     let next: Episode;
     if (result.release) {
       next = {
         ...existing,
+        rankedReleases,
         status: "selected",
         infoHash: result.release.infoHash.toLowerCase(),
         acquisitionLocator: result.release.magnet ?? result.release.infoHash,
@@ -829,6 +834,7 @@ async function executeSelect(
     } else {
       next = {
         ...existing,
+        rankedReleases,
         noMatchReason: summarizeNoMatch(
           existing,
           item.releases,
