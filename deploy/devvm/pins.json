@@ -34,7 +34,7 @@
     "version": "1.10.0",
     "source": "c9f0ab0e90e9d02b63ecbb860d0f51722893e579",
     "patch": "patches/torlink-durable.patch",
-    "runtimeEntrypointSha256": "dd4225811182db27dc0c41806ea27ff2c734173978f01be8a403ea987aa0989c"
+    "runtimeEntrypointSha256": "c31dd82c13174cb28868867a00d47b2226bf110aa1be465baeccc741a103c125"
   },
   "nordvpn": {
     "version": "6.0.2",

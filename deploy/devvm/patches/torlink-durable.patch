@@ -625,3 +625,80 @@ diff --git a/src/daemon/runtime.ts b/src/daemon/runtime.ts
    runtime.queue.add(
      {
        id: parsed.infoHash,
+diff --git a/src/cli/search.ts b/src/cli/search.ts
+--- a/src/cli/search.ts
++++ b/src/cli/search.ts
+@@ -13,6 +13,7 @@
+   count: number;
+   error: string | null;
+   code: string | null;
++  retryAt?: number;
+ }
+ 
+ export interface SearchDocument {
+@@ -100,7 +101,8 @@
+   });
+ 
+   const attempts = await Promise.all(
+-    selectSources(category).map(async (source) => {
++    selectSources(category).filter((source) => !process.env.TORLINK_SEARCH_SOURCE ||
++      source.id === process.env.TORLINK_SEARCH_SOURCE).map(async (source) => {
+       try {
+         const results = await Promise.race([
+           cachedSearch(source, options.query, { signal }),
+@@ -133,6 +135,7 @@
+             count: 0,
+             error: error instanceof Error ? error.message : String(error),
+             code: errorCode(error),
++            ...(error instanceof HttpError && error.retryAt ? {retryAt:error.retryAt}:{}),
+           } satisfies SourceOutcome,
+         };
+       }
+diff --git a/src/util/net.ts b/src/util/net.ts
+--- a/src/util/net.ts
++++ b/src/util/net.ts
+@@ -13,7 +13,7 @@
+ 
+ export class HttpError extends Error {
+   status: number;
+-  constructor(status: number, message?: string) {
++  constructor(status: number, message?: string, readonly retryAt?: number) {
+     super(message ?? `HTTP ${status}`);
+     this.name = "HttpError";
+     this.status = status;
+@@ -113,22 +113,23 @@
+ 
+     if (!RETRY_STATUS.has(res.status)) return res;
+ 
++    const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
++    const retryAt = retryAfterMs === undefined ? undefined : Date.now() + retryAfterMs;
+     const server = res.headers.get("server")?.toLowerCase() || "";
+     if (res.status === 503 && (server.includes("ddos-guard") || server.includes("cloudflare"))) {
+       throw new HttpError(
+         res.status,
+-        `Request to ${url} blocked by ${server} (HTTP ${res.status}).`,
++        `Request to ${url} blocked by ${server} (HTTP ${res.status}).`, retryAt,
+       );
+     }
+ 
+     if (attempt >= retries) {
+       throw new HttpError(
+         res.status,
+-        `Request to ${url} failed after ${retries} retries (HTTP ${res.status}).`,
++        `Request to ${url} failed after ${retries} retries (HTTP ${res.status}).`, retryAt,
+       );
+     }
+ 
+-    const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
+     // Retry-After floors the backoff, so it needs the bound the backoff has. A
+     // source that went invite-only answered every search with a 503 asking for
+     // 86400 seconds, and this sleep held the search for the full day. Retrying
+@@ -137,7 +138,7 @@
+     if (retryAfterMs !== undefined && retryAfterMs > capMs) {
+       throw new HttpError(
+         res.status,
+-        `Request to ${url} was told to retry in ${Math.ceil(retryAfterMs / 1000)}s (HTTP ${res.status}).`,
++        `Request to ${url} was told to retry in ${Math.ceil(retryAfterMs / 1000)}s (HTTP ${res.status}).`, retryAt,
+       );
+     }
+     await sleepImpl(backoffDelay(attempt, baseMs, capMs, retryAfterMs), signal ?? undefined);
