@@ -51,6 +51,7 @@ const Globals = z.object({
   episodeRetryHours: z.number().int().min(1).max(720).default(24),
   batchLimit: z.number().int().min(1).max(100).default(100),
   expectedInterface: z.string().optional(),
+  metadataGraceMinutes: z.number().int().positive().default(30),
   stallMinutes: z.number().int().positive().default(30),
   transferSampleMaxGapMinutes: z.number().int().positive().default(15),
   discoveryModel: z.string().default("movie-discovery"),
@@ -170,6 +171,7 @@ async function recordTransferHealth(ctx: Context, fallback?: Row) {
       });
       if (!sample.success) continue;
       const observation = observeTransfer(sample.data, saved, {
+        metadataGraceMs: ctx.globalArgs.metadataGraceMinutes * 60_000,
         stallMs: ctx.globalArgs.stallMinutes * 60_000,
         maxGapMs,
       });
