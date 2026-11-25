@@ -409,6 +409,7 @@ async function installUnlocked(
   });
   await define("pipeline", "@funsaized/hoardarr/pipeline", {
     ...config.observation,
+    reviewedTmdbAliases: config.reviewedTmdbAliases,
     requestModel: "requests",
     ...(config.providers.discovery === "tmdb" ? { trackedShows: config.interests.shows } : {}),
     destination: actual.destination,

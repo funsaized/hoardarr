@@ -28,6 +28,7 @@ reports:
   - migration_comparison.ts
 include:
   - _lib/tracked_tv.ts
+  - _lib/release_feed.ts
   - _lib/catalog_identity.ts
   - _lib/archive.ts
   - _lib/episode_identity.ts

@@ -35,6 +35,8 @@ export const ConfigSchema = z.object({
     destination: binding.default("local"),
     network: binding.default("gluetun"),
   }).strict(),
+  reviewedTmdbAliases: z.record(z.uuid(), z.number().int().positive()).default({}),
+  movieReleaseFeeds: z.array(binding).max(8).default([]),
   providerFiles: z.array(absolutePath).default([]),
   providerSettings: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
   interests: z.object({

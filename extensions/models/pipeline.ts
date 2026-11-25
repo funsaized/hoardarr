@@ -1,4 +1,5 @@
 /** Catalog-facing batch operations. Swamp workflows own phase ordering and recovery. */
+import { FeedName, FeedReview, ingestReleaseFeeds } from "./_lib/release_feed.ts";
 import { z } from "npm:zod@4.5.1";
 import {
   assertAdmission,
@@ -35,6 +36,7 @@ import { CatalogIdentity, identityIndex, movieCatalogId } from "./_lib/catalog_i
 import { airedEpisodes, TrackedEpisodeList, trackedKey, TrackedSeries } from "./_lib/tracked_tv.ts";
 const Globals = z.object({
   trackedShows: z.array(TrackedSeries).optional(),
+  reviewedTmdbAliases: z.record(z.uuid(), z.number().int().positive()).default({}),
   requestModel: z.string().optional(),
   libraryRoot: z.string().optional(),
   destination: z.string().default("local-destination"),
@@ -310,11 +312,24 @@ export const model = {
   }],
   globalArguments: Globals,
   resources: {
+    feedBudget: {
+      schema: z.object({ remaining: z.number().int().nonnegative() }),
+      description: "Remaining regional movie discovery allowance",
+      lifetime: "7d",
+      garbageCollection: 2,
+    },
+    feedReview: {
+      schema: FeedReview,
+      description: "Configured movie feed identity and regional release evidence",
+      lifetime: "infinite",
+      garbageCollection: 2,
+    },
     episodeReview: {
       schema: z.object({
         title: z.string(),
         reason: z.string(),
         provider: z.enum(["tvmaze", "tmdb"]),
+        resolved: z.boolean().optional(),
         ids: z.array(z.number().int().positive()),
       }),
       description: "Tracked episodes awaiting numbering or identity confirmation",
@@ -327,6 +342,7 @@ export const model = {
         title: z.string(),
         year: z.number().nullable(),
         localIds: z.array(z.uuid()),
+        resolved: z.boolean().optional(),
         reason: z.string(),
       }),
       description: "Movie identities awaiting review",
@@ -658,6 +674,33 @@ export const model = {
         });
       },
     },
+    ingestReleaseFeeds: {
+      description: "Review configured Swamp release suggestions under the weekly movie allowance.",
+      arguments: Owned.extend({
+        feeds: z.array(FeedName).max(8),
+        region: z.string().regex(/^[A-Z]{2}$/),
+        limit: z.number().int().min(1).max(50),
+      }),
+      execute: async (
+        args: { owner: string; feeds: string[]; region: string; limit: number },
+        ctx: Context,
+      ) => {
+        await assertLease(ctx.repoDir, args.owner);
+        const remaining = await ingestReleaseFeeds(
+          ctx,
+          args.feeds,
+          args.region,
+          args.limit,
+          ctx.globalArgs.movies,
+          ctx.globalArgs.discoveryModel ?? "movie-discovery",
+        );
+        return {
+          dataHandles: [
+            await ctx.writeResource("feedBudget", "feed-budget-current", { remaining }),
+          ],
+        };
+      },
+    },
     ingestTracked: {
       description:
         "Admit aired tracked episodes from confirmed TVmaze series under installation ownership.",
@@ -680,9 +723,10 @@ export const model = {
             : list.tracked.tmdbId ?? 2 ** 52 + show.id;
           const seriesKey = "s-" + seriesId;
           const { aired, review } = airedEpisodes(list, Date.now());
-          const recordReview = async (ids: number[], reason: string) => {
+          const recordReview = async (ids: number[], reason: string, resolved = false) => {
             await ctx.writeResource("episodeReview", "review-" + record.name, {
               title: show.name,
+              resolved,
               ids,
               reason,
               provider: "tvmaze",
@@ -761,6 +805,12 @@ export const model = {
           }
           if (review.length) {
             await recordReview(review, "Confirm episode numbering, identity or air date");
+          } else if (
+            (await ctx.readModelData("pipeline", "episodeReview")).some((r) =>
+              r.name === "review-" + record.name && !r.attributes.resolved
+            )
+          ) {
+            await recordReview([], "Episode review complete", true);
           }
         }
         return write(ctx, "summary", { ok: true });
@@ -802,7 +852,59 @@ export const model = {
         const catalogRows = await rows(ctx, args.mediaKind);
         const existing = new Set(catalogRows.map((r) => r[idField(args.mediaKind)]));
         const missing = [];
+        const approved = ctx.globalArgs.reviewedTmdbAliases ?? {};
+        const reviewed = new Set(
+          (await ctx.readModelData(
+            "pipeline",
+            args.mediaKind === "movie" ? "identityReview" : "episodeReview",
+          )).filter((r) => !r.attributes.resolved).map((r) => r.name),
+        );
         for (const discovery of discoveries) {
+          const movie = args.mediaKind === "movie";
+          const providerId = discovery[idField(args.mediaKind)];
+          const reviewKey = movie
+            ? "review-movie-" + providerId
+            : "review-tmdb-episode-" + providerId;
+          const mapped = catalogRows.filter((r) =>
+            typeof r.localId === "string" && approved[r.localId] === providerId
+          );
+          if (mapped.length === 1 && reviewed.has(reviewKey)) {
+            const row = mapped[0];
+            if (
+              movie ? row.year !== discovery.year : row.seasonNumber !== discovery.seasonNumber ||
+                row.episodeNumber !== discovery.episodeNumber
+            ) {
+              throw new Error("Reviewed provider identity differs from discovery");
+            }
+            await invoke(ctx, catalog(ctx, args.mediaKind), "linkReviewedTmdb", {
+              id: catalogNumber(row, args.mediaKind),
+              localId: row.localId,
+              tmdbId: providerId,
+              ...(!movie ? { showTmdbId: discovery.showTmdbId } : {}),
+            });
+            await ctx.writeResource(
+              movie ? "identityReview" : "episodeReview",
+              reviewKey,
+              movie
+                ? {
+                  tmdbId: providerId,
+                  title: row.title,
+                  year: row.year,
+                  localIds: [row.localId],
+                  reason: "Operator confirmed",
+                  resolved: true,
+                }
+                : {
+                  provider: "tmdb",
+                  title: row.showName,
+                  ids: [providerId],
+                  reason: "Operator confirmed",
+                  resolved: true,
+                },
+            );
+            existing.add(providerId);
+            continue;
+          }
           if (existing.has(discovery[idField(args.mediaKind)])) continue;
           if (
             args.mediaKind === "episode" && catalogRows.some((r) =>
@@ -1043,7 +1145,12 @@ export const model = {
               list.attributes.shows,
             )
           ) {
-            if (show.tmdbId) legacy("series", "s-", show.tmdbId);
+            if (
+              show.tmdbId && ![...index.byKey.values()].some((r) =>
+                r.kind === "series" &&
+                r.aliases.some((a) => a.provider === "tmdb" && a.value === String(show.tmdbId))
+              )
+            ) legacy("series", "s-", show.tmdbId);
           }
         }
         const handles = [];

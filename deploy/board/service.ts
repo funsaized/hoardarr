@@ -1,11 +1,12 @@
 // The browser only sees these projections. Provider responses can include private locators.
 const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "episodeReview", "identityReview"]) || (modelName == "tracked-tv" && specName == "refreshStatus" && attributes.state != "ready")';
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "episodeReview", "identityReview"] && (!("resolved" in attributes) || !attributes.resolved)) || (modelName == "pipeline" && specName == "feedReview" && attributes.state == "pending") || (modelName == "tracked-tv" && specName == "refreshStatus" && attributes.state != "ready")';
 const catalogFields = [
   "catalogId", "localId", "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "seriesCatalogId", "seriesLocalId", "tvmazeSeriesId", "numbering", "showName",
   "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
 ];
-const catalogProjection = 'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
+const catalogProjection = 'specName == "feedReview" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason} : ' +
+  'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
   'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
   'specName == "searchState" ? {"searchAttempts": attributes.attempts} : ' +
   'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
