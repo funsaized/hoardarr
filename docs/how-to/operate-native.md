@@ -216,7 +216,7 @@ session or model calls.
 
 ## Request a movie or episodes
 
-Ask Pi for a movie, an exact episode, a season, an entire series, the latest aired episode or the
+Ask Pi for a movie, an exact episode, a season, an entire series, the most recently aired episode or the
 remaining episodes of a series. Include a year when titles could match more than one TMDB entry. Pi
 asks for clarification when needed, then records the identity and scope in Swamp. Closing Pi leaves
 accepted requests available to the scheduled `media` workflow.
@@ -234,6 +234,19 @@ sudo hoardarr-operator request submit --resolution RESOLUTION_UUID --tmdb-id TMD
   --scope movie --key UNIQUE_REQUEST_KEY --text "Download Arrival (2016)" --json
 ```
 
+If TMDB is unavailable, resolve a known movie by its saved title and year. For a movie missing from
+the catalog, use `--local` and confirm the title and year. Include an IMDb ID if you have verified it.
+
+```sh
+sudo hoardarr-operator request resolve --kind movie --local \
+  --query "Night of the Living Dead" --year 1968 --imdb-id tt0063350 --json
+sudo hoardarr-operator request submit --resolution RESOLUTION_UUID --local-id LOCAL_UUID \
+  --scope movie --key UNIQUE_REQUEST_KEY --text "Download Night of the Living Dead (1968)" --json
+```
+
+Use the resolution and local IDs from the first command. When TMDB returns, Hoardarr can link an
+exact IMDb match to that local ID. Open the title in Attention to inspect a match that needs review.
+
 Use the same key if you retry that submission. Reusing a key for a different intent fails. Separate
 requests for the same media share existing catalog progress and verified deliveries.
 
@@ -243,7 +256,7 @@ requests for the same media share existing catalog progress and verified deliver
 | `episode`   | `--season --episode` | One episode; future episodes wait for their air date     |
 | `season`    | `--season`           | Regular episodes aired in that season by acceptance      |
 | `series`    | Series identity      | All regular episodes aired by acceptance                 |
-| `latest`    | Series identity      | Latest regular episode aired by acceptance               |
+| `latest`    | Series identity      | Most recent regular episode aired by acceptance               |
 | `remaining` | Series identity      | The finite series set, reusing existing catalog progress |
 
 Acceptance uses a UTC date cutoff. Hoardarr saves the complete target list before catalog intake;

@@ -474,8 +474,8 @@ Try asking: “Give me a read-only health summary,” “Download Severance (202
 “Finish the remaining episodes of The Good Place (2016).” Include a year for ambiguous titles.
 
 One-off requests use `hoardarr-operator request`: resolve a title, submit a finite scope, then read
-its status. Pi translates the conversation into those typed commands. A request records the selected
-TMDB identity and survives the agent session. The existing `media` workflow acquires it, preserving
+its status. Pi translates the conversation into those typed commands. A request keeps its confirmed
+catalog identity and survives the agent session. The existing `media` workflow acquires it, preserving
 completed copies and downloads already in progress. An entire-series request covers regular episodes
 aired by its acceptance date; ongoing tracking remains an explicit configuration change.
 
@@ -535,10 +535,15 @@ tmdbKey: '${{ vault.get("hoardarr", "TMDB_API_KEY") }}'
 | `providerFiles`                       | Absolute paths to additional provider descriptors                                      |
 | `providerSettings`                    | Behavior global arguments keyed by provider binding ID                                 |
 | `interests`                           | Movie flag, region, language, weekly limit and up to 100 configured shows              |
-| `interests.shows[]`                   | Required `name`; optional `tmdbId`, `year`; `category` is `tv` or `anime`              |
+| `interests.shows[]`                   | Show name, year, category and confirmed TMDB, TVmaze, TVDB or IMDb IDs              |
 | `television`                          | Independent search/submission budgets and retry cooldown                               |
 | `policies.movie`, `.episode`          | [Selection policy schema](extensions/models/_lib/policy.ts)                            |
 | `download`                            | Seeding, operation concurrency and staging capacity settings                           |
+| `search`                              | Global and per-source call limits and per-call timeout                                  |
+| `observation`                         | Minutes of zero growth for a stall and a separate metadata grace period                |
+| `switching`                           | Enable new switches for specific movie or episode keys, with a cooldown per stalled hash |
+| `movieReleaseFeeds`                   | Swamp behaviors that supply movie suggestions and dated regional digital releases       |
+| `reviewedTmdbAliases`                 | Confirmed mappings from local movie UUIDs to TMDB IDs                                   |
 | `schedule`                            | Enabled flag and five-field cron expression                                            |
 | `torlink`                             | CLI binary, loopback API URL, optional vault token and tunnel interface                |
 | `tmdbKey`                             | Vault expression; default key is `hoardarr/TMDB_API_KEY`                               |
