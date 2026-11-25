@@ -141,3 +141,36 @@ Deno.test("TVmaze ingest replays one episode with stable local ownership and hol
     strictEqual(record.infoHash, "a".repeat(40));
     strictEqual(data.get("review-tmdb-episode-73")?.spec, "episodeReview");
   }));
+
+Deno.test("confirm a current series candidate once and reject stale or conflicting choices", async () => {
+  const { model } = await import("../extensions/models/tracked_tv.ts");
+  const { trackedKey } = await import("../extensions/models/_lib/tracked_tv.ts");
+  const review = trackedKey(tracked) + "-status", revision = "2026-11-25T15:00:00.000Z";
+  const records = new Map<string, Record<string, unknown>>([[review, {
+    title: tracked.name,
+    state: "confirm-series",
+    retryAt: revision,
+    choices: [show, { ...show, id: 42 }],
+  }]]);
+  let writes = 0;
+  const ctx = {
+    signal: new AbortController().signal,
+    globalArgs: { shows: [tracked] },
+    readModelData: async () => [],
+    readResource: async (key: string) => records.get(key) ?? null,
+    writeResource: async (_: string, name: string, data: Record<string, unknown>) => {
+      records.set(name, data);
+      writes++;
+      return { name };
+    },
+  };
+  const confirm = (id: number, rev = revision) =>
+    model.methods.confirmSeries.execute({ review, id, revision: rev }, ctx);
+  const { rejects } = await import("node:assert/strict");
+  await rejects(() => confirm(41, "2025-01-01T00:00:00.000Z"));
+  await rejects(() => confirm(100));
+  await confirm(41);
+  await confirm(41);
+  await rejects(() => confirm(42));
+  strictEqual(writes, 1);
+});

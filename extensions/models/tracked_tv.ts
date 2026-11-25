@@ -62,7 +62,12 @@ export async function observeSeries(tracked: ShowConfig, get: (path: string) => 
 }
 export const model = {
   type: "@funsaized/hoardarr/tracked-tv",
-  version: "2026.11.25.1",
+  version: "2026.11.25.3",
+  upgrades: [{
+    toVersion: "2026.11.25.3",
+    description: "Preserve tracked shows when adding operator series decisions",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }],
   globalArguments: z.object({ shows: z.array(TrackedSeries).max(100) }),
   resources: {
     episodeList: {
@@ -77,6 +82,17 @@ export const model = {
       lifetime: "infinite",
       garbageCollection: 2,
     },
+    seriesDecision: {
+      description:
+        "Operator-confirmed TVmaze series for a tracked configuration and review revision",
+      schema: z.object({
+        id: z.number().int().positive(),
+        revision: z.iso.datetime(),
+        confirmedAt: z.iso.datetime(),
+      }),
+      lifetime: "infinite",
+      garbageCollection: 2,
+    },
     backoff: {
       description: "Shared TVmaze rate limit",
       schema: z.object({ retryAt: z.iso.datetime() }),
@@ -85,6 +101,42 @@ export const model = {
     },
   },
   methods: {
+    confirmSeries: {
+      description:
+        "Confirm a saved TVmaze series candidate from the current tracked-series review.",
+      arguments: z.object({
+        review: z.string().regex(/^tracked-[a-f0-9]{32}-status$/),
+        id: z.number().int().positive(),
+        revision: z.iso.datetime(),
+      }),
+      execute: async (
+        { review, id, revision }: { review: string; id: number; revision: string },
+        ctx: Context,
+      ) => {
+        const key = review.slice(0, -7);
+        const tracked = ctx.globalArgs.shows.find((show) => trackedKey(show) === key);
+        if (!tracked) throw new Error("Tracked configuration changed");
+        const previous = await ctx.readResource(key + "-decision");
+        if (previous?.revision === revision && previous.id === id) return { dataHandles: [] };
+        const latest = status.parse(await ctx.readResource(review));
+        const match = latest.choices?.find((c) => c.id === id);
+        if (
+          previous?.revision === revision || latest.state !== "confirm-series" ||
+          latest.retryAt !== revision || !match
+        ) throw new Error("Series review has changed");
+        if (
+          tracked.tvmazeId && tracked.tvmazeId !== id ||
+          tracked.imdbId && tracked.imdbId !== match.externals.imdb ||
+          tracked.tvdbId && tracked.tvdbId !== match.externals.thetvdb
+        ) throw new Error("Configured series aliases conflict");
+        const decision = await ctx.writeResource("seriesDecision", key + "-decision", {
+          id,
+          revision,
+          confirmedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [decision] };
+      },
+    },
     refresh: {
       description: "Refresh due tracked series with confirmed aliases or return series choices.",
       arguments: z.object({}),
@@ -126,7 +178,11 @@ export const model = {
           const key = trackedKey(tracked);
           const prior = await ctx.readResource(key + "-status");
           const next = Date.parse(String(prior?.retryAt)) || 0;
-          if (next > Date.now()) continue;
+          const decision = await ctx.readResource(key + "-decision");
+          if (
+            next > Date.now() &&
+            !(prior?.state === "confirm-series" && decision && decision.revision === prior.retryAt)
+          ) continue;
           const saved = aliases.get(resolutionKey(tracked));
           const identity = saved?.status === "resolved" && saved.tmdbId &&
               (!tracked.tmdbId || tracked.tmdbId === saved.tmdbId)
@@ -137,7 +193,13 @@ export const model = {
               ...tracked,
             })
             : tracked;
-          due.push({ tracked: identity, key, next });
+          due.push({
+            tracked: decision && !identity.tvmazeId
+              ? { ...identity, tvmazeId: Number(decision.id) }
+              : identity,
+            key,
+            next,
+          });
         }
         for (const { tracked, key } of due.sort((a, b) => a.next - b.next).slice(0, 12)) {
           let outcome: z.infer<typeof status>, limited = false;

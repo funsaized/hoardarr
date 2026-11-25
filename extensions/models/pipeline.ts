@@ -347,7 +347,7 @@ async function itemRow(ctx: Context, item: Item): Promise<Row> {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.25.2",
+  version: "2026.11.25.3",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -385,6 +385,10 @@ export const model = {
     toVersion: "2026.11.25.2",
     description: "Preserve settings for pipelined local delivery",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.25.3",
+    description: "Keep existing reviews while recording typed provider references",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
   resources: {
@@ -411,6 +415,7 @@ export const model = {
         title: z.string(),
         reason: z.string(),
         provider: z.enum(["tvmaze", "tmdb"]),
+        entityType: z.enum(["series", "episode"]).optional(),
         resolved: z.boolean().optional(),
         ids: z.array(z.number().int().positive()),
       }),
@@ -881,20 +886,31 @@ export const model = {
             : list.tracked.tmdbId ?? 2 ** 52 + show.id;
           const seriesKey = "s-" + seriesId;
           const { aired, review } = airedEpisodes(list, Date.now());
-          const recordReview = async (ids: number[], reason: string, resolved = false) => {
+          const recordReview = async (
+            ids: number[],
+            reason: string,
+            resolved = false,
+            entityType: "series" | "episode" = "episode",
+          ) => {
             await ctx.writeResource("episodeReview", "review-" + record.name, {
               title: show.name,
               resolved,
               ids,
               reason,
               provider: "tvmaze",
+              entityType,
             });
           };
           if (
             !prior && !list.tracked.tmdbId &&
             existing.some((r) => String(r.showName).toLowerCase() === show.name.toLowerCase())
           ) {
-            await recordReview([show.id], "Confirm series alias against the existing catalog");
+            await recordReview(
+              [show.id],
+              "Confirm series alias against the existing catalog",
+              false,
+              "series",
+            );
             continue;
           }
           const series = index.confirm("series", seriesKey, {

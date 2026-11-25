@@ -206,6 +206,35 @@ async function mainUnlocked(argv: string[]): Promise<void> {
     output(await movieSummary(repo, args.length ? args.slice(1).join(" ") : undefined));
     return;
   }
+  if (action === "confirm-series") {
+    if (!config.guest) throw new Error("Series review requires an enrolled operator console");
+    await assertCommissioned(config, repo);
+    const review = option("--review"), id = option("--id"), revision = option("--revision");
+    if (
+      !review || !/^tracked-[a-f0-9]{32}-status$/.test(review) || !id ||
+      !/^[1-9][0-9]{0,14}$/.test(id) || !revision || !Number.isFinite(Date.parse(revision))
+    ) throw new Error("Invalid series review");
+    await assertAdmission(repo, true);
+    await leaseOperation(repo, async (path) => {
+      if (await readLease(path)) throw new Error("An installation operation is running");
+      await command([
+        "model",
+        "method",
+        "run",
+        "tracked-tv",
+        "confirmSeries",
+        "--input",
+        "review=" + review,
+        "--input",
+        "id=" + id,
+        "--input",
+        "revision=" + revision,
+        "--json",
+      ], repo);
+    });
+    output({ status: "succeeded" });
+    return;
+  }
   if (action === "archive") {
     if (config.providers.destination !== "local") {
       throw new Error("Archive requires the local destination");
@@ -496,6 +525,7 @@ export async function main(argv: string[]): Promise<void> {
     "schedule",
     "recover",
     "recover-apply",
+    "confirm-series",
     "recover-maintenance",
     "admit",
   ].includes(action);

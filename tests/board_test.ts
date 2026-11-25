@@ -90,3 +90,38 @@ Deno.test("commands require the exact loopback host and browser origin", () => {
     }
   }
 });
+
+import { reviewRows } from "../deploy/board/reviews.ts";
+Deno.test("series and episodes with the same provider ID retain distinct review labels", () => {
+  const list = {
+    trackedList: "tracked-a",
+    sourceShow: { id: 42, name: "Orbit" },
+    episodes: [
+      {
+        id: 42,
+        name: "Pilot",
+        season: 1,
+        number: 1,
+        airdate: "2026-01-01",
+        airstamp: "2026-01-01T00:00:00Z",
+      },
+      { id: 43, name: "Special", season: 1, number: 1 },
+    ],
+  };
+  const reviews = reviewRows([list, {
+    reviewKey: "first",
+    title: "Orbit",
+    provider: "tvmaze",
+    ids: [42, 43, 44],
+  }, {
+    reviewKey: "second",
+    reason: "Confirm series alias against the existing catalog",
+    provider: "tvmaze",
+    ids: [42],
+  }]);
+  const [ep, other, unknown] = reviews[0].candidates;
+  if (
+    ep.name !== "Pilot" || !ep.note?.includes("Another episode") ||
+    !other.note?.includes("Air time") || unknown.name || reviews[1].candidates[0].name !== "Orbit"
+  ) throw Error("Incorrect provider projection");
+});

@@ -288,7 +288,15 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     join(path, "hoardarr-board.service"),
     `[Unit]\nDescription=Hoardarr operator board\nRequires=hoardarr-board-command.socket\nPartOf=hoardarr-swamp.service\nAfter=hoardarr-swamp.service hoardarr-egress-guard.service\nRequires=hoardarr-egress-guard.service\nRequiresMountsFor=${
       q(g.projectRoot)
-    }\n[Service]\n${common}RuntimeDirectory=hoardarr-board\nRuntimeDirectoryMode=0700\nIPAddressDeny=any\nIPAddressAllow=localhost\nExecStart=${direct}/usr/local/bin/deno run --no-config --allow-env=TORLINK_STATE_DIR --allow-read --allow-write=/run/hoardarr-board,/run/hoardarr/board-command.sock --allow-net=127.0.0.1:9161,unix:/run/hoardarr-board/http.sock,unix:/run/hoardarr/board-command.sock --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts\n`,
+    }\n[Service]\n${common}RuntimeDirectory=hoardarr-board\nRuntimeDirectoryMode=0700\nIPAddressDeny=any\nIPAddressAllow=localhost\nExecStart=${direct}/usr/local/bin/deno run --no-config --allow-env=TORLINK_STATE_DIR --allow-read ${
+      arg(
+        "--allow-write=/run/hoardarr-board,/run/hoardarr/board-command.sock," +
+          join(g.projectRoot, "state/maintenance/board-history.json") + "," +
+          join(g.projectRoot, "state/maintenance/board-history.json.new"),
+      )
+    } --allow-net=127.0.0.1:9161,unix:/run/hoardarr-board/http.sock,unix:/run/hoardarr/board-command.sock --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts ${
+      arg(join(g.projectRoot, "state/maintenance/board-history.json"))
+    }\n`,
   );
   await Deno.writeTextFile(
     join(path, "hoardarr-board-command.socket"),

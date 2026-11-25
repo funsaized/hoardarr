@@ -1,31 +1,54 @@
+import { reviewRows } from "./reviews.ts";
 // The browser only sees these projections. Provider responses can include private locators.
-const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"] && (!("resolved" in attributes) || !attributes.resolved)) || (modelName == "pipeline" && specName == "feedReview" && attributes.state == "pending") || (modelName == "tracked-tv" && specName == "refreshStatus" && attributes.state != "ready")';
+export const catalogPredicate =
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"] && (!("resolved" in attributes) || !attributes.resolved)) || (modelName == "pipeline" && specName == "feedReview" && attributes.state == "pending") || (modelName == "tracked-tv" && (specName in ["episodeList","seriesDecision"] || (specName == "refreshStatus" && attributes.state != "ready")))';
 const catalogFields = [
-  "catalogId", "localId", "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "seriesCatalogId", "seriesLocalId", "tvmazeSeriesId", "numbering", "showName",
-  "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
+  "catalogId",
+  "localId",
+  "tmdbEpisodeId",
+  "tmdbId",
+  "infoHash",
+  "archivedAt",
+  "showTmdbId",
+  "seriesCatalogId",
+  "seriesLocalId",
+  "tvmazeSeriesId",
+  "numbering",
+  "showName",
+  "seasonNumber",
+  "episodeNumber",
+  "episodeTitle",
+  "title",
+  "status",
+  "transferredAt",
+  "year",
+  "airDate",
+  "localCleanedAt",
 ];
-const catalogProjection = 'specName == "releaseSwitch" ? {"switchKey": attributes.key, "phase": attributes.phase, "oldHash": attributes.oldHash, "newHash": attributes.candidate.infoHash, "rank": attributes.candidate.rank, "updatedAt": attributes.updatedAt} : ' +
+export const catalogProjection =
+  'specName == "seriesDecision" ? {"decisionKey": name, "revision": attributes.revision} : ' +
+  'specName == "episodeList" ? {"trackedList": name, "sourceShow": {"id": attributes.show.id, "name": attributes.show.name, "premiered": attributes.show.premiered}, "episodes": attributes.episodes.map(e, {"id": e.id, "name": e.name, "season": e.season, "number": e.number, "type": e.type, "airstamp": "airstamp" in e ? e.airstamp : null, "airdate": "airdate" in e ? e.airdate : null})} : ' +
+  'specName == "releaseSwitch" ? {"switchKey": attributes.key, "phase": attributes.phase, "oldHash": attributes.oldHash, "newHash": attributes.candidate.infoHash, "rank": attributes.candidate.rank, "updatedAt": attributes.updatedAt} : ' +
   'specName == "feedReview" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason} : ' +
-  'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
-  'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
+  'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "retryAt": attributes.retryAt, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
+  'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "provider": "provider" in attributes ? attributes.provider : "tmdb", "entityType": "entityType" in attributes ? attributes.entityType : null, "localIds": "localIds" in attributes ? attributes.localIds : null, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
   'specName == "searchState" ? {"searchAttempts": attributes.attempts} : ' +
   'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
   'specName == "transferObservation" ? {' +
-  '"observationKey": name, "hash": attributes.sample.hash, "decision": attributes.decision, ' +
+  '"observationKey": name, "hash": attributes.sample.hash, "decision": attributes.decision, "events": "events" in attributes ? attributes.events : [], ' +
   '"observedAt": attributes.sample.observedAt, "idleMs": attributes.idleMs, ' +
   '"lastProgressAt": "lastProgressAt" in attributes ? attributes.lastProgressAt : null, ' +
   '"etaSeconds": "etaSeconds" in attributes ? attributes.etaSeconds : null, ' +
   '"metadataMs": "metadataMs" in attributes ? attributes.metadataMs : null, "byteRate": "byteRate" in attributes ? attributes.byteRate : null} : ' +
   'specName == "showList" ? {"shows": attributes.shows.map(show, ' +
   '{"tmdbId": show.tmdbId, "name": show.name})} : {' +
-  catalogFields.map((field) =>
-    `"${field}": "${field}" in attributes ? attributes.${field} : null`
-  ).concat(
-    '"error": "error" in attributes && attributes.error != null && attributes.error != ""',
-    '"rankedCount": size("rankedReleases" in attributes ? attributes.rankedReleases : [])',
-    '"noMatchReason": "noMatchReason" in attributes ? attributes.noMatchReason : null',
-  ).join(", ") + "}";
+  catalogFields.map((field) => `"${field}": "${field}" in attributes ? attributes.${field} : null`)
+    .concat(
+      '"error": "error" in attributes && attributes.error != null && attributes.error != ""',
+      '"rankedCount": size("rankedReleases" in attributes ? attributes.rankedReleases : [])',
+      '"noMatchReason": "noMatchReason" in attributes ? attributes.noMatchReason : null',
+    ).join(", ") +
+  "}";
 type Transfer = {
   id: string;
   name: string;
@@ -102,21 +125,39 @@ async function live() {
   }
   return transfers(downloads, seeds, saved);
 }
-function matchingObservation(row: Record<string, unknown>, records: Map<string, Record<string, unknown>>) {
-  const suffix = row.showName ? `episode-${row.catalogId ?? row.tmdbEpisodeId}` : `movie-${row.catalogId ?? row.tmdbId}`;
+function matchingObservation(
+  row: Record<string, unknown>,
+  records: Map<string, Record<string, unknown>>,
+) {
+  const suffix = row.showName
+    ? `episode-${row.catalogId ?? row.tmdbEpisodeId}`
+    : `movie-${row.catalogId ?? row.tmdbId}`;
   const health = records.get("transfer-health-" + suffix);
   if (!health || health.hash !== row.infoHash) return undefined;
-  const { decision, observedAt, idleMs, byteRate, metadataMs, lastProgressAt, etaSeconds } = health;
-  return { decision, observedAt, idleMs, byteRate, metadataMs, lastProgressAt, etaSeconds };
+  const { decision, observedAt, idleMs, byteRate, metadataMs, lastProgressAt, etaSeconds, events } =
+    health;
+  return { decision, observedAt, idleMs, byteRate, metadataMs, lastProgressAt, etaSeconds, events };
 }
 const rejectionCodes = new Set([
-  "no-releases", "no-acceptable-release", "identity-mismatch-rejected", "episode-token-mismatch",
-  "not-1080p-web", "cam-ts-tc", "executable-archive", "pack", "low-seeders", "too-large",
-  "source-not-allowed", "title-mismatch", "year-mismatch",
+  "no-releases",
+  "no-acceptable-release",
+  "identity-mismatch-rejected",
+  "episode-token-mismatch",
+  "not-1080p-web",
+  "cam-ts-tc",
+  "executable-archive",
+  "pack",
+  "low-seeders",
+  "too-large",
+  "source-not-allowed",
+  "title-mismatch",
+  "year-mismatch",
 ]);
 export function rejectionSummary(value: unknown) {
   if (typeof value !== "string" || !value) return null;
-  const codes = value.replace(/^no-acceptable-release: /, "").split(",").filter((code) => rejectionCodes.has(code));
+  const codes = value.replace(/^no-acceptable-release: /, "").split(",").filter((code) =>
+    rejectionCodes.has(code)
+  );
   return codes.length ? codes.join(", ") : "Waiting for an eligible release";
 }
 function searchDetails(attempt: Record<string, unknown> | undefined, rankedCount: unknown) {
@@ -150,43 +191,66 @@ async function catalog() {
   for (const row of results) {
     if (row.observationKey) observations.set(row.observationKey, row);
   }
-  const switches = new Map(results.filter((r: {switchKey?: string}) => r.switchKey).map((r: {switchKey:string})=>[r.switchKey,r]));
-  const attempts = results.find((row: { searchAttempts?: unknown }) => row.searchAttempts)?.searchAttempts ?? {};
+  const switches = new Map(
+    results.filter((r: { switchKey?: string }) => r.switchKey).map((
+      r: { switchKey: string },
+    ) => [r.switchKey, r]),
+  );
+  const attempts =
+    results.find((row: { searchAttempts?: unknown }) => row.searchAttempts)?.searchAttempts ?? {};
   return {
     shows,
-    rows: [...results.filter((r: Record<string, unknown>) => r.reviewKey).map((r: Record<string, unknown>) => ({
-      id: r.reviewKey, review: true, title: r.title, state: "blocked",
-      reason: r.reason === "confirm-series" ? "Confirm a TVmaze series in tracked show settings" :
-        r.reason === "unavailable" ? "TVmaze unavailable · retaining last successful episode list" : r.reason,
-      providers: Array.isArray(r.choices) ? r.choices.map(c => c.name + " (" + (c.premiered ?? "unknown premiere") + ") · TVmaze " + c.id).join(", ") :
-        Array.isArray(r.ids) ? r.ids.slice(0, 24).join(", ") : undefined,
-    })), ...results.filter((r: Record<string, unknown>) => !r.switchKey && !r.reviewKey && !r.searchAttempts && !r.shows && !r.observationKey && !r.catalogKey).map((
-      r: Record<string, unknown>,
-    ) => ({
-      id: r.localId ?? identities.get(r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`) ??
-        (r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`),
-      health: matchingObservation(r, observations),
-      releaseSwitch: switches.get(r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`),
-      search: searchDetails(attempts[String(r.showName ? r.catalogId ?? r.tmdbEpisodeId : "m-" + (r.catalogId ?? r.tmdbId))], r.rankedCount),
-      hash: r.infoHash,
-      archived: !!r.archivedAt,
-      showId: r.seriesLocalId ?? identities.get("s-" + (r.seriesCatalogId ?? r.showTmdbId)) ?? r.showTmdbId,
-      ...(r.tvmazeSeriesId ? { source: "TVmaze · aired order", sourceUrl: "https://www.tvmaze.com/shows/" + r.tvmazeSeriesId } : {}),
-      show: r.showName,
-      season: r.seasonNumber,
-      episode: r.episodeNumber,
-      episodeTitle: r.episodeTitle,
-      title: r.showName
-        ? `${r.showName} · S${String(r.seasonNumber).padStart(2, "0")}E${
-          String(r.episodeNumber).padStart(2, "0")
-        }`
-        : r.title,
-      state: r.status,
-      delivered: r.transferredAt,
-      reason: r.error
-        ? "Recorded error · inspect operator status"
-        : rejectionSummary(r.noMatchReason),
-    })),],
+    rows: [
+      ...reviewRows(results),
+      ...results.filter((r: Record<string, unknown>) =>
+        !r.decisionKey && !r.trackedList && !r.switchKey && !r.reviewKey && !r.searchAttempts &&
+        !r.shows && !r.observationKey && !r.catalogKey
+      ).map((
+        r: Record<string, unknown>,
+      ) => ({
+        id: r.localId ??
+          identities.get(
+            r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`,
+          ) ??
+          (r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`),
+        health: matchingObservation(r, observations),
+        releaseSwitch: switches.get(
+          r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`,
+        ),
+        search: searchDetails(
+          attempts[
+            String(r.showName ? r.catalogId ?? r.tmdbEpisodeId : "m-" + (r.catalogId ?? r.tmdbId))
+          ],
+          r.rankedCount,
+        ),
+        hash: r.infoHash,
+        archived: !!r.archivedAt,
+        showId: r.seriesLocalId ?? identities.get("s-" + (r.seriesCatalogId ?? r.showTmdbId)) ??
+          r.showTmdbId,
+        ...(r.tvmazeSeriesId
+          ? {
+            source: "TVmaze · aired order",
+            sourceUrl: "https://www.tvmaze.com/shows/" + r.tvmazeSeriesId,
+          }
+          : {}),
+        show: r.showName,
+        season: r.seasonNumber,
+        episode: r.episodeNumber,
+        episodeTitle: r.episodeTitle,
+        title: r.showName
+          ? `${r.showName} · S${String(r.seasonNumber).padStart(2, "0")}E${
+            String(r.episodeNumber).padStart(2, "0")
+          }`
+          : r.title,
+        state: r.status,
+        delivered: r.transferredAt,
+        cleaned: r.localCleanedAt,
+        year: r.year,
+        reason: r.error
+          ? "Recorded error · inspect operator status"
+          : rejectionSummary(r.noMatchReason),
+      })),
+    ],
   };
 }
 export function cache<T>(load: () => Promise<T>, interval: (value: T) => number) {
@@ -242,41 +306,85 @@ if (import.meta.main) {
   const readCatalog = cache(catalog, () => 60000);
   const assets = new Map<string, { body: Uint8Array<ArrayBuffer>; type: string }>();
   for (
-    const [route, file, type] of [["/", "index.html", "text/html"], [
-      "/board.js",
-      "board.js",
-      "text/javascript",
-    ], ["/board.css", "board.css", "text/css"]]
+    const [route, file, type] of [
+      ["/", "index.html", "text/html"],
+      [
+        "/board.js",
+        "board.js",
+        "text/javascript",
+      ],
+      ["/mesh.js", "mesh.js", "text/javascript"],
+      ["/board.css", "board.css", "text/css"],
+    ]
   ) {
     assets.set(route, { body: await Deno.readFile(new URL(file, import.meta.url)), type });
   }
-  let preview: { observed: string; acquisitions: string[]; deliveries: string[] } | null = null;
-  let operation = { mode: "", status: "Idle", started: 0 };
-  async function operate(mode: string) {
-    operation = { mode, status: "Running", started: Date.now() };
+  type Run = {
+    id: string;
+    mode: string;
+    status: string;
+    started: number;
+    finished?: number;
+    runId?: string;
+  };
+  type Plan = { observed: string; acquisitions: string[]; deliveries: string[] };
+  const journal = Deno.args[0];
+  let history: Run[] = [], preview: Plan | null = null;
+  let pendingSave = Promise.resolve();
+  function save() {
+    const value = JSON.stringify({ history, preview });
+    pendingSave = pendingSave.catch(() => {}).then(async () => {
+      await Deno.writeTextFile(journal + ".new", value, { mode: 0o600 });
+      await Deno.rename(journal + ".new", journal);
+    });
+    return pendingSave;
+  }
+  if (journal) {
     try {
+      const saved = JSON.parse(await Deno.readTextFile(journal));
+      history = saved.history;
+      preview = saved.preview;
+      for (const h of history) {
+        if (h.status === "Running") {
+          h.status = "Interrupted · check operator status";
+          h.finished = Date.now();
+        }
+      }
+      await save();
+    } catch (e) {
+      if (!(e instanceof Deno.errors.NotFound)) throw e;
+    }
+  }
+  let operation: Run = history[0] ?? { id: "", mode: "", status: "Idle", started: 0 };
+  async function operate(run: Run, request: string) {
+    try {
+      if (journal) await save();
       const socket = await Deno.connect({
         transport: "unix",
         path: "/run/hoardarr/board-command.sock",
       });
       try {
         const out = socket.writable.getWriter();
-        await out.write(new TextEncoder().encode(mode + "\n"));
+        await out.write(new TextEncoder().encode(request + "\n"));
         out.releaseLock();
         const result = await new Response(socket.readable).text();
-        if (mode === "preview" && result.startsWith("{")) {
-          preview = JSON.parse(result);
-          operation.status = "Succeeded";
-        } else {operation.status = result.trim() === "OK"
-            ? "Succeeded"
-            : "Failed · inspect operator journal";}
+        const reply = JSON.parse(result);
+        if (reply.status !== "succeeded") throw Error();
+        if (run.mode === "preview") preview = reply.preview;
+        run.runId = reply.runId;
+        run.status = "Succeeded";
       } finally {
         try {
           socket.close();
         } catch { /* already closed */ }
       }
     } catch {
-      operation.status = "Failed · operator unavailable";
+      run.status = run.mode === "confirm"
+        ? "Failed · check current candidates or installation status"
+        : "Failed · inspect operator journal";
+    } finally {
+      run.finished = Date.now();
+      if (journal) await save();
     }
   }
   Deno.serve({ path: "/run/hoardarr-board/http.sock" }, async (req) => {
@@ -290,14 +398,33 @@ if (import.meta.main) {
     const route = url.pathname;
     if (route.startsWith("/api/operate/") && req.method === "POST") {
       const mode = route.slice("/api/operate/".length);
-      if (!["preview", "discover", "run"].includes(mode)) {
+      if (!["preview", "discover", "run", "confirm"].includes(mode)) {
         return new Response(null, { status: 404, headers });
       }
       if (!localCommandRequest(req.headers)) {
         return new Response(null, { status: 403, headers });
       }
       if (operation.status === "Running") return new Response(null, { status: 409, headers });
-      void operate(mode);
+      let request = mode;
+      if (mode === "confirm") {
+        let data;
+        try {
+          data = JSON.parse(await req.text());
+        } catch {
+          return new Response(null, { status: 400, headers });
+        }
+        if (
+          !data || typeof data.review !== "string" ||
+          !/^tracked-[a-f0-9]{32}-status$/.test(data.review) || !Number.isSafeInteger(data.id) ||
+          data.id <= 0 || typeof data.revision !== "string" ||
+          !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(data.revision)
+        ) return new Response(null, { status: 400, headers });
+        request = JSON.stringify({ review: data.review, id: data.id, revision: data.revision });
+      }
+      if (operation.status === "Running") return new Response(null, { status: 409, headers });
+      operation = { id: crypto.randomUUID(), mode, status: "Running", started: Date.now() };
+      history = [operation, ...history].slice(0, 50);
+      void operate(operation, request).catch(() => console.error("Board history write failed"));
       return Response.json(operation, { status: 202, headers });
     }
     if (req.method !== "GET") return new Response(null, { status: 405, headers });
@@ -307,6 +434,8 @@ if (import.meta.main) {
         live,
         catalog: catalogResponse(catalog, url.searchParams.get("catalog")),
         operation,
+        history,
+        capabilities: { operate: req.headers.get("host") === "127.0.0.1:9184" },
         preview,
       }, { headers });
     }

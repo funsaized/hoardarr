@@ -1,5 +1,6 @@
 """Run one fixed operator mode under the enrolled service identity."""
 import json
+import re
 import subprocess
 import sys
 from uuid import UUID
@@ -22,17 +23,26 @@ def preview(run_id):
 
 
 modes = {b"preview\n": ["plan"], b"discover\n": ["plan", "--refresh"], b"run\n": ["run"]}
-mode = sys.stdin.buffer.readline(16)
-if mode in modes:
+mode = sys.stdin.buffer.readline(512)
+args = modes.get(mode)
+if mode.startswith(b"{") and mode.endswith(b"\n"):
+    data = json.loads(mode)
+    if (re.fullmatch(r"tracked-[a-f0-9]{32}-status", data["review"])
+            and type(data["id"]) is int and data["id"] > 0
+            and re.fullmatch(r"[0-9T:.Z-]{24}", data["revision"])):
+        args = ["confirm-series", "--review", data["review"], "--id", str(data["id"]),
+                "--revision", data["revision"]]
+if args:
     result = subprocess.run(
         ["/usr/local/bin/deno", "run", "--cached-only", "--allow-all",
-         "/opt/hoardarr/cli/main.ts", *modes[mode]],
+         "/opt/hoardarr/cli/main.ts", *args],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
     )
     sys.stderr.write(result.stdout)
-    if result.returncode != 0:
-        print("FAILED")
-    elif mode == b"preview\n":
-        print(json.dumps(preview(json.loads(result.stdout)["runId"])))
-    else:
-        print("OK")
+    reply = {"status": "failed"}
+    if result.returncode == 0:
+        result_data = json.loads(result.stdout)
+        reply = {"status": "succeeded", "runId": result_data.get("runId")}
+        if mode == b"preview\n":
+            reply["preview"] = preview(result_data["runId"])
+    print(json.dumps(reply))
