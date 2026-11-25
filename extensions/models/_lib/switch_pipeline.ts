@@ -5,10 +5,10 @@ import {
   needsCandidateRefresh,
   partialIdentity,
   payloadName,
+  refreshedCandidate,
   ReleaseSwitch,
   retainPartial,
   type Switch,
-  refreshedCandidate,
   SwitchPolicy,
 } from "./switch_release.ts";
 import { assertLease, invoke, recordExternalIntent, type Runtime } from "./runtime.ts";
@@ -162,10 +162,19 @@ export async function switchReleases(ctx: Runtime, owner: string, opts: Options)
     }
     if (needsCandidateRefresh(journal, Date.now(), opts.policy.candidateMaxAgeHours)) {
       const live = await sample();
-      const liveHashes = new Set([...live.torrents.map((r) => r.infoHash), ...live.seeds.map((r) => r.id)]);
+      const liveHashes = new Set([
+        ...live.torrents.map((r) => r.infoHash),
+        ...live.seeds.map((r) => r.id),
+      ]);
       if (!liveHashes.has(journal.oldHash) && !liveHashes.has(journal.candidate.infoHash)) {
         const excluded = new Set([...blocked, ...liveHashes, journal.oldHash]);
-        const refreshed = refreshedCandidate(journal, ranked, excluded, Date.now(), opts.policy.candidateMaxAgeHours);
+        const refreshed = refreshedCandidate(
+          journal,
+          ranked,
+          excluded,
+          Date.now(),
+          opts.policy.candidateMaxAgeHours,
+        );
         if (refreshed) {
           journal = { ...journal, candidate: refreshed, updatedAt: new Date().toISOString() };
           await save(journal);
@@ -174,12 +183,12 @@ export async function switchReleases(ctx: Runtime, owner: string, opts: Options)
     }
     const j = journal, candidate = j.candidate;
     if (row.infoHash === candidate.infoHash && row.lastSwitch === j.attemptId) {
-      await save({...j,phase:"committed",updatedAt:new Date().toISOString()});
+      await save({ ...j, phase: "committed", updatedAt: new Date().toISOString() });
       return;
     }
     if (row.infoHash !== j.oldHash) throw new Error("Release switch lost catalog ownership");
     if (row.status !== "downloading" || row.transferredAt) {
-      await save({...j,phase:"cancelled",updatedAt:new Date().toISOString()});
+      await save({ ...j, phase: "cancelled", updatedAt: new Date().toISOString() });
       return;
     }
     const ownsAlt = foreign.some((r) => r.infoHash === candidate.infoHash);

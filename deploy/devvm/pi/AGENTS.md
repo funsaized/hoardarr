@@ -80,17 +80,19 @@ alternate media workflows, schedules, databases or background agent loops.
 
 ## Archive exported media
 
-Use `sudo hoardarr-operator archive help` for single movies, batches and series, or all movies/TV.
-Archive removes completed local library copies and preserves acquisition history. Export belongs to
-the user; do not require cloud receipts or integrate an upload service. A user request to archive a
-clear target authorizes removal. Resolve titles to exact catalog TMDB movie or series IDs with Swamp
-data queries, inspect `swamp behavior get pipeline --json`, and preview with `archive --dry-run`
-before executing. Ask only when the intended title or scope is ambiguous. Report skipped unfinished
-imports and archived items. Archiving a series covers currently completed episodes; future episodes
-remain eligible. Never run archive as part of routine deployment or maintenance.
+Resolve each requested title to its numeric catalog movie or series ID through Swamp. Use
+`sudo hoardarr-operator archive --movies ID --dry-run --json` (or `--shows`) for previews.
+Report the titles, eligible files, bytes and count of unfinished items. Finish a preview-only
+request there. Each title retains its own requested action even in a mixed request.
 
-Archive previews use metadata only and do not acquire durable installation ownership. Downloads and
-ready items do not require waiting for the whole library to become idle; removal skips unfinished
-imports. Before retrying a lock timeout, inspect active Swamp runs and identify the holder's method
-and PID. A previous archive command may still be running. Do not start concurrent retries or call a
-persisted owner active without checking. Recover cancelled owners through the documented path.
+A clear archive instruction authorizes submission. Use the same selection with a fresh
+`--id UUID`, and reuse that ID on command retries. Use `--defer` when asked to queue it.
+Hoardarr pins the eligible deliveries, attempts ordinary submissions immediately and keeps busy
+requests for the media workflow. Report the request ID, state, actual waiting owner when present,
+and bytes removed. Use `archive status --id UUID` or `archive cancel --id UUID` for follow-ups.
+
+Use the built-in manifest preview and receipt verification. Read the media bytes separately only
+for an explicitly requested independent checksum. The user handles export. Active downloads and
+skipped imports alone give no evidence of lock contention. If ownership needs investigation, use
+active Swamp runs and the saved lease, and identify an unconfirmed holder as such. Inspect the
+method report after failure. Follow the documented recovery procedure for an interrupted owner.

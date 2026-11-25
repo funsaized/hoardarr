@@ -8,7 +8,7 @@ const movie = (id: number) => ({
   release_date: "2026-01-01",
   overview: "Synthetic fixture",
 });
-async function get(path: string): Promise<unknown> {
+function fixtureResponse(path: string): unknown {
   const url = new URL(path, "https://fixture.invalid");
   if (url.pathname === "/search/movie") {
     return {
@@ -48,6 +48,7 @@ async function get(path: string): Promise<unknown> {
   }
   throw new Error("Fixture metadata identity is unavailable");
 }
+const get = (path: string) => Promise.resolve().then(() => fixtureResponse(path));
 export const fixtureResolve = (args: z.infer<typeof ResolveArgs>, ctx: MetadataContext) =>
   resolveTitle(args, ctx, get);
 export const fixtureTargets = (args: z.infer<typeof TargetsArgs>, ctx: MetadataContext) =>

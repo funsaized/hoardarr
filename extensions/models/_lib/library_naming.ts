@@ -18,6 +18,7 @@ export const VIDEO_EXTENSIONS = new Set([
 
 /** Portable, bounded filename component, retaining Unicode titles. */
 export function namePart(value: string, fallback = "Untitled", maxBytes = 180): string {
+  // deno-lint-ignore no-control-regex -- control characters cannot appear in a media name.
   let name = value.normalize("NFC").replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g, " ")
     .replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
   if (!name || name === "." || name === "..") name = fallback;

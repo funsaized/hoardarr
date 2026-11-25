@@ -386,8 +386,10 @@ function library() {
       r.state,
     );
   const remaining = (r) => !downloaded(r) && !r.archived && r.state !== "ignored";
-  let total = 0, done = 0, left = 0;
+  const available = (r) => ["transferred", "cleanup-pending"].includes(r.state) && !r.archived;
+  let total = 0, left = 0;
   for (const r of rows) {
+    if (r.review) continue;
     if (!r.showId) {
       movies.push(r);
       continue;
@@ -395,7 +397,7 @@ function library() {
     if (!series.has(r.showId)) series.set(r.showId, { name: r.show, episodes: [] });
     series.get(r.showId).episodes.push(r);
     total++;
-    if (downloaded(r)) done++;
+
     if (remaining(r)) left++;
   }
   remainingButton.hidden = !observed;
@@ -403,7 +405,7 @@ function library() {
   const onlyRemaining = remainingButton.getAttribute("aria-pressed") === "true";
   byId("totals").textContent = observed
     ? series.size + " shows  /  " + movies.length + " movies  /  " + total +
-      " known episodes  /  " + done + " downloaded  /  "
+      " known episodes  /  " + rows.filter(available).length + " available locally  /  " + rows.filter(r => r.archived).length + " archived  /  "
     : "Waiting for catalog.";
   const query = byId("filter").value.trim().toLowerCase();
   for (const [id, show] of [...series].sort((a, b) => a[1].name.localeCompare(b[1].name))) {
@@ -419,7 +421,7 @@ function library() {
       element(
         "span",
         eps.length
-          ? eps.filter(downloaded).length + "/" + eps.length + " downloaded · " +
+          ? eps.filter(available).length + " available locally · " + eps.filter(r => r.archived).length + " archived · " +
             eps.filter(remaining).length + " remaining"
           : "No known episodes",
         "meta",
@@ -437,7 +439,7 @@ function library() {
             "S" + String(ep.season).padStart(2, "0") + "E" + String(ep.episode).padStart(2, "0"),
           ),
           element("span", ep.episodeTitle || "Untitled episode"),
-          element("small", ep.archived ? "archived" : ep.state),
+          element("small", ep.archived ? "archived" : available(ep) ? "available locally" : ep.state),
         );
         episodes.append(line);
       }
@@ -462,7 +464,7 @@ function library() {
     const div = element("div", "", "movie");
     div.append(
       element("b", m.title),
-      element("span", "Movie · " + (m.archived ? "archived" : m.state), "meta"),
+      element("span", "Movie · " + (m.archived ? "archived" : available(m) ? "available locally" : m.state), "meta"),
     );
     titles.append(div);
   }

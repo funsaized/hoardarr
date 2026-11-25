@@ -427,7 +427,8 @@ an item error while other imports continue. A receipt proves copy integrity, not
 release label or completion by a separate cloud-sync client.
 
 After exporting files yourself, use [`archive`](docs/how-to/archive-library.md) to remove selected
-local library copies while retaining catalog history.
+local library copies while retaining catalog history. A busy installation queues the exact files you
+selected. See [which operations can run together](docs/explanation/locking.md).
 
 Use [`organize --dry-run`](docs/how-to/organize-library.md) to preview existing library names, then
 `organize` to move completed local copies through the same import steps. This preserves completed
@@ -475,9 +476,10 @@ Try asking: “Give me a read-only health summary,” “Download Severance (202
 
 One-off requests use `hoardarr-operator request`: resolve a title, submit a finite scope, then read
 its status. Pi translates the conversation into those typed commands. A request keeps its confirmed
-catalog identity and survives the agent session. The existing `media` workflow acquires it, preserving
-completed copies and downloads already in progress. An entire-series request covers regular episodes
-aired by its acceptance date; ongoing tracking remains an explicit configuration change.
+catalog identity and survives the agent session. The existing `media` workflow acquires it,
+preserving completed copies and downloads already in progress. An entire-series request covers
+regular episodes aired by its acceptance date; ongoing tracking remains an explicit configuration
+change.
 
 The request command attempts an immediate run when the installation is idle. Busy requests wait for
 the existing schedule; closed admissions reject new intake. Requests share the configured release
@@ -525,28 +527,28 @@ schedule:
 tmdbKey: '${{ vault.get("hoardarr", "TMDB_API_KEY") }}'
 ```
 
-| Field                                 | Contract                                                                               |
-| ------------------------------------- | -------------------------------------------------------------------------------------- |
-| `schemaVersion`                       | `2`                                                                                    |
-| `profile`                             | One of the three [run modes](#run-modes)                                               |
-| `paths.staging`, `.state`, `.library` | Absolute, distinct roots without overlap or parent traversal                           |
-| `guest`                               | Native-only protected identity, protocol and storage mapping; provisioning supplies it |
-| `providers`                           | Binding IDs for discovery, search, downloader, destination and network                 |
-| `providerFiles`                       | Absolute paths to additional provider descriptors                                      |
-| `providerSettings`                    | Behavior global arguments keyed by provider binding ID                                 |
-| `interests`                           | Movie flag, region, language, weekly limit and up to 100 configured shows              |
-| `interests.shows[]`                   | Show name, year, category and confirmed TMDB, TVmaze, TVDB or IMDb IDs              |
-| `television`                          | Independent search/submission budgets and retry cooldown                               |
-| `policies.movie`, `.episode`          | [Selection policy schema](extensions/models/_lib/policy.ts)                            |
-| `download`                            | Seeding, operation concurrency and staging capacity settings                           |
-| `search`                              | Global and per-source call limits and per-call timeout                                  |
-| `observation`                         | Minutes of zero growth for a stall and a separate metadata grace period                |
+| Field                                 | Contract                                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `schemaVersion`                       | `2`                                                                                      |
+| `profile`                             | One of the three [run modes](#run-modes)                                                 |
+| `paths.staging`, `.state`, `.library` | Absolute, distinct roots without overlap or parent traversal                             |
+| `guest`                               | Native-only protected identity, protocol and storage mapping; provisioning supplies it   |
+| `providers`                           | Binding IDs for discovery, search, downloader, destination and network                   |
+| `providerFiles`                       | Absolute paths to additional provider descriptors                                        |
+| `providerSettings`                    | Behavior global arguments keyed by provider binding ID                                   |
+| `interests`                           | Movie flag, region, language, weekly limit and up to 100 configured shows                |
+| `interests.shows[]`                   | Show name, year, category and confirmed TMDB, TVmaze, TVDB or IMDb IDs                   |
+| `television`                          | Independent search/submission budgets and retry cooldown                                 |
+| `policies.movie`, `.episode`          | [Selection policy schema](extensions/models/_lib/policy.ts)                              |
+| `download`                            | Seeding, operation concurrency and staging capacity settings                             |
+| `search`                              | Global and per-source call limits and per-call timeout                                   |
+| `observation`                         | Minutes of zero growth for a stall and a separate metadata grace period                  |
 | `switching`                           | Enable new switches for specific movie or episode keys, with a cooldown per stalled hash |
-| `movieReleaseFeeds`                   | Swamp behaviors that supply movie suggestions and dated regional digital releases       |
-| `reviewedTmdbAliases`                 | Confirmed mappings from local movie or episode UUIDs to TMDB IDs                                   |
-| `schedule`                            | Enabled flag and five-field cron expression                                            |
-| `torlink`                             | CLI binary, loopback API URL, optional vault token and tunnel interface                |
-| `tmdbKey`                             | Vault expression; default key is `hoardarr/TMDB_API_KEY`                               |
+| `movieReleaseFeeds`                   | Swamp behaviors that supply movie suggestions and dated regional digital releases        |
+| `reviewedTmdbAliases`                 | Confirmed mappings from local movie or episode UUIDs to TMDB IDs                         |
+| `schedule`                            | Enabled flag and five-field cron expression                                              |
+| `torlink`                             | CLI binary, loopback API URL, optional vault token and tunnel interface                  |
+| `tmdbKey`                             | Vault expression; default key is `hoardarr/TMDB_API_KEY`                                 |
 
 Policy fields are `version: 1`, `minSeeders`, `maxSizeBytes`, `resolution` (`720p`, `1080p`,
 `2160p`), `sources`, `ranking` and `maxAttempts` (default three). `sources` is an allowlist when
@@ -651,29 +653,30 @@ Use `bin/hoardarr help` for local CLI discovery. `sudo hoardarr-operator` select
 native installation, service environment and configuration. It deliberately rejects custom `--dir`,
 `--config` and `--repo-dir` overrides. `sudo hoardarr-operator swamp help` discovers Swamp commands.
 
-| CLI command                                                     | Purpose and effects                                                                                   |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `init --profile demo\|compose-vpn-local --dir PATH`             | Create a new installation with scheduling disabled                                                    |
-| `apply [--no-pull]`                                             | Generate and validate definitions from configuration; native requires stopped writers                 |
-| `doctor [--live]`                                               | Check pins, extensions, provider contracts, paths and required keys; optional daemon health           |
-| `status`                                                        | Read catalog, show identity, TV backlog, retries, saved downloader state, source errors and ownership |
-| `plan [--refresh]`                                              | Record a preview workflow; `--refresh` also changes discovery/catalog state                           |
-| `organize [--dry-run]`                                          | Preview or apply canonical names to completed local library copies                                    |
-| `run`                                                           | Execute one owned reconciliation                                                                      |
-| `schedule enable\|disable`                                      | Update schedule activation and generated definitions                                                  |
-| `inhibit --reason TEXT`                                         | Persistently close new admissions; the current owner may finish                                       |
-| `admit`                                                         | Reopen native admissions after readiness, commissioning and ownership checks                          |
-| `native-check`                                                  | Check native readiness, identity, storage, admission and downloader state                             |
-| `recover`                                                       | Reconcile an interrupted media owner; native also verifies stopped writers                            |
-| `recover-apply --journal PATH`                                  | Recover the exact native configuration transaction                                                    |
-| `backup [--backup-dir PATH]`                                    | Archive installation state; native requires complete stopped-writer/capsule checks                    |
-| `restore --snapshot PATH --mapping JSON_FILE`                   | Verify a complete snapshot into explicit new roots                                                    |
-| `recover-maintenance --snapshot PATH --owner UUID`              | Release only the restored snapshot's verified maintenance owner                                       |
-| `migration inventory --output PATH`                             | Save a private semantic inventory                                                                     |
-| `migration compare --before PATH --after PATH [--mapping PATH]` | Compare identities, catalogs, receipts and payloads                                                   |
-| `migration prepare --mapping JSON_FILE --snapshot PATH`         | Journal an explicit relocation using a complete snapshot                                              |
-| `migration resume --session UUID`                               | Continue that relocation                                                                              |
-| `native-init`                                                   | Provisioning entry point for a fresh root-identified guest; not an ordinary setup shortcut            |
+| CLI command                                                        | Purpose and effects                                                                                   |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `init --profile demo\|compose-vpn-local --dir PATH`                | Create a new installation with scheduling disabled                                                    |
+| `apply [--no-pull]`                                                | Generate and validate definitions from configuration; native requires stopped writers                 |
+| `doctor [--live]`                                                  | Check pins, extensions, provider contracts, paths and required keys; optional daemon health           |
+| `status`                                                           | Read catalog, show identity, TV backlog, retries, saved downloader state, source errors and ownership |
+| `plan [--refresh]`                                                 | Record a preview workflow; `--refresh` also changes discovery/catalog state                           |
+| `archive [--dry-run or --defer]`, `archive list/status/run/cancel` | Preview, queue and inspect removal of exported local files                                            |
+| `organize [--dry-run]`                                             | Preview or apply canonical names to completed local library copies                                    |
+| `run`                                                              | Execute one owned reconciliation                                                                      |
+| `schedule enable\|disable`                                         | Update schedule activation and generated definitions                                                  |
+| `inhibit --reason TEXT`                                            | Persistently close new admissions; the current owner may finish                                       |
+| `admit`                                                            | Reopen native admissions after readiness, commissioning and ownership checks                          |
+| `native-check`                                                     | Check native readiness, identity, storage, admission and downloader state                             |
+| `recover`                                                          | Reconcile an interrupted media owner; native also verifies stopped writers                            |
+| `recover-apply --journal PATH`                                     | Recover the exact native configuration transaction                                                    |
+| `backup [--backup-dir PATH]`                                       | Archive installation state; native requires complete stopped-writer/capsule checks                    |
+| `restore --snapshot PATH --mapping JSON_FILE`                      | Verify a complete snapshot into explicit new roots                                                    |
+| `recover-maintenance --snapshot PATH --owner UUID`                 | Release only the restored snapshot's verified maintenance owner                                       |
+| `migration inventory --output PATH`                                | Save a private semantic inventory                                                                     |
+| `migration compare --before PATH --after PATH [--mapping PATH]`    | Compare identities, catalogs, receipts and payloads                                                   |
+| `migration prepare --mapping JSON_FILE --snapshot PATH`            | Journal an explicit relocation using a complete snapshot                                              |
+| `migration resume --session UUID`                                  | Continue that relocation                                                                              |
+| `native-init`                                                      | Provisioning entry point for a fresh root-identified guest; not an ordinary setup shortcut            |
 
 Local commands accept `--dir PATH`, optional `--config PATH`, and `--json`. `migration` describes
 storage relocation and inventory verification, not an importer for a retired deployment format.
@@ -701,24 +704,24 @@ backlog. Select a title to inspect its transfer. Switching stages clears the sel
 today uses your browser’s local date.
 
 Open **Tracked library** to search movies and shows. Expand a show to see its known episodes in
-season order. Downloaded includes episodes that have reached seeding, delivery or archival.
-Remaining counts episodes still wanted, including failed downloads. Ignored episodes count toward
-the known total. Select the remaining count to list outstanding episodes by show. Select it again to
-return to the full library.
+season order. Available locally counts verified local deliveries. Archived counts deliveries removed
+from the library. Remaining counts episodes still wanted, including failed downloads. Ignored
+episodes count toward the known total. Select the remaining count to list outstanding episodes by
+show. Select it again to return to the full library.
 
 The operating mode controls run the same commands as the guest CLI. **Preview plan** calculates the
 next plan and shows the titles selected for acquisition or delivery, along with the time of the
 catalog reading. **Refresh discovery** updates the catalog, and **Run media pipeline** processes
-deliveries and acquisitions. Open `http://127.0.0.1:9184/` on the host to start an operation.
-The board accepts one operation at a time and shows its result.
-Workflow history and the guest journal retain the details.
+deliveries and acquisitions. Open `http://127.0.0.1:9184/` on the host to start an operation. The
+board accepts one operation at a time and shows its result. Workflow history and the guest journal
+retain the details.
 
 Transfer readings refresh every 15 seconds while downloads are active or queued, and every minute
 when idle. Catalog readings refresh once a minute. Open screens share a cache. The service reads
 sources on demand, and hidden tabs suspend requests.
 
-To open the board on an enrolled host with the standard inventory, install the user tunnel unit
-and select the enrolled VM. Run these commands on the host after provisioning the image.
+To open the board on an enrolled host with the standard inventory, install the user tunnel unit and
+select the enrolled VM. Run these commands on the host after provisioning the image.
 
 ```sh
 install -Dm644 deploy/devvm/hoardarr-board-tunnel@.service \
@@ -735,9 +738,9 @@ require the corresponding SSH config path in the tunnel unit.
 When upgrading a host that used Tailscale Serve, inspect `tailscale serve status --json` before
 installing the keyless image. If the board was the only handler on HTTPS port 9185, remove that
 listener with `tailscale serve --https=9185 off`. If it shares a listener, remove only the board
-handler. Verify the remaining routes against the original list. From another device on your Tailscale network,
-check that the former board URL is unreachable. Confirm the local URL still works before updating
-the appliance.
+handler. Verify the remaining routes against the original list. From another device on your
+Tailscale network, check that the former board URL is unreachable. Confirm the local URL still works
+before updating the appliance.
 
 ## Storage
 

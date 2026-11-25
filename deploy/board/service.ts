@@ -155,7 +155,7 @@ async function catalog() {
   return {
     shows,
     rows: [...results.filter((r: Record<string, unknown>) => r.reviewKey).map((r: Record<string, unknown>) => ({
-      id: r.reviewKey, title: r.title, state: "blocked",
+      id: r.reviewKey, review: true, title: r.title, state: "blocked",
       reason: r.reason === "confirm-series" ? "Confirm a TVmaze series in tracked show settings" :
         r.reason === "unavailable" ? "TVmaze unavailable · retaining last successful episode list" : r.reason,
       providers: Array.isArray(r.choices) ? r.choices.map(c => c.name + " (" + (c.premiered ?? "unknown premiere") + ") · TVmaze " + c.id).join(", ") :

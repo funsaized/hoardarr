@@ -26,6 +26,7 @@ import {
   RequestSchema,
   targetKey,
 } from "./_lib/requests.ts";
+import { ArchiveWork, processArchives } from "./_lib/archive_queue.ts";
 import { archive, ArchiveArgs, ArchiveRecord } from "./_lib/archive.ts";
 import {
   observeTransfer,
@@ -284,7 +285,7 @@ async function itemRow(ctx: Context, item: Item): Promise<Row> {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.18.1",
+  version: "2026.11.25.1",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -313,6 +314,10 @@ export const model = {
   }, {
     toVersion: "2026.11.18.1",
     description: "Retain existing settings and acquisition history",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.25.1",
+    description: "Process frozen archive requests under existing ownership",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
@@ -386,7 +391,13 @@ export const model = {
       garbageCollection: 100,
     },
     archiveSummary: resource(
-      z.object({ dryRun: z.boolean(), items: z.array(z.record(z.string(), z.unknown())) }),
+      z.object({
+        dryRun: z.boolean(),
+        items: z.array(z.record(z.string(), z.unknown())),
+        fileCount: z.number().optional(),
+        bytes: z.number().optional(),
+        bytesRemoved: z.number().optional(),
+      }),
       "Archive batch results",
     ),
     requestFairness: {
@@ -454,6 +465,17 @@ export const model = {
     transfer: resource(TransferSchema, "Validated source manifest for delivery"),
   },
   methods: {
+    runArchive: {
+      description: "Try an accepted archive immediately.",
+      arguments: ArchiveWork.required(),
+      execute: (args: { owner: string; id: string }, ctx: Context) =>
+        processArchives(args, ctx, false),
+    },
+    drainArchives: {
+      description: "Finish accepted archive requests before releasing media ownership.",
+      arguments: Owned,
+      execute: (args: { owner: string }, ctx: Context) => processArchives(args, ctx, true),
+    },
     archive: {
       description:
         "Remove completed local library copies after user-managed export, preserving catalog history.",
@@ -598,12 +620,22 @@ export const model = {
           const next = all.filter((r) => {
             if (r.status !== "downloading") return false;
             const attempt = state[r.mediaKind === "movie" ? r.key : String(r.id)];
-            const pending = journal.find((j) => j.key === r.key && !["committed", "cancelled"].includes(j.phase));
+            const pending = journal.find((j) =>
+              j.key === r.key && !["committed", "cancelled"].includes(j.phase)
+            );
             if (pending) {
-              return needsCandidateRefresh(pending, Date.now(), ctx.globalArgs.switchPolicy.candidateMaxAgeHours) &&
-                (!attempt || attempt.searchedAt <= pending.candidate.selectedAt || attempt.nextSearchAt <= now);
+              return needsCandidateRefresh(
+                pending,
+                Date.now(),
+                ctx.globalArgs.switchPolicy.candidateMaxAgeHours,
+              ) &&
+                (!attempt || attempt.searchedAt <= pending.candidate.selectedAt ||
+                  attempt.nextSearchAt <= now);
             }
-            if (!ctx.globalArgs.switchPolicy.enabled || !ctx.globalArgs.switchPolicy.titles.includes(r.key)) return false;
+            if (
+              !ctx.globalArgs.switchPolicy.enabled ||
+              !ctx.globalArgs.switchPolicy.titles.includes(r.key)
+            ) return false;
             const observation = health.get("transfer-health-" + r.mediaKind + "-" + r.id);
             return observation?.decision === "stall" && observation.sample.hash === r.infoHash &&
               (!attempt ||
@@ -1014,10 +1046,20 @@ export const model = {
           results: Row[];
           sources?: Record<string, { ok: boolean; error?: string }>;
         }[];
-        const recovering = new Set(ctx.globalArgs.expectedInterface
-          ? (await ctx.readModelData("pipeline", "releaseSwitch")).map((r) => ReleaseSwitch.parse(r.attributes))
-            .filter((r) => needsCandidateRefresh(r, Date.now(), ctx.globalArgs.switchPolicy.candidateMaxAgeHours)).map((r) => r.key)
-          : []);
+        const recovering = new Set(
+          ctx.globalArgs.expectedInterface
+            ? (await ctx.readModelData("pipeline", "releaseSwitch")).map((r) =>
+              ReleaseSwitch.parse(r.attributes)
+            )
+              .filter((r) =>
+                needsCandidateRefresh(
+                  r,
+                  Date.now(),
+                  ctx.globalArgs.switchPolicy.candidateMaxAgeHours,
+                )
+              ).map((r) => r.key)
+            : [],
+        );
         for (const kind of ["movie", "episode"]) {
           const prefix = kind === "movie" ? "m-" : "e-";
           const items = queries.filter((q) =>
@@ -1027,7 +1069,7 @@ export const model = {
             [idField(kind)]: Number(q.key.slice(2)),
             releases: q.results,
             refreshAlternates: recovering.has(q.key) || ctx.globalArgs.switchPolicy.enabled &&
-              ctx.globalArgs.switchPolicy.titles.includes(q.key),
+                ctx.globalArgs.switchPolicy.titles.includes(q.key),
           }));
           if (items.length) await invoke(ctx, catalog(ctx, kind), "select", { items });
         }
@@ -1042,7 +1084,6 @@ export const model = {
         const planned = (work?.queries ?? []) as { key: string }[];
         const currentEpisodes = await rows(ctx, "episode");
         const now = new Date();
-        const requestRows = await requests(ctx);
         const currentMovies = await rows(ctx, "movie");
         for (const { key } of planned) {
           const id = key.slice(2),

@@ -66,16 +66,25 @@ export function alternate(
     return c.data;
   }
 }
-export function refreshedCandidate(journal: Switch, ranked: unknown[], occupied: Set<string>, now: number, maxAgeHours: number) {
+export function refreshedCandidate(
+  journal: Switch,
+  ranked: unknown[],
+  occupied: Set<string>,
+  now: number,
+  maxAgeHours: number,
+) {
   if (!needsCandidateRefresh(journal, now, maxAgeHours)) return;
   // An uncertain add can retry only its original hash. Earlier phases have issued no add.
   const permitted = journal.phase === "adding"
-    ? ranked.filter((r) => SwitchCandidate.safeParse(r).data?.infoHash === journal.candidate.infoHash)
+    ? ranked.filter((r) =>
+      SwitchCandidate.safeParse(r).data?.infoHash === journal.candidate.infoHash
+    )
     : ranked;
   return alternate(permitted, occupied, now, maxAgeHours);
 }
 export function payloadName(name: string) {
   return !!name && name.length <= 255 && !name.startsWith(".") &&
+    // deno-lint-ignore no-control-regex -- control characters cannot appear in a media name.
     !/[/\\\x00-\x1f\x7f]/.test(name) &&
     !/^(?:[1-9]\d*|[em]-[1-9]\d*)$/.test(name);
 }

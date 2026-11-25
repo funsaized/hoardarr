@@ -1089,8 +1089,11 @@ export const definition = {
         if (
           !row || row.infoHash !== args.oldHash || row.status !== "downloading" || row.transferredAt
         ) throw new Error("Switch no longer owns this download");
-        const candidate = args.candidate ?? row.rankedReleases?.find((r) => r.infoHash === args.newHash);
-        if (candidate && candidate.infoHash !== args.newHash) throw new Error("Different alternate hash in saved intent");
+        const candidate = args.candidate ??
+          row.rankedReleases?.find((r) => r.infoHash === args.newHash);
+        if (candidate && candidate.infoHash !== args.newHash) {
+          throw new Error("Different alternate hash in saved intent");
+        }
         if (!candidate) throw new Error("Alternate no longer ranked");
         const stalled = z.record(z.string(), z.string()).parse(row.stalledReleases ?? {});
         return {

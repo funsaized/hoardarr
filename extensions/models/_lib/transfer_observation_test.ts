@@ -15,7 +15,11 @@ Deno.test("stall time requires fresh continuous byte readings from the same sess
   };
   let prior = observeTransfer(start, undefined, policy);
   const sample = (elapsed: number, overrides: Partial<typeof start> = {}) => {
-    prior = observeTransfer({ ...start, observedAt: start.observedAt + elapsed, ...overrides }, prior, policy);
+    prior = observeTransfer(
+      { ...start, observedAt: start.observedAt + elapsed, ...overrides },
+      prior,
+      policy,
+    );
     return [prior.decision, prior.idleMs];
   };
   deepStrictEqual(sample(10), ["idle", 10]);
@@ -36,16 +40,29 @@ Deno.test("stall time requires fresh continuous byte readings from the same sess
 });
 
 Deno.test("metadata grace excludes gaps and session changes and never authorizes detachment", () => {
-  const base = { hash: "a".repeat(40), observedAt: 100, session: "s", active: true,
-    networkReady: true, metadataReady: false, bytes: 0 };
+  const base = {
+    hash: "a".repeat(40),
+    observedAt: 100,
+    session: "s",
+    active: true,
+    networkReady: true,
+    metadataReady: false,
+    bytes: 0,
+  };
   const policy = { stallMs: 15, maxGapMs: 10, metadataGraceMs: 20 };
   let sample = observeTransfer(base, undefined, policy);
-  for (const time of [110, 120]) sample = observeTransfer({ ...base, observedAt: time }, sample, policy);
+  for (const time of [110, 120]) {
+    sample = observeTransfer({ ...base, observedAt: time }, sample, policy);
+  }
   deepStrictEqual([sample.decision, sample.metadataMs, sample.idleMs], ["metadata-timeout", 20, 0]);
   sample = observeTransfer({ ...base, observedAt: 140 }, sample, policy);
   deepStrictEqual([sample.decision, sample.metadataMs], ["metadata", 0]);
   sample = observeTransfer({ ...base, observedAt: 150, session: "restart" }, sample, policy);
   deepStrictEqual(sample.metadataMs, 0);
-  sample = observeTransfer({ ...base, observedAt: 160, session: "restart", metadataReady: true }, sample, policy);
+  sample = observeTransfer(
+    { ...base, observedAt: 160, session: "restart", metadataReady: true },
+    sample,
+    policy,
+  );
   deepStrictEqual([sample.decision, sample.idleMs], ["baseline", 0]);
 });

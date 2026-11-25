@@ -324,3 +324,72 @@ Deno.test("archive hashes changed copies even when a saved receipt exists", () =
     assert(hashes === 1 && !a.row.archivedAt);
     assert(await Deno.readTextFile(a.path) === "Changed");
   }));
+
+Deno.test("queued archives freeze deliveries, report drift, survive a busy owner and cancel before claim", () =>
+  temporary(async (root) => {
+    const f = await fixture(root);
+    const { model: queue } = await import("../extensions/models/archives.ts");
+    const requests = new Map<string, Row>();
+    const ctx = {
+      ...f.ctx,
+      globalArgs: queue.globalArguments.parse({ libraryRoot: root + "/library" }),
+      readResource: (name: string) => Promise.resolve(requests.get(name) ?? null),
+      writeResource: (spec: string, name: string, value: Row) => {
+        if (spec === "request") requests.set(name, structuredClone(value));
+        return Promise.resolve({ name });
+      },
+    };
+    const read = f.ctx.readModelData, run = f.ctx.runModel;
+    f.ctx.readModelData = (name, spec) =>
+      name === "archives"
+        ? Promise.resolve([...requests].map(([name, attributes]) => ({ name, attributes })))
+        : read(name, spec);
+    f.ctx.runModel = async (options) => {
+      if (options.definition !== "archives") return await run(options);
+      const args = options.arguments!, m = queue.methods;
+      const result = options.method === "claim"
+        ? await m.claim.execute(m.claim.arguments.parse(args), ctx)
+        : await m.finish.execute(m.finish.arguments.parse(args), ctx);
+      return {
+        ok: true,
+        resources: result.dataHandles.map(({ name }) => ({
+          name,
+          attributes: requests.get(name)!,
+        })),
+      };
+    };
+    const a = await f.add(1, 20), b = await f.add(2, 20), changedDelivery = await f.add(3, 20);
+    const id = crypto.randomUUID(), owner = crypto.randomUUID();
+    await coordinator.methods.acquire.execute({ owner }, f.ctx);
+    const submit = (owner: string, dryRun = false) =>
+      queue.methods.submit.execute(
+        archiveArguments(["archive", "--shows", "20", ...(dryRun ? ["--dry-run"] : [])], owner),
+        ctx,
+      );
+    await submit(crypto.randomUUID(), true);
+    assert(requests.size === 0);
+    await submit(id);
+    const late = await f.add(4, 20);
+    await submit(id);
+    assert((requests.get("archive-request-" + id)?.targets as Row[]).length === 3);
+    const cancelled = crypto.randomUUID();
+    await submit(cancelled);
+    await queue.methods.cancel.execute({ id: cancelled }, ctx);
+    await model.methods.runArchive.execute({ owner: crypto.randomUUID(), id }, f.ctx);
+    assert((await Deno.stat(a.path)).isFile);
+    await Deno.writeTextFile(b.path, "Changed");
+    changedDelivery.row.transferredAt = new Date().toISOString();
+    await model.methods.drainArchives.execute({ owner }, f.ctx);
+    await assertLease(root, owner);
+    const record = requests.get("archive-request-" + id)!;
+    assert(record.status === "needs-review");
+    deepStrictEqual((record.items as Row[]).map((i) => i.outcome), [
+      "archived",
+      "needs-review",
+      "needs-review",
+    ]);
+    assert(requests.get("archive-request-" + cancelled)?.status === "cancelled");
+    assert((await Deno.stat(b.path)).isFile && (await Deno.stat(late.path)).isFile);
+    await rejects(() => Deno.stat(a.path));
+    await coordinator.methods.release.execute({ owner }, f.ctx);
+  }));

@@ -1,4 +1,10 @@
-import { cache, catalogResponse, localCommandRequest, rejectionSummary, transfers } from "../deploy/board/service.ts";
+import {
+  cache,
+  catalogResponse,
+  localCommandRequest,
+  rejectionSummary,
+  transfers,
+} from "../deploy/board/service.ts";
 Deno.test("queue ranks skip active items and seeds replace completed transfers", () => {
   const item = (id: string, status: string) => ({ id, name: id, status });
   const rows = transfers(
@@ -61,12 +67,26 @@ Deno.test("transfer polls reuse a catalog revision through a failed refresh", as
 });
 
 Deno.test("catalog rejection details disclose only policy codes", () => {
-  if (rejectionSummary("no-acceptable-release: low-seeders,private-locator,year-mismatch") !== "low-seeders, year-mismatch") throw Error("Unexpected rejection details");
+  if (
+    rejectionSummary("no-acceptable-release: low-seeders,private-locator,year-mismatch") !==
+      "low-seeders, year-mismatch"
+  ) throw Error("Unexpected rejection details");
 });
 
 Deno.test("commands require the exact loopback host and browser origin", () => {
   const host = "127.0.0.1:9184", origin = "http://" + host;
-  for (const [h, o, expected] of [[host,origin,true], [host,undefined,false], [host,"null",false], [host,"https://"+host,false], ["localhost:9184",origin,false],[host,"https://remote.test",false]] as const) {
-    if (localCommandRequest(new Headers({host:h,...(o ? {origin:o}: {})})) !== expected) throw Error("Unexpected command admission");
+  for (
+    const [h, o, expected] of [
+      [host, origin, true],
+      [host, undefined, false],
+      [host, "null", false],
+      [host, "https://" + host, false],
+      ["localhost:9184", origin, false],
+      [host, "https://remote.test", false],
+    ] as const
+  ) {
+    if (localCommandRequest(new Headers({ host: h, ...(o ? { origin: o } : {}) })) !== expected) {
+      throw Error("Unexpected command admission");
+    }
   }
 });

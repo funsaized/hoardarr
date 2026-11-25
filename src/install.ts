@@ -391,6 +391,12 @@ async function installUnlocked(
     retryHours: config.television.retryHours,
     ...(config.guest ? { storage: config.guest.storage } : {}),
   });
+  if (config.providers.destination === "local") {
+    await define("archives", "@funsaized/hoardarr/archives", {
+      libraryRoot: config.paths.library,
+      ...(config.guest ? { storage: config.guest.storage } : {}),
+    });
+  }
   await define("media-files", "hoardarr/media-files", {
     stagingRoot: config.paths.staging,
     catalogModelName: "movie-catalog",

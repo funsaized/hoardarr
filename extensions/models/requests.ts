@@ -16,7 +16,6 @@ import { assertStorage, StorageSchema } from "./_lib/storage.ts";
 import {
   fingerprint,
   IntentSchema,
-  type MediaRequest,
   MovieTarget,
   RequestId,
   requestId,
@@ -226,7 +225,7 @@ export const model = {
       description:
         "Accept an idempotent request using a previously resolved candidate; preserve shared media progress",
       arguments: Submit,
-      execute: async (args: z.infer<typeof Submit>, ctx: Context) =>
+      execute: (args: z.infer<typeof Submit>, ctx: Context) =>
         writable(ctx, async () => {
           if (!ctx.globalArgs.supported && !args.localId) {
             throw new Error("Configured discovery provider does not support scoped requests");

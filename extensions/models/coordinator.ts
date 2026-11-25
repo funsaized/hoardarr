@@ -19,10 +19,14 @@ type Context = {
 /** Swamp behavior implementing coordinator operations. */
 export const model = {
   type: "@funsaized/hoardarr/coordinator",
-  version: "2026.11.09.1",
+  version: "2026.11.25.1",
   upgrades: [{
     toVersion: "2026.11.09.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.25.1",
+    description: "Label the operation holding the installation in its status record",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: z.object({ storage: StorageSchema.optional() }),
@@ -33,6 +37,7 @@ export const model = {
         owner: z.string(),
         acquiredAt: z.iso.datetime().nullable(),
         held: z.boolean(),
+        operation: z.string().optional(),
       }),
       lifetime: "infinite",
       garbageCollection: 100,
@@ -63,8 +68,11 @@ export const model = {
     },
     acquire: {
       description: "Acquire an installation lease; refuse overlapping and unrecovered runs.",
-      arguments: Owner,
-      execute: async ({ owner }: { owner: string }, context: Context) =>
+      arguments: Owner.extend({ operation: z.string().max(100).optional() }),
+      execute: async (
+        { owner, operation }: { owner: string; operation?: string },
+        context: Context,
+      ) =>
         await leaseOperation(context.repoDir, async (path) => {
           const storage = context.globalArgs?.storage;
           if (storage) await assertNativeCommissioned(context.repoDir, storage.installationId);
@@ -92,6 +100,7 @@ export const model = {
                 owner: lease.owner,
                 acquiredAt: lease.acquiredAt,
                 held: true,
+                operation: operation ?? "media reconciliation",
               }),
             ],
           };

@@ -49,7 +49,7 @@ apply      Generate and validate definitions from the selected configuration.
 doctor     Check runtime, extension loading and configured filesystem paths.
 plan       Preview catalog work; --refresh also refreshes discovery.
 run        Reconcile discovery, downloads, verified delivery and cleanup.
-archive    Remove exported local library copies; --dry-run lists files (archive help for options).
+archive    Preview, submit, inspect or cancel removal of exported local copies (archive help for options).
 organize   Organize existing local library copies; --dry-run previews filenames.
 status     Show catalog states and outstanding reconciliation ownership.
 request    resolve|submit|run|status|list scoped media requests (request help for options).

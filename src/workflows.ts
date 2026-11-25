@@ -507,7 +507,15 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       recoverJob,
       {
         name: "release",
-        steps: [method("release", "coordinator", "release", { owner })],
+        steps: config.providers.destination === "local"
+          ? [
+            skip(
+              method("archives", "pipeline", "drainArchives", { owner }),
+              "inputs.dryRun || inputs.reorganize",
+            ),
+            method("release", "coordinator", "release", { owner }, "archives"),
+          ]
+          : [method("release", "coordinator", "release", { owner })],
         weight: 0,
         dependsOn: [{ job: "ownership", condition: { type: "succeeded" } }, {
           job: "recover",

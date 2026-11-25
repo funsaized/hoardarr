@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import uuid
 
 source = Path(__file__).resolve().parents[1]
 repo = Path(tempfile.mkdtemp(prefix='hoardarr-archive-'))
@@ -42,7 +43,16 @@ await Deno.writeTextFile(`${repo}/hoardarr.yaml`, encodeConfig(config));
     preview = cli('archive', '--all', 'movies', '--dry-run')
     assert any(r['outcome'] == 'would-archive' for r in preview['items']), preview
     assert all(p.exists() for p in before)
-    applied = cli('archive', '--movies', '1')
+    request_id = str(uuid.uuid4())
+    queued = cli('archive', '--movies', '1', '--id', request_id, '--defer')
+    assert queued['status'] == 'queued' and queued['bytesRemoved'] == 0, queued
+    assert cli('archive', '--movies', '1', '--id', request_id, '--defer')['requestId'] == request_id
+    assert cli('archive', 'cancel', '--id', request_id)['status'] == 'cancelled'
+    assert all(p.exists() for p in before)
+    queued = cli('archive', '--movies', '1', '--defer')
+    cli('run')
+    applied = cli('archive', 'status', '--id', queued['requestId'])
+    assert applied['status'] == 'completed' and applied['bytesRemoved'] == applied['bytes'] > 0, applied
     assert any(r['outcome'] == 'archived' for r in applied['items']), applied
     assert [p for p in before if p.exists() and 'TV' in p.parts]
     tv = cli('archive', '--shows', '1')
@@ -56,7 +66,7 @@ await Deno.writeTextFile(`${repo}/hoardarr.yaml`, encodeConfig(config));
     cli('run')
     assert not [p for p in library.rglob('*') if p.is_file()], 'Archived files must not be downloaded or organized again'
     assert cli('status')['lease'] is None
-    print(json.dumps({'passed': True, 'checks': ['real Swamp execution', 'preview', 'movie ID', 'series ID', 'all movies preview', 'idempotent archive', 'catalog metadata', 'organize exclusion', 'no redownload', 'lease release']}))
+    print(json.dumps({'passed': True, 'checks': ['real Swamp execution', 'preview', 'movie ID', 'series ID', 'all movies preview', 'idempotent archive', 'catalog metadata', 'organize exclusion', 'no redownload', 'lease release', 'durable submission', 'cancellation', 'workflow drain', 'removed bytes']}))
 except BaseException:
     print(f'Archive smoke artifacts: {repo}', flush=True)
     raise

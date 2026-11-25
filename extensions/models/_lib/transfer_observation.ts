@@ -10,7 +10,16 @@ export const TransferSample = z.object({
   bytes: z.number().int().nonnegative().optional(),
   total: z.number().int().nonnegative().optional(),
 });
-const Decision = z.enum(["inactive", "metadata", "metadata-timeout", "uncertain", "baseline", "progress", "idle", "stall"]);
+const Decision = z.enum([
+  "inactive",
+  "metadata",
+  "metadata-timeout",
+  "uncertain",
+  "baseline",
+  "progress",
+  "idle",
+  "stall",
+]);
 export const TransferObservation = z.object({
   sample: TransferSample,
   decision: Decision,
@@ -41,15 +50,15 @@ export function observeTransfer(
   if (!sample.active || !sample.networkReady) observation.decision = "inactive";
   else if (!sample.metadataReady) {
     const elapsed = before ? sample.observedAt - before.observedAt : 0;
-    observation.metadataMs = before && !before.metadataReady && before.active && before.networkReady &&
+    observation.metadataMs =
+      before && !before.metadataReady && before.active && before.networkReady &&
         before.session === sample.session && elapsed <= policy.maxGapMs
-      ? (prior?.metadataMs ?? 0) + elapsed
-      : 0;
+        ? (prior?.metadataMs ?? 0) + elapsed
+        : 0;
     observation.decision = observation.metadataMs >= (policy.metadataGraceMs ?? 30 * 60000)
       ? "metadata-timeout"
       : "metadata";
-  }
-  else if (sample.bytes === undefined) observation.decision = "uncertain";
+  } else if (sample.bytes === undefined) observation.decision = "uncertain";
   else if (
     prior && before?.session === sample.session && before.active && before.networkReady &&
     before.metadataReady && before.bytes !== undefined && prior.decision !== "uncertain" &&
