@@ -36,6 +36,8 @@ export const ConfigSchema = z.object({
     destination: binding.default("local"),
     network: binding.default("gluetun"),
   }).strict(),
+  reviewedTmdbAliases: z.record(z.uuid(), z.number().int().positive()).default({}),
+  movieReleaseFeeds: z.array(binding).max(8).default([]),
   providerFiles: z.array(absolutePath).default([]),
   providerSettings: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
   interests: z.object({
@@ -85,6 +87,10 @@ export const ConfigSchema = z.object({
     concurrency: 4,
     minFreeBytes: 20 * 1024 ** 3,
   }),
+  observation: z.object({
+    stallMinutes: z.number().int().min(5).max(1440).default(30),
+    metadataGraceMinutes: z.number().int().min(5).max(1440).default(30),
+  }).strict().default({ stallMinutes: 30, metadataGraceMinutes: 30 }),
   schedule: z.object({
     enabled: z.boolean().default(false),
     cron: z.string().regex(/^\S+ \S+ \S+ \S+ \S+$/).default("0 2,8,14,22 * * *"),

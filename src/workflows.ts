@@ -193,6 +193,19 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       ),
     );
   }
+  const feeds = config.movieReleaseFeeds ?? [];
+  const movieGuard = `inputs.requestId != "" || ${!config.interests.movies}`;
+  if (feeds.length) {
+    discovery.push(skip(
+      method("release-feeds", "pipeline", "ingestReleaseFeeds", {
+        ...owned,
+        feeds,
+        region: config.interests.region,
+        limit: config.interests.limit,
+      }, linkMovies ? "link-aliases" : "ingest-requests"),
+      movieGuard,
+    ));
+  }
   discovery.push(skip(
     call(
       "movies",
@@ -201,13 +214,15 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       {
         region: config.interests.region,
         language: config.interests.language,
-        limit: config.interests.limit,
+        limit: feeds.length
+          ? expr('steps["release-feeds"].outputs.remaining')
+          : config.interests.limit,
         excludeIds: expr("steps.known.outputs.movieIds"),
       },
-      linkMovies ? "link-aliases" : "ingest-requests",
+      feeds.length ? "release-feeds" : linkMovies ? "link-aliases" : "ingest-requests",
       true,
     ),
-    `inputs.requestId != "" || ${!config.interests.movies}`,
+    feeds.length ? movieGuard + ' || steps["release-feeds"].outputs.remaining == 0' : movieGuard,
   ));
   discovery.push(savedIngest("ingest-movies", "movie", "movies"));
   discovery.push(skip(

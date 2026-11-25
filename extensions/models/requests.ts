@@ -368,10 +368,13 @@ export const model = {
             `m-${movieCatalogId(r.attributes)}`
           ),
         );
-        const episodes = new Set(
-          (await ctx.readModelData(ctx.globalArgs.episodes, "episode")).map((r) =>
-            `e-${episodeCatalogId(r.attributes)}`
-          ),
+        const episodeRows = (await ctx.readModelData(ctx.globalArgs.episodes, "episode")).map((r) =>
+          r.attributes
+        );
+        const episodes = new Set(episodeRows.map((r) => `e-${episodeCatalogId(r)}`));
+        const episodeAliases = new Map(
+          episodeRows.filter((r) => r.tmdbEpisodeId && r.catalogId)
+            .map((r) => [r.tmdbEpisodeId, episodeCatalogId(r)]),
         );
         let count = 0;
         for (let request of await all(ctx)) {
@@ -405,6 +408,32 @@ export const model = {
             // Freeze membership before touching catalogs; interrupted ingestion replays this exact set.
             await ctx.writeResource("request", `request-${request.id}`, request);
           }
+          const targets = request.targets!.map((t) => {
+            if (t.mediaKind !== "episode") return t;
+            const catalogId = episodeAliases.get(t.tmdbEpisodeId);
+            return catalogId && catalogId !== t.catalogId ? { ...t, catalogId } : t;
+          });
+          if (targets.some((t, i) => t !== request.targets![i])) {
+            request = { ...request, targets };
+            await ctx.writeResource("request", "request-" + request.id, request);
+          }
+          if (
+            targets.some((t) =>
+              t.mediaKind === "episode" && !episodes.has(targetKey(t)) &&
+              episodeRows.some((r) =>
+                r.tvmazeEpisodeId && !r.tmdbEpisodeId &&
+                (r.showTmdbId === t.showTmdbId ||
+                  String(r.showName).toLowerCase() === t.showName.toLowerCase()) &&
+                r.seasonNumber === t.seasonNumber && r.episodeNumber === t.episodeNumber
+              )
+            )
+          ) {
+            await ctx.writeResource("request", "request-" + request.id, {
+              ...request,
+              error: "Confirm the matching TVmaze episode identity before request ingestion",
+            });
+            continue;
+          }
           const today = new Date().toISOString().slice(0, 10);
           const due = request.targets!.filter((t) =>
             t.mediaKind === "movie" || !!t.airDate && t.airDate <= today
@@ -434,6 +463,7 @@ export const model = {
             await ctx.writeResource("request", `request-${request.id}`, {
               ...request,
               ingestedAt: new Date().toISOString(),
+              error: null,
             });
           }
         }
