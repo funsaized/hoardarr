@@ -249,11 +249,55 @@ aside .row {
 .columns h2 {
   padding-bottom: 12px;
 }
-progress {
+.download-meter {
+  --ember: linear-gradient(90deg,#823baf,#c24bc2 25%,#f2659a 48%,#ff9849 73%,#ffe064);
+  --glint: linear-gradient(108deg,transparent 43%,#fff3e67a 49%,transparent 55%);
   grid-column: 1/-1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.meter-word {
+  position: relative;
+  color: #aaa2b9;
+  font: 800 11px/1.4 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.meter-word::after {
+  content: "Downloading";
+  position: absolute;
+  inset: 0;
+  background: var(--ember);
+  background-clip: text;
+  color: transparent;
+  clip-path: inset(0 calc(100% - var(--complete)) 0 0);
+}
+.meter-rail {
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: repeating-linear-gradient(110deg,#352638 0 5px,#291e2d 5px 7px);
+}
+.meter-fill {
+  display: block;
   width: 100%;
-  height: 4px;
-  accent-color: var(--mint);
+  clip-path: inset(0 calc(100% - var(--complete)) 0 0);
+  height: 100%;
+  background: var(--ember);
+}
+@keyframes ember-sweep {
+  from { background-position: -52px 0,0 0; }
+  to { background-position: calc(100% + 52px) 0,0 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .flowing .meter-fill,.flowing .meter-word::after {
+    background-image: var(--glint),var(--ember);
+    background-size: 52px 100%,100% 100%;
+    background-repeat: no-repeat;
+    animation: ember-sweep 2.8s ease-in-out infinite;
+  }
 }
 #detail {
   margin-top: 10px;
@@ -448,3 +492,166 @@ footer {
 #remaining {
   padding: 4px 8px;
 }
+
+/* The horizon moves slowly. Transfer signals carry the faster, directional motion. */
+:root {
+  --ink: #f4eefc;
+  --dim: #b7aeca;
+  --line: #46405e;
+  --mint: #62eeeb;
+  --acid: #ff9cee;
+  --panel: #181429;
+  background: #100d1c;
+}
+.horizon {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  align-items: end;
+  min-height: 136px;
+  padding: 18px 24px;
+  background: linear-gradient(105deg,#21162f 10%,#331845 60%,#4c204f);
+  border-bottom: 2px solid #ff79ca;
+}
+.horizon h1 { margin: 0; z-index: 1; text-shadow: 0 2px 12px #1b1029; }
+.sun {
+  position: absolute;
+  right: 9%;
+  top: 10%;
+  width: 94px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: linear-gradient(#ffe092,#ff888c 50%,#f54bab);
+  mask-image: repeating-linear-gradient(#000 0 8px,transparent 9px 11px);
+}
+.horizon::after {
+  content: "";
+  position: absolute;
+  inset: 55% -20% -55%;
+  transform: perspective(75px) rotateX(45deg);
+  background-image: linear-gradient(#b74aad88 1px,transparent 1px),linear-gradient(90deg,#b74aad88 1px,transparent 1px);
+  background-size: 42px 15px;
+}
+.controls { margin-top: 18px; }
+button,input,#detail,#preview,.episode { background-color: #1b172c; }
+button[aria-pressed=true],#mode label:has(:checked) { background: #163039; }
+.signal {
+  display: inline-grid;
+  place-items: center;
+  width: 1.55em;
+  height: 1.55em;
+  flex: none;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  color: var(--mint);
+  font: bold 14px/1 var(--mono);
+}
+.signal.stack,.signal.send { color: var(--acid); }
+.signal.alert { color: #ffce84; }
+.item-title { display: flex; align-items: center; gap: 10px; min-width: 0; overflow-wrap: anywhere; }
+#stages button { position: relative; }
+#stages .signal { float: right; margin-bottom: 4px; }
+.backlog summary { min-height: 45px; }
+.backlog[open] { border-left: 2px solid var(--acid); padding-left: 8px; }
+@keyframes receive { 50% { transform: translateY(3px); } }
+@keyframes send { 50% { transform: translateY(-3px); } }
+@keyframes tick { 50% { transform: rotate(16deg); } }
+@keyframes stack { 50% { box-shadow: 2px 2px 0 #a95899; } }
+@keyframes beacon { 50% { opacity: .62; } }
+@keyframes horizon { to { background-position: 0 15px; } }
+@media (prefers-reduced-motion: no-preference) {
+  .horizon::after { animation: horizon 8s linear infinite; }
+  .signal { animation: beacon 3s ease-in-out infinite; }
+  .signal.receive { animation: none; }
+  .row .signal.receive:not(.stationary) { animation: receive 3s ease-in-out infinite; }
+  .signal.send { animation-name: send; }
+  .signal.wait { animation-name: tick; }
+  .signal.stack { animation-name: stack; }
+  .signal.done { animation-iteration-count: 1; }
+  .phase-1 { animation-delay: -.7s; }
+  .phase-2 { animation-delay: -1.5s; }
+  .phase-3 { animation-delay: -2.2s; }
+}
+@media (max-width:850px) {
+  #stages .signal { float: none; }
+  .horizon { min-height: 110px; padding: 16px; }
+}
+
+body {
+  isolation: isolate;
+  background: radial-gradient(ellipse at 80% 12%,#33143d,transparent 53%),#0e0b1a;
+}
+#mesh { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+header { height: 64px; }
+header a { display: inline-flex; align-items: center; gap: 13px; font: italic 900 20px/1 system-ui,sans-serif; letter-spacing: .13em; }
+.vault-mark { position: relative; width: 37px; height: 35px; filter: drop-shadow(0 1px 5px #fb63bd55); }
+.vault-mark::before,.vault-mark::after,.vault-mark i {
+  content: ""; position: absolute; inset: 0;
+  clip-path: polygon(0 12%,50% 45%,100% 12%,85% 48%,50% 71%,15% 48%);
+  background: linear-gradient(110deg,#fff2ca,#ff8bd5 55%,#a970ff);
+}
+.vault-mark::after { transform: translateY(8px) scale(.76); background: #6eece8; }
+.vault-mark i { inset: 0 32% 62%; clip-path: polygon(50% 0,100% 60%,50% 100%,0 60%); background: #fff0bd; }
+.horizon {
+  align-items: center; min-height: clamp(156px,17vw,226px);
+  padding-inline: clamp(18px,4vw,60px);
+  background: linear-gradient(95deg,#231831a8 3%,transparent 68%),radial-gradient(ellipse at 78% 63%,#ff568044,transparent 45%);
+}
+.horizon h1 {
+  font: italic 950 clamp(42px,7.5vw,112px)/.94 system-ui,sans-serif;
+  letter-spacing: -.085em; text-transform: uppercase;
+  color: #fff4ed; text-shadow: 2px 3px #6d335e,4px 5px #281b3a;
+}
+.horizon h1 em { display: inline-block; color: #ff95cb; }
+.sun { width: clamp(96px,12vw,176px); right: 14%; top: 8%; z-index: -1; }
+.ridge,.ridge::after {
+  position: absolute; inset: 32% 0 0; background: linear-gradient(160deg,#503353,#251833 55%,#151025);
+  clip-path: polygon(0 91%,14% 71%,23% 86%,39% 80%,49% 63%,53% 68%,62% 35%,65% 42%,71% 17%,77% 52%,81% 46%,85% 65%,93% 25%,100% 48%,100% 100%,0 100%);
+}
+.horizon::after { inset: 85% -20% -75%; }
+.columns>section,.columns>aside,.controls,#library { background: #161225ed; }
+#stages button { border-top: 2px solid #69517d; background: linear-gradient(145deg,#2d203b,#181425); }
+#stages button[aria-pressed=true] { border-color: #6ceee8; background: linear-gradient(125deg,#243b45,#1c1b32); box-shadow: inset 0 -2px #6ceee8; }
+#views button { border-radius: 18px; }
+@media (prefers-reduced-motion: no-preference) {
+  button { transition: border-color .18s,box-shadow .18s,background-color .18s; }
+  #stages button:hover { box-shadow: inset 0 -2px #ffa3e0; }
+  header a:hover .vault-mark::after { transform: translateY(12px) scale(.76); }
+  .vault-mark::after { transition: transform .25s ease-out; }
+}
+@media (max-width:650px) {
+  .horizon { min-height: 144px; align-items: end; }
+  .sun { right: 8%; }
+}
+
+#titles {
+  columns: 19rem;
+  column-gap: 16px;
+}
+#titles > .series,
+#titles > .movie {
+  display: inline-block;
+  vertical-align: top;
+  width: 100%;
+  margin-bottom: 4px;
+  break-inside: avoid;
+  background: #211b32;
+}
+#titles .series summary,
+#titles > .movie {
+  padding: 7px 10px;
+}
+#titles .series summary {
+  display: grid;
+  grid-template-columns: 12px minmax(0,1fr);
+  gap: 2px 6px;
+}
+#titles .series summary::before { grid-row: span 2; align-self: center; }
+#titles .meta { display: block; margin: 0; font-size: 11px; }
+.library-episodes {
+  max-height: 17rem;
+  overflow-y: auto;
+  scrollbar-color: var(--line) var(--panel);
+}
+.library-episodes .episode { padding: 5px 8px; gap: 5px; }
