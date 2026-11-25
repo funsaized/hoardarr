@@ -15,6 +15,7 @@ import {
   fingerprint,
   IntentSchema,
   type MediaRequest,
+  MovieTarget,
   RequestId,
   requestId,
   RequestSchema,
@@ -59,6 +60,7 @@ async function all(ctx: Context) {
     RequestSchema.parse(r.attributes)
   );
 }
+const canonicalTitle = (title: string) => title.normalize("NFKC").trim().toLowerCase();
 async function writable<T>(ctx: Context, action: () => Promise<T>): Promise<T> {
   return await withOperatorGate(
     ctx.repoDir,
@@ -112,14 +114,42 @@ export const model = {
         }
         return await withOperatorGate(ctx.repoDir, false, async () => {
           await writable(ctx, async () => {});
-          const records = await invoke(
-            ctx,
-            ctx.globalArgs.metadata,
-            ctx.globalArgs.resolveMethod,
-            args,
-          );
-          const row = records.find((r) => r.name === `request-resolution-${args.resolutionId}`);
-          const resolution = ResolutionSchema.parse(row?.attributes);
+          const candidates = args.mediaKind === "movie"
+            ? (await ctx.readModelData(ctx.globalArgs.movies, "movie")).flatMap(({ attributes }) => {
+              const { tmdbId, title, year } = attributes;
+              if (typeof tmdbId !== "number" || typeof title !== "string") return [];
+              if (args.year !== undefined && args.year !== year) return [];
+              if (
+                args.tmdbId !== undefined
+                  ? args.tmdbId !== tmdbId
+                  : canonicalTitle(args.query) !== canonicalTitle(title)
+              ) return [];
+              return [{
+                tmdbId,
+                title,
+                year: typeof year === "number" ? year : null,
+                mediaKind: "movie",
+                url: `https://www.themoviedb.org/movie/${tmdbId}`,
+              }];
+            })
+            : [];
+          let resolution;
+          if (candidates.length && candidates.length <= 20) {
+            resolution = ResolutionSchema.parse({
+              ...args,
+              checkedAt: new Date().toISOString(),
+              candidates,
+            });
+          } else {
+            const records = await invoke(
+              ctx,
+              ctx.globalArgs.metadata,
+              ctx.globalArgs.resolveMethod,
+              args,
+            );
+            const row = records.find((r) => r.name === `request-resolution-${args.resolutionId}`);
+            resolution = ResolutionSchema.parse(row?.attributes);
+          }
           return await writable(
             ctx,
             async () => ({
@@ -168,29 +198,38 @@ export const model = {
             selection: args.selection,
             category: args.category,
           });
-          if (intent.selection.downloadAgain) {
-            const catalog = await ctx.readModelData(ctx.globalArgs.movies, "movie");
-            if (
-              !catalog.some((r) =>
-                r.attributes.tmdbId === media.tmdbId && r.attributes.archivedAt &&
-                r.attributes.status === "transferred"
-              )
-            ) {
-              throw new Error(
-                "Download again requires a previously archived movie. Use a normal request for this title.",
-              );
-            }
+          const known = media.mediaKind === "movie"
+            ? (await ctx.readModelData(ctx.globalArgs.movies, "movie")).find(
+              ({ attributes }) => attributes.tmdbId === media.tmdbId,
+            )?.attributes
+            : undefined;
+          if (
+            intent.selection.downloadAgain &&
+            (!known?.archivedAt || known.status !== "transferred")
+          ) {
+            throw new Error(
+              "Download again requires a previously archived movie. Use a normal request for this title.",
+            );
           }
-          const digest = fingerprint(intent);
+          const acceptedAt = new Date().toISOString();
+          const target = known && MovieTarget.parse({
+            mediaKind: "movie",
+            tmdbId: media.tmdbId,
+            title: known.title,
+            year: known.year ?? null,
+            releaseDate: null,
+            overview: known.overview ?? null,
+            discoveredAt: known.discoveredAt ?? acceptedAt,
+          });
           const request = RequestSchema.parse({
             id,
-            fingerprint: digest,
+            fingerprint: fingerprint(intent),
             intent,
             text: args.text,
             resolutionId: args.resolutionId,
-            acceptedAt: new Date().toISOString(),
-            targets: null,
-            expandedAt: null,
+            acceptedAt,
+            targets: target ? [target] : null,
+            expandedAt: target ? acceptedAt : null,
             ingestedAt: null,
             error: null,
             nextResolutionAt: null,

@@ -159,6 +159,22 @@ function harness(root: string) {
   };
 }
 
+Deno.test("a saved movie resolves and becomes a request target without metadata calls", () =>
+  temporary(async (root) => {
+    const h = harness(root);
+    h.store("movie-catalog").set("movie-3", {
+      spec: "movie",
+      attributes: { tmdbId: 3, title: "Hoardarr Requested", year: 2023, status: "wanted" },
+    });
+    await h.run("coordinator", "acquire", { owner: h.owner });
+    await h.submit("saved-movie");
+    await h.expand(requestId("saved-movie"));
+    const request = h.request("saved-movie");
+    assert(request.ingestedAt);
+    deepStrictEqual(request.targets?.map(targetKey), ["m-3"]);
+    deepStrictEqual(h.store("request-metadata").size, 0);
+  }));
+
 Deno.test("request intake is idempotent, candidate-bound and safe while a media owner is active", () =>
   temporary(async (root) => {
     const h = harness(root);
