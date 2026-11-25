@@ -699,22 +699,19 @@ enrolled management transport.
 
 ### Live queue board
 
-Open **Transfers** to see Torlink’s waiting order, active downloads and seeds alongside the catalog
-backlog. Select a title to inspect its transfer. Switching stages clears the selection. Delivered
-today uses your browser’s local date.
+**Night Shift** opens on Transfers. Choose Downloading, Waiting or Seeding to see transfer progress,
+queue order and peers. Select a title for its episode name, observed condition and next step. On a
+phone, Back returns to the row you opened.
 
-Open **Tracked library** to search movies and shows. Expand a show to see its known episodes in
-season order. Available locally counts verified local deliveries. Archived counts deliveries removed
-from the library. Remaining counts episodes still wanted, including failed downloads. Ignored
-episodes count toward the known total. Select the remaining count to list outstanding episodes by
-show. Select it again to return to the full library.
+**Library** searches movie titles, shows, episode names and codes such as `S02E13`. Combine a media
+type with Wanted, Available locally or Archived. Open a show to browse its seasons. **Attention**
+groups identity decisions, provider problems and transfer problems. Provider records include names,
+numbering and dates when available.
 
-The operating mode controls run the same commands as the guest CLI. **Preview plan** calculates the
-next plan and shows the titles selected for acquisition or delivery, along with the time of the
-catalog reading. **Refresh discovery** updates the catalog, and **Run media pipeline** processes
-deliveries and acquisitions. Open `http://127.0.0.1:9184/` on the host to start an operation. The
-board accepts one operation at a time and shows its result. Workflow history and the guest journal
-retain the details.
+**Activity** shows verified deliveries, recent board operations and the last successful preview.
+Open `http://127.0.0.1:9184/` on the operator host to preview a plan, refresh discovery, run the
+media pipeline or confirm a pending series match. The board accepts one operation at a time.
+Workflow history and the guest journal retain the underlying run details.
 
 Transfer readings refresh every 15 seconds while downloads are active or queued, and every minute
 when idle. Catalog readings refresh once a minute. Open screens share a cache. The service reads

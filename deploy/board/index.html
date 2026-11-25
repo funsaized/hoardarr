@@ -3,64 +3,33 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <meta name="theme-color" content="#100d21">
-    <title>Hoardarr · Operations</title>
+    <meta name="theme-color" content="#141023">
+    <title>Night Shift · Hoardarr</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/board.css">
     <script type="module" src="/board.js"></script>
   </head>
   <body>
     <canvas id="mesh" aria-hidden="true"></canvas>
-    <header><a href="/" aria-label="Hoardarr home"><span class="vault-mark" aria-hidden="true"><i></i></span><b>HOARDARR</b></a><div id="health" role="status">Connecting…</div></header>
+    <header><a href="?" aria-label="Hoardarr home"><span class="vault-mark" aria-hidden="true"><i></i></span>Hoardarr</a><div id="health" role="status">Connecting…</div></header>
     <main>
-      <div class="horizon"><h1>Transfer <em>deck</em></h1><div class="ridge" aria-hidden="true"></div><div class="sun" aria-hidden="true"></div></div>
-      <nav id="views"
-        aria-label="Console view"><button aria-pressed="true" data-view="queue">Transfers</button><button aria-pressed="false" data-view="library">Tracked library</button></nav>
-      <div id="queue">
-        <nav aria-label="Filter by stage" id="stages"></nav>
-        <div class="columns">
-          <section>
-            <h2 id="group">Downloading</h2>
-            <div id="items"></div>
-          </section>
-          <aside>
-            <section id="detail" hidden>
-              <h2>Transfer details</h2>
-              <h3></h3>
-              <dl></dl>
-            </section>
-            <h2>Up next</h2>
-            <div id="next"></div>
-          </aside>
-        </div>
+      <div class="horizon">
+        <h1>Night <em>Shift</em></h1>
+        <div class="stars"></div>
+        <div class="sun"></div>
+        <div class="ridge"></div>
+        <div class="road"></div>
       </div>
-      <section id="library" hidden>
-        <div
-          class="section-head"><h2>Tracked library</h2><input type="search" id="filter" aria-label="Filter shows and movies" placeholder="Filter shows and movies"></div>
-        <div
-          id="coverage"><span id="totals"></span> <button type="button" id="remaining" aria-pressed="false" hidden>Remaining</button></div>
-        <div id="titles"></div>
-      </section>
-      <section class="controls">
-        <div
-          class="section-head"><h2>Operating mode</h2><output id="operation">Connecting…</output></div>
-        <form id="commands">
-          <fieldset id="mode">
-            <legend>Choose a workflow</legend>
-            <label><input type="radio" name="workflow" value="preview" checked><b>Preview plan</b><span>Inspect catalog work</span></label>
-            <label><input type="radio" name="workflow" value="discover"><b>Refresh discovery</b><span>Update tracked titles</span></label>
-            <label><input type="radio" name="workflow" value="run"><b>Run media pipeline</b><span>Acquire and deliver</span></label>
-          </fieldset>
-          <button id="execute" type="submit" disabled>Start preview</button>
-        </form>
-        <p id="mode-help"></p>
-        <output id="feedback" role="status"></output>
-        <section id="preview" hidden aria-label="Last successful preview">
-          <h2>Last successful preview</h2>
-          <p id="preview-time"></p>
-          <div id="plan-groups"></div>
-        </section>
-      </section>
-      <footer><span id="torlink">Torlink · connecting</span><span id="catalog">Catalog · connecting</span></footer>
+      <nav id="views" aria-label="Main navigation"></nav>
+      <div id="workspace">
+        <div id="listing">
+          <div id="tools"></div>
+          <div id="results"></div>
+        </div>
+        <aside id="inspector" tabindex="-1" aria-label="Inspector"></aside>
+      </div>
+      <footer><span id="torlink">Downloader · connecting</span><span id="catalog">Catalog · connecting</span></footer>
     </main>
+    <div class="sr" id="announce" role="status"></div>
   </body>
 </html>
