@@ -448,6 +448,7 @@ async function installUnlocked(
   for (
     const name of [
       "media",
+      ...(config.guest && config.providers.downloader === "torlink" ? ["hoardarr-transfer-sampling"] : []),
       "hoardarr-observation",
       "hoardarr-discovery",
       "hoardarr-acquisition",

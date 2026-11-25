@@ -61,7 +61,7 @@ function render() {
   const rows = live.rows.map((t) => {
     const c = byHash.get(t.id.toLowerCase());
     if (c) joined.add(c.id);
-    return { ...t, id: c?.id ?? t.id, title: c?.title ?? t.title, release: t.title };
+    return { ...t, health: c?.health, id: c?.id ?? t.id, title: c?.title ?? t.title, release: t.title };
   });
   rows.push(
     ...activeCatalog.filter((c) => !joined.has(c.id)).map((c) => ({
@@ -226,6 +226,13 @@ function render() {
         State: describe(item),
         Release: item.release,
         Peers: item.peers,
+        "Transfer observation": item.health?.decision,
+        "Sample time": item.health && new Date(item.health.observedAt).toLocaleString(),
+        "Observed without growth": item.health && Math.floor(item.health.idleMs / 60000) + " min",
+        "Measured growth": item.health?.byteRate != null ? item.health.byteRate.toFixed(1) + " B/s" : null,
+        "Proposed action": item.health?.decision === "stall"
+          ? "Check for an eligible alternate · observation only"
+          : item.health ? "Continue observing" : null,
         Reason: item.reason,
         Delivered: item.delivered,
         Observed: minutes(item.release ? live.observed : catalog.observed),

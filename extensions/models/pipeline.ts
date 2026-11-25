@@ -1,8 +1,11 @@
 /** Catalog-facing batch operations. Swamp workflows own phase ordering and recovery. */
 import { z } from "npm:zod@4.5.1";
 import {
+  assertAdmission,
   assertLease,
   invoke,
+  leaseOperation,
+  readLease,
   type RecordData,
   recordExternalIntent,
   type Runtime,
@@ -22,7 +25,11 @@ import {
   targetKey,
 } from "./_lib/requests.ts";
 import { archive, ArchiveArgs, ArchiveRecord } from "./_lib/archive.ts";
-import { observeTransfer, TransferObservation, TransferSample } from "./_lib/transfer_observation.ts";
+import {
+  observeTransfer,
+  TransferObservation,
+  TransferSample,
+} from "./_lib/transfer_observation.ts";
 const Globals = z.object({
   requestModel: z.string().optional(),
   libraryRoot: z.string().optional(),
@@ -112,6 +119,58 @@ async function requests(ctx: Context): Promise<MediaRequest[]> {
 async function fairness(ctx: Context): Promise<RequestFairness> {
   return ((await ctx.readModelData("pipeline", "requestFairness"))[0]?.attributes ??
     { search: {}, submit: {} }) as RequestFairness;
+}
+async function recordTransferHealth(ctx: Context, fallback?: Row) {
+  let snapshot = fallback;
+  if (ctx.globalArgs.expectedInterface && ctx.globalArgs.downloadProvider === "torlink") {
+    const result = await ctx.runModel({ definition: "torlink", method: "sampleTransfers" });
+    snapshot = result.ok
+      ? result.resources.find((r) => r.name === "telemetry-current")?.attributes
+      : undefined;
+    // Close the interval on failure. A subsequent healthy reading starts a new baseline.
+    snapshot ??= { torrents: [], capturedAt: new Date().toISOString() };
+  }
+  if (!snapshot) return [];
+  const observedAt = Date.parse(String(snapshot.capturedAt));
+  const maxGapMs = ctx.globalArgs.transferSampleMaxGapMinutes * 60_000;
+  const age = Date.now() - observedAt;
+  const network = snapshot.network as Row | undefined;
+  const samples = new Map((snapshot.torrents as Row[]).map((row) => [row.infoHash, row]));
+  const previous = new Map(
+    (await ctx.readModelData("pipeline", "transferObservation")).map((r) => [r.name, r.attributes]),
+  );
+  const observations = [];
+  for (const kind of ["movie", "episode"] as const) {
+    for (const row of await rows(ctx, kind)) {
+      const torrent = samples.get(row.infoHash);
+      const key = `transfer-health-${kind}-${row[idField(kind)]}`;
+      const saved = TransferObservation.safeParse(previous.get(key)).data;
+      if (!torrent && !saved) continue;
+      const sample = TransferSample.safeParse({
+        hash: row.infoHash,
+        observedAt,
+        session: snapshot.telemetrySession ?? saved?.sample.session,
+        active: torrent?.status === "downloading" &&
+          typeof snapshot.telemetrySession === "string",
+        networkReady: age >= 0 && age <= maxGapMs && network?.online === true &&
+          !!network.address &&
+          (!ctx.globalArgs.expectedInterface ||
+            network.interface === ctx.globalArgs.expectedInterface),
+        metadataReady: torrent?.metadataReady === true,
+        bytes: torrent?.downloadedBytes,
+        total: torrent?.totalBytes,
+      });
+      if (!sample.success) continue;
+      const observation = observeTransfer(sample.data, saved, {
+        stallMs: ctx.globalArgs.stallMinutes * 60_000,
+        maxGapMs,
+      });
+      if (observation !== saved) {
+        observations.push(await ctx.writeResource("transferObservation", key, observation));
+      }
+    }
+  }
+  return observations;
 }
 function workItem(row: Row, kind: "movie" | "episode"): Item {
   const id = Number(row[idField(kind)]),
@@ -724,6 +783,17 @@ export const model = {
         return write(ctx, "summary", { ok: true });
       },
     },
+    sampleTransfers: {
+      description:
+        "Observe active transfer counters between media runs without issuing control commands.",
+      arguments: z.object({}),
+      execute: (_: unknown, ctx: Context) =>
+        leaseOperation(ctx.repoDir, async (path) => {
+          if (await readLease(path)) return { dataHandles: [] };
+          await assertAdmission(ctx.repoDir, true);
+          return { dataHandles: await recordTransferHealth(ctx) };
+        }),
+    },
     reconcile: {
       description:
         "Reconcile both catalogs against an explicitly supplied current download snapshot.",
@@ -740,15 +810,6 @@ export const model = {
           progress: r.progress ?? null,
         }));
         const present = new Set(snapshots.map((torrent) => torrent.infoHash));
-        const observedAt = Date.parse(String(snapshot.capturedAt));
-        const maxGapMs = ctx.globalArgs.transferSampleMaxGapMinutes * 60_000;
-        const age = Date.now() - observedAt;
-        const network = snapshot.network as Row | undefined;
-        const samples = new Map((snapshot.torrents as Row[]).map((row) => [row.infoHash, row]));
-        const previous = new Map(
-          (await ctx.readModelData("pipeline", "transferObservation")).map((r) => [r.name, r.attributes]),
-        );
-        const observations = [];
         for (const kind of ["movie", "episode"] as const) {
           await invoke(ctx, catalog(ctx, kind), "reconcile", { snapshots });
           // Reconcile a remove that succeeded before its acknowledgement was persisted.
@@ -756,32 +817,9 @@ export const model = {
             if (row.status === "seed-stopped" && row.infoHash && !present.has(row.infoHash)) {
               await transition(ctx, workItem(row, kind), { to: "transfer-ready" });
             }
-            const torrent = samples.get(row.infoHash);
-            const key = `transfer-health-${kind}-${row[idField(kind)]}`;
-            const saved = TransferObservation.safeParse(previous.get(key)).data;
-            if (!torrent && !saved) continue;
-            const sample = TransferSample.safeParse({
-              hash: row.infoHash,
-              observedAt,
-              session: snapshot.telemetrySession ?? saved?.sample.session,
-              active: torrent?.status === "downloading" &&
-                typeof snapshot.telemetrySession === "string",
-              networkReady: age >= 0 && age <= maxGapMs && network?.online === true &&
-                (!ctx.globalArgs.expectedInterface || network.interface === ctx.globalArgs.expectedInterface),
-              metadataReady: torrent?.metadataReady === true,
-              bytes: torrent?.downloadedBytes,
-              total: torrent?.totalBytes,
-            });
-            if (!sample.success) continue;
-            const observation = observeTransfer(sample.data, saved, {
-              stallMs: ctx.globalArgs.stallMinutes * 60_000,
-              maxGapMs,
-            });
-            if (observation !== saved) {
-              observations.push(await ctx.writeResource("transferObservation", key, observation));
-            }
           }
         }
+        const observations = await recordTransferHealth(ctx, snapshot);
         const summary = await write(ctx, "summary", { ok: true });
         return { dataHandles: [...summary.dataHandles, ...observations] };
       },

@@ -115,3 +115,15 @@ Deno.test("provider contracts require observation and reconciliation, without a 
   assert(!selected.downloader.methods.wait);
   assert(selected.network.methods.assertReady === "inspect");
 });
+
+Deno.test("native sampling fits the telemetry gap without scheduling acquisition", () => {
+  const config = nativeConfig("/tmp/native");
+  config.schedule.enabled = true;
+  const graph = workflowDefinitions(config, {});
+  const sampling = graph.find((w) => w.name === "hoardarr-transfer-sampling")!;
+  deepStrictEqual(sampling.trigger, {
+    schedule: "*/5 * * * *", inputs: {}, catchUp: { policy: "none" },
+  });
+  deepStrictEqual(steps(sampling).map((s) => s.name), ["sample"]);
+  assert(!JSON.stringify(sampling).includes("control"));
+});

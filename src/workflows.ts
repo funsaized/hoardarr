@@ -461,6 +461,16 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   root.reports = { require: ["@funsaized/hoardarr/run-summary"] };
   return [
     root,
+    ...(native && config.providers.downloader === "torlink"
+      ? [{
+        ...base("hoardarr-transfer-sampling", [
+          job([method("sample", "pipeline", "sampleTransfers")]),
+        ], { type: "object", properties: {} }),
+        ...(config.schedule.enabled
+          ? { trigger: { schedule: "*/5 * * * *", inputs: {}, catchUp: { policy: "none" } } }
+          : {}),
+      }]
+      : []),
     base("hoardarr-observation", [job(observation)]),
     base("hoardarr-discovery", [job(discovery)]),
     base("hoardarr-acquisition", [job(acquisition)]),

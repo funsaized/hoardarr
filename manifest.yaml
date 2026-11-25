@@ -17,6 +17,7 @@ models:
   - public_network_session.ts
   - public_guest_network.ts
   - torlink_migration.ts
+  - torlink_telemetry.ts
   - public_movie_catalog.ts
   - public_episode_catalog.ts
   - public_media_files.ts
@@ -29,6 +30,7 @@ include:
   - _lib/tv_backlog.ts
   - _lib/tv_progress.ts
   - _lib/requests.ts
+  - _lib/transfer_observation.ts
   - _lib/request_metadata.ts
   - _lib/fixture_request_metadata.ts
   - _lib/network_session_definition.ts

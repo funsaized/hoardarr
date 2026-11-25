@@ -1,11 +1,15 @@
 // The browser only sees these projections. Provider responses can include private locators.
 const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"])';
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName == "transferObservation")';
 const catalogFields = [
   "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "showName",
   "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
 ];
-const catalogProjection = 'specName == "showList" ? {"shows": attributes.shows.map(show, ' +
+const catalogProjection = 'specName == "transferObservation" ? {' +
+  '"observationKey": name, "hash": attributes.sample.hash, "decision": attributes.decision, ' +
+  '"observedAt": attributes.sample.observedAt, "idleMs": attributes.idleMs, ' +
+  '"byteRate": "byteRate" in attributes ? attributes.byteRate : null} : ' +
+  'specName == "showList" ? {"shows": attributes.shows.map(show, ' +
   '{"tmdbId": show.tmdbId, "name": show.name})} : {' +
   catalogFields.map((field) =>
     `"${field}": "${field}" in attributes ? attributes.${field} : null`
@@ -89,6 +93,13 @@ async function live() {
   }
   return transfers(downloads, seeds, saved);
 }
+function matchingObservation(row: Record<string, unknown>, records: Map<string, Record<string, unknown>>) {
+  const suffix = row.tmdbEpisodeId ? `episode-${row.tmdbEpisodeId}` : `movie-${row.tmdbId}`;
+  const health = records.get("transfer-health-" + suffix);
+  if (!health || health.hash !== row.infoHash) return undefined;
+  const { decision, observedAt, idleMs, byteRate } = health;
+  return { decision, observedAt, idleMs, byteRate };
+}
 async function catalog() {
   const result = await new Deno.Command("/usr/local/bin/swamp", {
     args: ["data", "query", catalogPredicate, "--select", catalogProjection, "--json"],
@@ -102,12 +113,17 @@ async function catalog() {
     id: s.tmdbId,
     name: s.name,
   }));
+  const observations = new Map<string, Record<string, unknown>>();
+  for (const row of results) {
+    if (row.observationKey) observations.set(row.observationKey, row);
+  }
   return {
     shows,
-    rows: results.filter((r: Record<string, unknown>) => !r.shows).map((
+    rows: results.filter((r: Record<string, unknown>) => !r.shows && !r.observationKey).map((
       r: Record<string, unknown>,
     ) => ({
       id: r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.tmdbId}`,
+      health: matchingObservation(r, observations),
       hash: r.infoHash,
       archived: !!r.archivedAt,
       showId: r.showTmdbId,

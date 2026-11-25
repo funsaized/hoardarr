@@ -448,3 +448,104 @@ index 0000000..494f2d8
 +    } finally { rmSync(root, { recursive: true, force: true }); }
 +  });
 +});
+diff --git i/src/daemon/serve.test.ts w/src/daemon/serve.test.ts
+index 85c416f..6c56464 100644
+--- i/src/daemon/serve.test.ts
++++ w/src/daemon/serve.test.ts
+@@ -183,6 +183,7 @@ describe("handleApi", () => {
+   it("reports a torrent's own limit and its due time on GET /downloads", async () => {
+     const completedAt = 1_700_000_000_000;
+     runtime.queue = {
++      transferReading: () => ({ metadataReady: true, downloadedBytes: 8, totalBytes: 80 }),
+       getItems: () => [
+         { id: "dl", name: "In flight", status: "downloading", progress: 0.5, peers: 1, speed: 0, seedTimeMs: 60_000 },
+       ],
+@@ -200,7 +201,8 @@ describe("handleApi", () => {
+     } as unknown as Runtime["queue"];
+     const res = await handleApi(runtime, null, "GET", "/downloads", undefined, "");
+     const body = res.body as { downloads: Record<string, unknown>[]; seeds: Record<string, unknown>[] };
+-    expect(body.downloads[0]).toMatchObject({ id: "dl", seedTimeMs: 60_000 });
++    expect(res.body.telemetrySession).toMatch(/^[a-f0-9-]{36}$/);
++    expect(body.downloads[0]).toMatchObject({ id: "dl", seedTimeMs: 60_000, metadataReady: true, downloadedBytes: 8, totalBytes: 80 });
+     expect(body.seeds[0]).toMatchObject({ id: "own", seedTimeMs: 3_600_000, seedUntil: completedAt + 3_600_000 });
+     expect(body.seeds[1]).toMatchObject({ id: "forever", seedTimeMs: 0, seedUntil: null });
+     expect("seedTimeMs" in body.seeds[2]!).toBe(false);
+diff --git i/src/daemon/serve.ts w/src/daemon/serve.ts
+index 9bd3e59..d3168cc 100644
+--- i/src/daemon/serve.ts
++++ w/src/daemon/serve.ts
+@@ -7,6 +7,7 @@
+ // deliberately non-standard and overridable with --port. Binds 127.0.0.1 by
+ // default; exposing it on a public interface requires a token.
+ 
++import { randomUUID } from "node:crypto";
+ import http from "node:http";
+ import { startRuntime, addInput, type Runtime } from "./runtime";
+ import { magnetFromTorrentBytes } from "../sources/torrentFile";
+@@ -210,12 +211,15 @@ export async function applyControl(
+   }
+ }
+ 
++const telemetrySession = randomUUID();
++
+ function statusPayload(runtime: Runtime): Record<string, unknown> {
+   const downloads = runtime.queue.getItems().map((it) => ({
+     id: it.id,
+     name: it.name,
+     status: it.status,
+     progress: it.progress,
++    ...runtime.queue.transferReading(it.id),
+     peers: it.peers,
+     speed: it.speed,
+     ...(it.seedTimeMs !== undefined ? { seedTimeMs: it.seedTimeMs } : {}),
+@@ -239,7 +243,7 @@ function statusPayload(runtime: Runtime): Record<string, unknown> {
+         : {}),
+     };
+   });
+-  return { downloads, seeds, network: runtime.queue.networkStatus() };
++  return { downloads, seeds, telemetrySession, network: runtime.queue.networkStatus() };
+ }
+ 
+ // Body of POST /network: { interface?: string | null, peerPort?: number | null,
+diff --git i/src/download/engine.ts w/src/download/engine.ts
+index d3db5e4..da9c012 100644
+--- i/src/download/engine.ts
++++ w/src/download/engine.ts
+@@ -459,6 +459,22 @@ export class TorrentEngine {
+     return (this.torrents.get(id)?.files ?? []).map((file) => file.path);
+   }
+ 
++  transferReading(id: string) {
++    const torrent = this.torrents.get(id);
++    try {
++      if (!torrent?.ready) return { metadataReady: false };
++      const downloadedBytes = torrent.downloaded;
++      const totalBytes = torrent.length;
++      return {
++        metadataReady: true,
++        ...(Number.isSafeInteger(downloadedBytes) && downloadedBytes >= 0 ? { downloadedBytes } : {}),
++        ...(Number.isSafeInteger(totalBytes) && totalBytes >= 0 ? { totalBytes } : {}),
++      };
++    } catch {
++      return { metadataReady: false };
++    }
++  }
++
+   stats(id: string): TorrentProgress | null {
+     const t = this.torrents.get(id);
+     if (!t) return null;
+diff --git i/src/download/queue.ts w/src/download/queue.ts
+index 047f594..8ebb465 100644
+--- i/src/download/queue.ts
++++ w/src/download/queue.ts
+@@ -151,6 +151,10 @@ export class DownloadQueue extends EventEmitter {
+     this.trackers = trackers;
+   }
+ 
++  transferReading(id: string) {
++    return this.engine.transferReading(id);
++  }
++
+   getItems(): QueueItem[] {
+     return [...this.items.values()].sort((a, b) => b.addedAt - a.addedAt);
+   }
