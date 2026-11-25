@@ -1,3 +1,4 @@
+import { episodeRevision } from "../../extensions/models/_lib/episode_revision.ts";
 type Provider = "TVmaze" | "TMDB" | "Catalog";
 type Kind = "series" | "episode" | "movie";
 export type Candidate = {
@@ -9,6 +10,8 @@ export type Candidate = {
   date?: string;
   url?: string;
   note?: string;
+  revision?: string;
+  match?: { id: number; title: string };
 };
 type Episode = {
   id: number;
@@ -20,6 +23,13 @@ type Episode = {
   airstamp?: string;
 };
 export type Projection = {
+  operatorDecision?: { action: string; target: string; candidate?: number; revision: string };
+  trackedTmdbId?: number;
+  tvmazeSeriesId?: number;
+  tvmazeEpisodeId?: number;
+  catalogId?: number;
+  showTmdbId?: number;
+  seriesCatalogId?: number;
   decisionKey?: string;
   revision?: string;
   title?: string;
@@ -52,6 +62,33 @@ function number(s?: number, n?: number) {
     : undefined;
 }
 export function reviewRows(records: Projection[]) {
+  const excluded = new Map(
+    records.flatMap((r) =>
+      r.operatorDecision?.candidate
+        ? [
+          [
+            r.operatorDecision.target + "/" + r.operatorDecision.candidate,
+            r.operatorDecision,
+          ] as const,
+        ]
+        : []
+    ),
+  );
+  const slots = new Map<string, Projection[]>();
+  for (const r of records) {
+    if (!r.showName) continue;
+    for (
+      const k of [
+        r.tvmazeSeriesId && "v" + r.tvmazeSeriesId,
+        !r.tvmazeSeriesId && r.showTmdbId && "t" + r.showTmdbId,
+      ].filter(Boolean)
+    ) {
+      const slot = k + "/" + r.seasonNumber + "/" + r.episodeNumber;
+      const entries = slots.get(slot) ?? [];
+      entries.push(r);
+      slots.set(slot, entries);
+    }
+  }
   const index = new Map<string, Candidate>();
   const add = (c: Candidate) => index.set(key(c.provider, c.kind, c.id), c);
   for (const r of records) {
@@ -81,7 +118,22 @@ export function reviewRows(records: Projection[]) {
             ? "Air time needs confirmation"
             : undefined,
         ].filter(Boolean);
+        const hits = [
+          ...(slots.get("v" + s.id + "/" + e.season + "/" + e.number) ?? []),
+          ...(r.trackedTmdbId
+            ? slots.get("t" + r.trackedTmdbId + "/" + e.season + "/" + e.number) ?? []
+            : []),
+        ];
+        const hit = hits.length === 1 && e.number && e.season && !hits[0].tvmazeEpisodeId
+          ? hits[0]
+          : undefined;
+        const catalogId = hit?.catalogId ?? hit?.tmdbEpisodeId;
+        if (hit) issues.push("An existing catalog episode occupies this number");
         add({
+          revision: episodeRevision(s.id, e),
+          match: hit && catalogId
+            ? { id: catalogId, title: hit.episodeTitle || hit.showName || "Catalog episode" }
+            : undefined,
           provider: "TVmaze",
           kind: "episode",
           id: e.id,
@@ -122,8 +174,14 @@ export function reviewRows(records: Projection[]) {
         ? "series"
         : "episode");
     for (const id of r.ids ?? []) {
+      const candidate = index.get(key(provider, kind, id));
+      const decision = excluded.get(r.reviewKey + "/" + id);
+      if (
+        candidate?.revision && decision?.revision === candidate.revision &&
+        ["link", "exclude"].includes(decision.action)
+      ) continue;
       candidates.push(
-        index.get(key(provider, kind, id)) ??
+        candidate ??
           { id, kind, provider, note: "Provider details unavailable" },
       );
     }
@@ -158,5 +216,7 @@ export function reviewRows(records: Projection[]) {
         ? "TVmaze is unavailable. The last successful episode list is still in use."
         : r.reason,
     };
-  });
+  }).filter((r) =>
+    r.candidates.length || !records.some((s) => s.reviewKey === r.id && s.ids?.length)
+  );
 }

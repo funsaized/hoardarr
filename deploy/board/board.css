@@ -890,3 +890,65 @@ footer {
     color: #fff;
   }
 }
+
+.feed .panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.feed-light {
+  color: var(--cyan,#72f6e1);
+  font: 600 .75rem monospace;
+}
+.feed-light::before {
+  content: "";
+  display: inline-block;
+  width: .42rem;
+  height: .42rem;
+  border-radius: 50%;
+  margin-inline-end: .4rem;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+.feed-list {
+  max-height: 23rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: auto;
+  scrollbar-color: #765071 transparent;
+}
+.event {
+  display: grid;
+  grid-template-columns: 6.2em minmax(0,1fr);
+  width: 100%;
+  text-align: left;
+  padding: .55rem .25rem;
+  gap: .55rem;
+  border: 0;
+  border-bottom: 1px solid #543b59;
+  background: transparent;
+  color: inherit;
+}
+button.event:hover,
+button.event:focus-visible {
+  background: #312138;
+}
+.event time,
+.event small {
+  font: normal .76rem/1.4 monospace;
+  color: #c8b7ce;
+}
+.event-body {
+  min-width: 0;
+  display: grid;
+  gap: .1rem;
+  overflow-wrap: anywhere;
+}
+.event-body b {
+  font-size: .92rem;
+  line-height: 1.35;
+}
+.candidate .small {
+  margin: .35rem .35rem 0 0;
+}

@@ -125,3 +125,113 @@ Deno.test("series and episodes with the same provider ID retain distinct review 
     !other.note?.includes("Air time") || unknown.name || reviews[1].candidates[0].name !== "Orbit"
   ) throw Error("Incorrect provider projection");
 });
+
+import { changes, logText, stepEvents } from "../deploy/board/feed.ts";
+Deno.test("only an enrolled HTTPS host and its matching browser origin can write", () => {
+  const origin = "https://board.example",
+    h = (host: string, o: string) => new Headers({ host, origin: o });
+  if (
+    !localCommandRequest(h("board.example", origin), origin) ||
+    localCommandRequest(h("board.example", "https://other.example"), origin) ||
+    localCommandRequest(h("other.example", origin), origin) ||
+    localCommandRequest(h("board.example", origin))
+  ) throw Error("Unexpected admission");
+});
+Deno.test("item timeline preserves real state changes and gives delivery steps their recorded item", () => {
+  const run = "b26f236a-ce70-4412-aec5-dc79b67f04ee", at = "2026-11-25T10:00:00Z";
+  const rows = ["wanted", "downloading", "downloading", "transferred"].map((state, i) => ({
+    name: "catalog-movie-3",
+    state,
+    at,
+    run,
+    version: i,
+  }));
+  if (changes(rows, "m-3").map((r) => r.label).join() !== "transferred,downloading,wanted") {
+    throw Error("Unexpected transitions");
+  }
+  if (
+    stepEvents({
+      id: run,
+      workflowName: "hoardarr-delivery",
+      inputs: { item: { key: "m-3" } },
+      jobs: [{ name: "main", steps: [{ name: "publish", status: "succeeded", completedAt: at }] }],
+    })[0].item !== "m-3"
+  ) throw Error("Lost execution scope");
+  if (
+    logText("ready") !== "ready" || logText("GET https://private.example/resource") !== null ||
+    logText("Bearer private-token") !== null
+  ) throw Error("Unexpected log projection");
+});
+Deno.test("episode resolution requires matching provider evidence and an unambiguous catalog slot", () => {
+  const rec = {
+    trackedList: "tracked-key",
+    sourceShow: { id: 10, name: "Orbit" },
+    trackedTmdbId: 20,
+    episodes: [{
+      id: 31,
+      name: "Lift",
+      season: 1,
+      number: 2,
+      type: "regular",
+      airdate: "2026-03-04",
+      airstamp: "2026-03-04T00:00:00Z",
+    }],
+  };
+  const cat = {
+    showTmdbId: 20,
+    showName: "Orbit",
+    seasonNumber: 1,
+    episodeNumber: 2,
+    tmdbEpisodeId: 27,
+    episodeTitle: "Takeoff",
+  };
+  const issue = {
+    reviewKey: "review-tracked-key",
+    title: "Orbit",
+    provider: "tvmaze",
+    entityType: "episode" as const,
+    ids: [31],
+  };
+  const candidate = reviewRows([rec, cat, issue])[0].candidates[0];
+  if (candidate.match?.id !== 27 || !candidate.revision) throw Error("Missing suggested slot");
+  const decision = {
+    operatorDecision: {
+      action: "exclude",
+      target: issue.reviewKey,
+      candidate: 31,
+      revision: candidate.revision,
+    },
+  };
+  if (
+    reviewRows([rec, cat, issue, decision]).length ||
+    !reviewRows([
+      { ...rec, episodes: [{ ...rec.episodes[0], name: "Changed" }] },
+      cat,
+      issue,
+      decision,
+    ]).length
+  ) throw Error("Stale disposition");
+});
+
+import { journalEntry } from "../deploy/board/journal.ts";
+Deno.test("stream only Swamp service messages and associate a run only when the message names it", () => {
+  const id = "b26f236a-ce70-4412-aec5-dc79b67f04ee";
+  const raw = {
+    _SYSTEMD_UNIT: "hoardarr-swamp.service",
+    __CURSOR: "one",
+    __REALTIME_TIMESTAMP: "1800000000000000",
+    MESSAGE: ' system │ Scheduled run completed for workflow "media" (run: "' + id + '")',
+    PRIORITY: "6",
+  };
+  const event = journalEntry(JSON.stringify(raw));
+  if (event?.run !== id || !event.label.includes("media") || event.source !== "Log") {
+    throw Error("Lost actual Swamp message");
+  }
+  for (
+    const change of [
+      { _SYSTEMD_UNIT: "another.service" },
+      { MESSAGE: "Authorization: Bearer abc" },
+      { MESSAGE: "https://private.invalid/file" },
+    ]
+  ) if (journalEntry(JSON.stringify({ ...raw, ...change }))) throw Error("Unexpected disclosure");
+});

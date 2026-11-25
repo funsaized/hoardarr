@@ -266,7 +266,11 @@ function refreshRows() {
   }
   incoming = live.filter((r) => !r.archived);
   review = rows.filter((r) =>
-    !r.archived && (r.review || ["paused", "missing", "failed", "blocked"].includes(r.state))
+    !r.archived &&
+    (r.review || ["paused", "missing", "failed", "blocked"].includes(r.state) ||
+      r.state === "wanted" &&
+        ["provider-error", "authentication-error"].includes(r.search?.outcome) ||
+      r.live && ["stall", "metadata-timeout"].includes(r.health?.decision))
   );
   delivered = cats.filter((r) => deliveredState(r) && r.delivered).sort((a, b) =>
     Date.parse(b.delivered) - Date.parse(a.delivered)
@@ -285,6 +289,11 @@ function refreshRows() {
   }
 }
 function issue(r) {
+  if (
+    !r.review && r.search &&
+    ["authentication-error", "provider-error"].includes(r.search.outcome) &&
+    ["wanted", "failed"].includes(r.state)
+  ) return "Search problems";
   if (r.review) return r.reviewKind === "provider" ? "Provider problems" : "Identity decisions";
   return "Transfer problems";
 }
@@ -528,13 +537,23 @@ function attention() {
   draw("tools", titlebar("Attention", review.length + " items"));
   draw(
     "results",
-    ["Identity decisions", "Provider problems", "Transfer problems"].map((group) => {
-      const list = review.filter((r) => issue(r) === group);
-      return list.length && field(
-        group,
-        list.map((r) => row(r, { sub: r.reason || condition(r), symbol: "!", kind: "alert" })),
-      );
-    }),
+    ["Identity decisions", "Transfer problems", "Provider problems", "Search problems"].map(
+      (group) => {
+        const list = review.filter((r) => issue(r) === group);
+        return list.length && field(
+          group,
+          list.map((r) =>
+            row(r, {
+              sub: group === "Search problems"
+                ? label(r.search?.outcome)
+                : r.reason || condition(r),
+              symbol: "!",
+              kind: "alert",
+            })
+          ),
+        );
+      },
+    ),
     !review.length &&
       field(
         "Review queue",
@@ -545,7 +564,7 @@ function attention() {
   );
 }
 function canOperate() {
-  return location.origin === "http://127.0.0.1:9184" && snapshot?.capabilities?.operate === true &&
+  return snapshot?.capabilities?.operate === true &&
     !offline;
 }
 function activity() {
@@ -569,13 +588,14 @@ function activity() {
       "notice",
       offline
         ? "Reconnect to start an operation."
-        : "Viewing console. Start operations on the operator host at http://127.0.0.1:9184/.",
+        : "Commands are unavailable on this address. Open the configured private dashboard.",
     ),
     el("output", { role: "status" }, message),
   );
   draw("tools", titlebar("Activity", op.status || "Idle"));
   draw(
     "results",
+    globalFeed(true),
     field("Operations", controls),
     plan &&
       field(
@@ -596,7 +616,8 @@ function activity() {
         ? snapshot.history.map((h) =>
           row(h, {
             action: "run-detail",
-            title: modes[h.mode]?.[0] || "Series review",
+            title: modes[h.mode]?.[0] ||
+              (h.mode === "resolve" ? "Item resolution" : "Series review"),
             sub: when(h.started),
             metric: h.status,
             symbol: "◷",
@@ -618,6 +639,248 @@ function activity() {
     ),
   );
 }
+const feeds = new Map(), pendingFeeds = new Map();
+let feedFilter = "all", feedPaused = false;
+function loadFeed(key, query) {
+  if (pendingFeeds.has(key) || document.hidden || feedPaused) return;
+  const last = feeds.get(key);
+  if (last && Date.now() - last.checked < 6500) return;
+  const request = fetch("/api/feed" + query, { signal: AbortSignal.timeout(45000) }).then(
+    async (res) => {
+      if (!res.ok) throw Error();
+      const data = await res.json();
+      feeds.set(key, { ...data, checked: Date.now() });
+    },
+  ).catch(() =>
+    feeds.set(key, {
+      entries: last?.entries ?? [],
+      observed: last?.observed,
+      stale: true,
+      checked: Date.now(),
+    })
+  ).finally(() => {
+    pendingFeeds.delete(key);
+    if (feeds.size > 64) {
+      const old = [...feeds.keys()].find((k) => k !== "global" && k !== key);
+      if (old) feeds.delete(old);
+    }
+    if (snapshot) render();
+  });
+  pendingFeeds.set(key, request);
+}
+function feedRow(e, openRun = true) {
+  const title = e.item && rows.find((r) => r.key === e.item);
+  const name = title ? pretty(title) : "";
+  const attrs = { class: "event", "data-key": "event-" + e.id };
+  const contents = [
+    el(
+      "time",
+      { datetime: e.at, title: when(e.at) },
+      e.at
+        ? new Date(e.at).toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
+        : "—",
+    ),
+    tag(
+      "span",
+      "event-body",
+      tag("small", "", e.source + (name ? " · " + name : "")),
+      tag("b", "", e.label),
+      e.detail && tag("small", "", e.detail),
+    ),
+  ];
+  return e.run && openRun
+    ? btn("feed-run", contents, { ...attrs, "data-id": e.run, "data-kind": e.kind ?? "workflow" })
+    : el("div", attrs, contents);
+}
+const serviceMessages = new Map();
+let source, streaming = false, repaint;
+function watchSwamp() {
+  if (document.hidden || feedPaused) {
+    source?.close();
+    source = null;
+    streaming = false;
+    return;
+  }
+  if (source) return;
+  source = new EventSource("/api/feed/stream");
+  source.addEventListener("entries", (e) => {
+    for (const entry of JSON.parse(e.data)) serviceMessages.set(entry.id, entry);
+    while (serviceMessages.size > 240) serviceMessages.delete(serviceMessages.keys().next().value);
+    clearTimeout(repaint);
+    repaint = setTimeout(() => {
+      if (snapshot && !feedPaused) render();
+    }, 80);
+  });
+  source.addEventListener("status", (e) => {
+    const next = JSON.parse(e.data).connected;
+    if (streaming !== next) {
+      streaming = next;
+      if (snapshot) render();
+    }
+  });
+  source.onerror = () => {
+    if (streaming) {
+      streaming = false;
+      if (snapshot) render();
+    }
+  };
+}
+document.addEventListener("visibilitychange", watchSwamp);
+window.addEventListener("pagehide", () => {
+  source?.close();
+  source = null;
+});
+window.addEventListener("pageshow", watchSwamp);
+function globalFeed(full = false) {
+  loadFeed("global", "");
+  const data = feeds.get("global"),
+    entries = [...serviceMessages.values(), ...(data?.entries ?? [])].sort((a, b) =>
+      b.at.localeCompare(a.at)
+    );
+  const filtered = full && feedFilter !== "all"
+    ? entries.filter((e) => e.source === feedFilter)
+    : entries;
+  return el(
+    "section",
+    { class: "panel feed", "data-key": full ? "full-feed" : "rail-feed" },
+    tag(
+      "div",
+      "panel-head",
+      tag("h2", "", "Swamp feed"),
+      el(
+        "small",
+        { class: "feed-light" },
+        feedPaused
+          ? "Paused"
+          : data?.stale
+          ? "Reconnecting"
+          : streaming
+          ? "Live"
+          : data?.observed
+          ? "History · connecting to logs"
+          : "Connecting",
+      ),
+    ),
+    full && tag(
+      "div",
+      "chips",
+      ["all", "Workflow", "Behavior", "Step", "Log"].map((id) =>
+        btn("feed-filter", id === "all" ? "All" : id, {
+          "data-id": id,
+          "aria-pressed": String(id === feedFilter),
+        })
+      ),
+    ),
+    tag(
+      "div",
+      "feed-list",
+      filtered.length ? filtered.slice(0, full ? 80 : 5).map((e) => feedRow(e)) : empty(
+        data?.stale
+          ? "Swamp history unavailable. Reconnecting…"
+          : data
+          ? "No recorded events in this filter."
+          : "Reading Swamp history…",
+      ),
+    ),
+    tag(
+      "div",
+      "shelf",
+      btn("feed-pause", feedPaused ? "Resume feed" : "Pause feed", { class: "small" }),
+      !full && btn("all-events", "All activity", { class: "small" }),
+    ),
+  );
+}
+function itemTimeline(r) {
+  const data = r.key ? feeds.get(r.key) : null;
+  if (r.key) loadFeed(r.key, "?item=" + encodeURIComponent(r.key));
+  const entries = [...(data?.entries ?? [])];
+  function add(at, source, text) {
+    if (at && Number.isFinite(new Date(at).getTime())) {
+      entries.push({ id: source + at + text, at: new Date(at).toISOString(), source, label: text });
+    }
+  }
+  add(r.search?.searchedAt, "Search", label(r.search?.outcome));
+  for (const e of r.health?.events ?? []) add(e.at, "Downloader", label(e.decision));
+  add(r.delivered, "Delivery", "Delivery verified");
+  add(r.cleaned, "Staging", "Staging cleaned");
+  for (const d of snapshot.catalog.decisions ?? []) {
+    if (
+      d.target === r.key || d.target === r.id || d.action === "link" && "e-" + d.match === r.key
+    ) add(d.at, "Resolution", resolutionLabels[d.action]);
+  }
+  for (const run of snapshot.history ?? []) {
+    if (run.subject && (run.subject === r.key || run.subject === r.id)) {
+      add(run.finished ?? run.started, "Operation", run.status);
+    }
+  }
+  entries.sort((a, b) => b.at.localeCompare(a.at));
+  return el(
+    "div",
+    { class: "detail-part", "data-key": "journey-" + r.id },
+    tag("h3", "", "Item timeline"),
+    data?.stale && empty("Catalog history unavailable. Retrying…"),
+    entries.length
+      ? tag("div", "feed-list", entries.map((e) => feedRow(e)))
+      : empty(r.key && !data ? "Reading item history…" : "No recorded changes yet."),
+  );
+}
+function executionPanel(s) {
+  const [, kind, id] = s.id.split(":");
+  loadFeed(s.id, "?run=" + encodeURIComponent(id) + "&kind=" + encodeURIComponent(kind));
+  const data = feeds.get(s.id), track = feeds.get("global")?.entries.find((e) => e.id === id);
+  const linked = data?.entries.find((e) => e.item)?.item,
+    item = linked && rows.find((r) => r.key === linked);
+  const entries = [...serviceMessages.values()].filter((e) => e.run === id).concat(
+    data?.entries ?? [],
+  ).sort((a, b) => b.at.localeCompare(a.at));
+  return [
+    tag("h2", "title", track?.label ?? "Swamp execution"),
+    tag("p", "", track?.detail ?? kind),
+    item && btn("in-library", "Open " + pretty(item), { "data-id": item.id, class: "small" }),
+    tag("h3", "", "Steps and logs"),
+    data?.stale && empty("Swamp history unavailable. Retrying…"),
+    entries.length
+      ? tag("div", "feed-list", entries.map((e) => feedRow(e, false)))
+      : empty(data ? "No stored steps or log lines for this execution." : "Reading execution…"),
+    el(
+      "details",
+      { "data-key": "run-ref" },
+      el("summary", {}, "Technical details"),
+      tag("p", "", id),
+    ),
+  ];
+}
+const resolutionLabels = {
+  exclude: "Exclude provider episode",
+  link: "Link to catalog episode",
+  retry: "Retry search",
+  resume: "Resume download",
+  reseed: "Resume seeding",
+  recheck: "Recheck transfer health",
+};
+function resolutionButton(action, text, c) {
+  return btn("resolve-choice", text, {
+    "data-id": action,
+    "data-candidate": c?.id,
+    class: "small",
+  });
+}
+function resolutionPrompt(r, c) {
+  if (!decision || decision.item !== r.id || decision.input.candidate !== c?.id) return null;
+  return tag(
+    "div",
+    "answer",
+    el("b", {}, decision.prompt),
+    btn("do-resolve", "Confirm", { class: "primary", disabled: busy }),
+    btn("cancel-resolution", "Cancel", { class: "small" }),
+  );
+}
+let decision;
+
 function standby() {
   const speed = incoming.reduce((s, r) => s + (r.speed || 0), 0),
     live = Boolean(speed && !offline && !snapshot.live.stale);
@@ -641,6 +904,7 @@ function standby() {
             incoming.filter((r) => r.state === "seeding").length + " seeding",
       ),
     ),
+    state().view !== "activity" && globalFeed(),
     waiting.length > 0 &&
     field(
       "Up next",
@@ -689,6 +953,12 @@ function candidate(c, r) {
     el("small", {}, [c.provider, c.kind, c.number, c.date].filter(Boolean).join(" · ")),
     c.note && tag("p", "", c.note),
     c.url && el("a", { href: c.url }, "Provider record ↗"),
+    c.revision && c.kind === "episode" && /^review-tracked-/.test(r.id) && canOperate() &&
+      [
+        c.match && resolutionButton("link", "Link to " + c.match.title, c),
+        resolutionButton("exclude", "Exclude this episode", c),
+        resolutionPrompt(r, c),
+      ],
     r.canConfirm && canOperate() &&
       btn("choose", "Review this match", { class: "small", "data-id": c.id }),
   );
@@ -699,6 +969,8 @@ function itemContents(r) {
   const reason = r.reason?.split(", ").map((v) => words[v] || v).join(" · ");
   const details = [
     ["Catalog reference", r.id],
+    ["Swamp item key", r.key],
+    ["Search revision", search.searchedAt],
     ["Release", r.release],
     ["Transfer hash", r.hash],
     ["Previous hash", sw.oldHash],
@@ -714,6 +986,20 @@ function itemContents(r) {
     tag("h2", "title", pretty(r)),
     tag("p", "", context(r) || (!r.review && r.year ? String(r.year) : "")),
     tag("div", "answer", el("b", {}, condition(r)), tag("p", "", nextStep(r))),
+    r.key && r.live && ["stall", "metadata-timeout"].includes(h.decision) && canOperate() &&
+    resolutionButton("recheck", "Recheck transfer health"),
+    r.state === "paused" && r.key && canOperate() &&
+    resolutionButton(r.seed ? "reseed" : "resume", r.seed ? "Resume seeding" : "Resume download"),
+    r.key && ["wanted", "failed"].includes(r.state) &&
+    ["authentication-error", "provider-error", "no-match", "no-releases"].includes(
+      search.outcome,
+    ) && canOperate() &&
+    [
+      search.outcome === "authentication-error" &&
+      tag("p", "", "Update the provider credential before retrying."),
+      resolutionButton("retry", "Retry search"),
+    ],
+    resolutionPrompt(r),
     r.candidates?.length > 0 &&
     tag(
       "div",
@@ -721,6 +1007,7 @@ function itemContents(r) {
       el("h3", {}, "Provider records"),
       r.candidates.map((c) => candidate(c, r)),
     ),
+    itemTimeline(r),
     facts([
       ["Progress", r.progress != null ? r.progress + "%" : null],
       [
@@ -819,9 +1106,20 @@ function inspector(s) {
           ),
           btn("close", "← Back", { class: "small" }),
         ),
-        g ? seriesContents(g, s) : r ? itemContents(r) : run
+        s.id.startsWith("swamp:")
+          ? executionPanel(s)
+          : g
+          ? seriesContents(g, s)
+          : r
+          ? itemContents(r)
+          : run
           ? [
-            tag("h2", "title", modes[run.mode]?.[0] || "Series review"),
+            tag(
+              "h2",
+              "title",
+              modes[run.mode]?.[0] ||
+                (run.mode === "resolve" ? "Item resolution" : "Series review"),
+            ),
             facts([
               ["Status", run.status],
               ["Started", when(run.started)],
@@ -836,6 +1134,7 @@ function inspector(s) {
               : "Loading this item…",
           ),
       ),
+      !mobile.matches && s.view !== "activity" && globalFeed(),
     );}
   if (s.id !== lastPanel) {
     panel.firstElementChild?.classList.add("inspect-enter");
@@ -906,6 +1205,7 @@ async function update() {
       if (!("rows" in board.catalog)) {
         board.catalog.rows = snapshot.catalog.rows;
         board.catalog.shows = snapshot.catalog.shows;
+        board.catalog.decisions = snapshot.catalog.decisions;
       }
       snapshot = board;
       offline = false;
@@ -948,7 +1248,7 @@ async function operate(which, payload) {
       : res.status === 409
       ? "Another operation or review update took precedence. Refresh and check its status."
       : res.status === 403
-      ? "Use the local operator console."
+      ? "Open the configured private dashboard."
       : "Operation unavailable.";
     if (res.ok) {
       snapshot.operation = await res.json();
@@ -973,7 +1273,59 @@ document.addEventListener("click", async (event) => {
   if (!b) return;
   const a = b.dataset.action, id = b.dataset.id, s = state();
   if (a !== "choose" && a !== "confirm") proposed = null;
+  if (!["do-resolve", "resolve-choice"].includes(a)) decision = null;
   switch (a) {
+    case "resolve-choice": {
+      const r = byId.get(s.id),
+        c = r?.candidates?.find((c) => String(c.id) === b.dataset.candidate);
+      if (!r) return;
+      const input = {
+        action: id,
+        target: c ? r.id : r.key,
+        revision: c?.revision ?? (id === "retry" ? r.search?.searchedAt : r.hash ?? r.id),
+        ...(c ? { candidate: c.id } : {}),
+        ...(id === "link" ? { match: c.match.id } : {}),
+      };
+      decision = {
+        item: r.id,
+        input,
+        prompt: id === "link"
+          ? "Identify " + c.name + " as " + c.match.title + " at " + c.number + "?"
+          : id === "exclude"
+          ? "Exclude " + c.name + " from this review while its provider details stay the same?"
+          : id === "retry"
+          ? "Make " + pretty(r) + " eligible for search on the next acquisition run?"
+          : resolutionLabels[id] + " for " + pretty(r) + "?",
+      };
+      render();
+      break;
+    }
+    case "cancel-resolution":
+      decision = null;
+      render();
+      break;
+    case "do-resolve":
+      if (decision) {
+        const input = decision.input;
+        decision = null;
+        await operate("resolve", input);
+      }
+      break;
+    case "all-events":
+      navigate({ view: "activity" }, { reset: true });
+      break;
+    case "feed-filter":
+      feedFilter = id;
+      render();
+      break;
+    case "feed-pause":
+      feedPaused = !feedPaused;
+      watchSwamp();
+      render();
+      break;
+    case "feed-run":
+      navigate({ item: "swamp:" + b.dataset.kind + ":" + id, parent: s.id });
+      break;
     case "view":
       navigate({ view: id }, { reset: true });
       break;
@@ -1006,7 +1358,7 @@ document.addEventListener("click", async (event) => {
       closePanel();
       break;
     case "in-library":
-      navigate({ view: "library", item: s.id }, { reset: true });
+      navigate({ view: "library", item: id || s.id }, { reset: true });
       break;
     case "execute":
       await operate(mode);
@@ -1082,3 +1434,7 @@ historyRestore = Boolean(history.state);
 render();
 update();
 setInterval(freshness, 5000);
+
+setInterval(() => {
+  if (!document.hidden && snapshot && !feedPaused) render();
+}, 7000);

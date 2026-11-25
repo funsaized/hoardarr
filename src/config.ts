@@ -17,6 +17,10 @@ export const ConfigSchema = z.object({
   profile: z.enum(["compose-vpn-local", "demo", "devvm-nordvpn-local"]),
   guest: z.object({
     installationId: z.uuid(),
+    boardOrigin: z.string().url().refine((value) => {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.origin === value;
+    }, "Use an exact HTTPS origin without a path").optional(),
     projectRoot: absolutePath,
     repoRoot: absolutePath,
     purpose: z.enum(["qualification", "production"]),

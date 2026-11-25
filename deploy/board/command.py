@@ -23,11 +23,18 @@ def preview(run_id):
 
 
 modes = {b"preview\n": ["plan"], b"discover\n": ["plan", "--refresh"], b"run\n": ["run"]}
-mode = sys.stdin.buffer.readline(512)
+mode = sys.stdin.buffer.readline(1024)
 args = modes.get(mode)
 if mode.startswith(b"{") and mode.endswith(b"\n"):
     data = json.loads(mode)
-    if (re.fullmatch(r"tracked-[a-f0-9]{32}-status", data["review"])
+    if data.get("action") in {"exclude","link","retry","resume","reseed","recheck"} and isinstance(data.get("target"),str) and re.fullmatch(r"(?:review-tracked-[0-9a-f]{32}-episodes|[me]-[1-9][0-9]{0,15})",data["target"]) and isinstance(data.get("revision"),str) and re.fullmatch(r"[0-9A-Za-z:.-]{1,80}", data["revision"]):
+        args = ["resolve",data["action"],"--target",data["target"],"--revision",data["revision"]]
+        for key in ("candidate","match"):
+            if key in data:
+                if type(data[key]) is not int or not 0 < data[key] <= 2**53-1:
+                    raise ValueError("Invalid episode selection")
+                args.extend(["--"+key,str(data[key])])
+    elif (re.fullmatch(r"tracked-[a-f0-9]{32}-status", data.get("review",""))
             and type(data["id"]) is int and data["id"] > 0
             and re.fullmatch(r"[0-9T:.Z-]{24}", data["revision"])):
         args = ["confirm-series", "--review", data["review"], "--id", str(data["id"]),
@@ -36,10 +43,17 @@ if args:
     result = subprocess.run(
         ["/usr/local/bin/deno", "run", "--cached-only", "--allow-all",
          "/opt/hoardarr/cli/main.ts", *args],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
-    sys.stderr.write(result.stdout)
+    sys.stderr.write(result.stdout + result.stderr)
     reply = {"status": "failed"}
+    if result.returncode:
+        for fragment, reason in [("Installation is owned","busy"), ("inhibited","inhibited"),
+                ("changed","stale"), ("already linked","conflict"), ("alias","conflict"),
+                ("did not resume","paused"), ("telemetry unavailable","offline")]:
+            if fragment.lower() in result.stderr.lower():
+                reply["reason"] = reason
+                break
     if result.returncode == 0:
         result_data = json.loads(result.stdout)
         reply = {"status": "succeeded", "runId": result_data.get("runId")}

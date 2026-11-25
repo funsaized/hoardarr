@@ -1,7 +1,9 @@
+import { journalStream } from "./journal.ts";
+import { itemFeed, overview, runFeed } from "./feed.ts";
 import { reviewRows } from "./reviews.ts";
 // The browser only sees these projections. Provider responses can include private locators.
 export const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"] && (!("resolved" in attributes) || !attributes.resolved)) || (modelName == "pipeline" && specName == "feedReview" && attributes.state == "pending") || (modelName == "tracked-tv" && (specName in ["episodeList","seriesDecision"] || (specName == "refreshStatus" && attributes.state != "ready")))';
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["operatorDecision","transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"] && (!("resolved" in attributes) || !attributes.resolved)) || (modelName == "pipeline" && specName == "feedReview" && attributes.state == "pending") || (modelName == "tracked-tv" && (specName in ["episodeList","seriesDecision"] || (specName == "refreshStatus" && attributes.state != "ready")))';
 const catalogFields = [
   "catalogId",
   "localId",
@@ -13,6 +15,7 @@ const catalogFields = [
   "seriesCatalogId",
   "seriesLocalId",
   "tvmazeSeriesId",
+  "tvmazeEpisodeId",
   "numbering",
   "showName",
   "seasonNumber",
@@ -26,8 +29,9 @@ const catalogFields = [
   "localCleanedAt",
 ];
 export const catalogProjection =
+  'specName == "operatorDecision" ? {"operatorDecision": attributes} : ' +
   'specName == "seriesDecision" ? {"decisionKey": name, "revision": attributes.revision} : ' +
-  'specName == "episodeList" ? {"trackedList": name, "sourceShow": {"id": attributes.show.id, "name": attributes.show.name, "premiered": attributes.show.premiered}, "episodes": attributes.episodes.map(e, {"id": e.id, "name": e.name, "season": e.season, "number": e.number, "type": e.type, "airstamp": "airstamp" in e ? e.airstamp : null, "airdate": "airdate" in e ? e.airdate : null})} : ' +
+  'specName == "episodeList" ? {"trackedList": name, "trackedTmdbId": "tmdbId" in attributes.tracked ? attributes.tracked.tmdbId : null, "sourceShow": {"id": attributes.show.id, "name": attributes.show.name, "premiered": attributes.show.premiered}, "episodes": attributes.episodes.map(e, {"id": e.id, "name": e.name, "season": e.season, "number": e.number, "type": e.type, "airstamp": "airstamp" in e ? e.airstamp : null, "airdate": "airdate" in e ? e.airdate : null})} : ' +
   'specName == "releaseSwitch" ? {"switchKey": attributes.key, "phase": attributes.phase, "oldHash": attributes.oldHash, "newHash": attributes.candidate.infoHash, "rank": attributes.candidate.rank, "updatedAt": attributes.updatedAt} : ' +
   'specName == "feedReview" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason} : ' +
   'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "retryAt": attributes.retryAt, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
@@ -79,6 +83,7 @@ export function transfers(downloads: Transfer[], seeds: Transfer[], saved: Saved
       peers?: number;
       rank?: number;
       uploaded?: number;
+      seed?: boolean;
       bytes?: number;
       total?: number;
       eta?: number;
@@ -99,6 +104,7 @@ export function transfers(downloads: Transfer[], seeds: Transfer[], saved: Saved
       peers: row.peers,
       rank: ranks.get(row.id),
       uploaded: row.uploaded,
+      seed: seeds.includes(row),
       bytes: matches ? snapshot.downloadedBytes : undefined,
       total: snapshot?.totalBytes,
       eta: row.speed && snapshot?.totalBytes && matches
@@ -164,6 +170,7 @@ function searchDetails(attempt: Record<string, unknown> | undefined, rankedCount
   if (!attempt) return undefined;
   return {
     outcome: attempt.outcome,
+    searchedAt: attempt.searchedAt,
     partial: attempt.partial === true,
     lastSuccessfulAt: attempt.lastSuccessfulAt,
     nextSearchAt: attempt.nextSearchAt,
@@ -199,15 +206,20 @@ async function catalog() {
   const attempts =
     results.find((row: { searchAttempts?: unknown }) => row.searchAttempts)?.searchAttempts ?? {};
   return {
+    decisions: results.filter((r: { operatorDecision?: unknown }) => r.operatorDecision).map((
+      r: { operatorDecision: unknown },
+    ) => r.operatorDecision),
     shows,
     rows: [
       ...reviewRows(results),
       ...results.filter((r: Record<string, unknown>) =>
-        !r.decisionKey && !r.trackedList && !r.switchKey && !r.reviewKey && !r.searchAttempts &&
+        !r.operatorDecision && !r.decisionKey && !r.trackedList && !r.switchKey && !r.reviewKey &&
+        !r.searchAttempts &&
         !r.shows && !r.observationKey && !r.catalogKey
       ).map((
         r: Record<string, unknown>,
       ) => ({
+        key: (r.showName ? "e-" : "m-") + (r.catalogId ?? r.tmdbEpisodeId ?? r.tmdbId),
         id: r.localId ??
           identities.get(
             r.showName ? `e-${r.catalogId ?? r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`,
@@ -260,7 +272,7 @@ export function cache<T>(load: () => Promise<T>, interval: (value: T) => number)
     stale = true,
     next = 0,
     pending: Promise<void> | undefined;
-  return async (waitForReading = true) => {
+  const read = async (waitForReading = true) => {
     if (Date.now() >= next && !pending) {
       pending = Promise.resolve().then(async () => {
         try {
@@ -281,9 +293,18 @@ export function cache<T>(load: () => Promise<T>, interval: (value: T) => number)
     if (waitForReading) await pending;
     return { rows: data ?? [], revision, observed, stale, refreshing: !!pending };
   };
+  return Object.assign(read, {
+    invalidate() {
+      next = 0;
+    },
+  });
 }
 export function catalogResponse(
-  reading: Awaited<ReturnType<ReturnType<typeof cache<Awaited<ReturnType<typeof catalog>>>>>>,
+  reading: Awaited<
+    ReturnType<
+      ReturnType<typeof cache<{ rows: unknown[]; shows: unknown[]; decisions?: unknown[] }>>
+    >
+  >,
   knownRevision: string | null,
 ) {
   const { rows: saved, ...status } = reading;
@@ -292,13 +313,20 @@ export function catalogResponse(
     ...status,
     rows: "rows" in saved ? saved.rows : [],
     shows: "shows" in saved ? saved.shows : [],
+    decisions: "decisions" in saved ? saved.decisions : [],
   };
 }
-export function localCommandRequest(headers: Headers) {
-  return headers.get("host") === "127.0.0.1:9184" &&
-    headers.get("origin") === "http://127.0.0.1:9184";
+function commandOrigin(headers: Headers, origin?: string) {
+  if (headers.get("host") === "127.0.0.1:9184") return "http://127.0.0.1:9184";
+  if (origin && new URL(origin).host === headers.get("host")) return origin;
+  return null;
+}
+export function localCommandRequest(headers: Headers, configured?: string) {
+  const origin = commandOrigin(headers, configured);
+  return !!origin && headers.get("origin") === origin;
 }
 if (import.meta.main) {
+  const stream = journalStream();
   const readLive = cache(
     live,
     (rows) => rows.some((r) => ["queued", "downloading"].includes(r.state)) ? 15000 : 60000,
@@ -326,6 +354,7 @@ if (import.meta.main) {
     started: number;
     finished?: number;
     runId?: string;
+    subject?: string;
   };
   type Plan = { observed: string; acquisitions: string[]; deliveries: string[] };
   const journal = Deno.args[0];
@@ -369,7 +398,21 @@ if (import.meta.main) {
         out.releaseLock();
         const result = await new Response(socket.readable).text();
         const reply = JSON.parse(result);
-        if (reply.status !== "succeeded") throw Error();
+        if (reply.status !== "succeeded") {
+          const reasons: Record<string, string> = {
+            busy: "Another installation operation is running",
+            inhibited: "Admissions are paused",
+            stale: "Evidence changed. Reload this item before deciding",
+            conflict: "Provider identity conflicts with the catalog",
+            paused: "The downloader still reports this item paused",
+            offline: "Downloader telemetry is unavailable",
+          };
+          if (Object.hasOwn(reasons, reply.reason)) {
+            run.status = "Failed · " + reasons[reply.reason];
+            return;
+          }
+          throw Error();
+        }
         if (run.mode === "preview") preview = reply.preview;
         run.runId = reply.runId;
         run.status = "Succeeded";
@@ -379,11 +422,12 @@ if (import.meta.main) {
         } catch { /* already closed */ }
       }
     } catch {
-      run.status = run.mode === "confirm"
+      run.status = (run.mode === "confirm" || run.mode === "resolve")
         ? "Failed · check current candidates or installation status"
         : "Failed · inspect operator journal";
     } finally {
       run.finished = Date.now();
+      if (run.status === "Succeeded") readCatalog.invalidate();
       if (journal) await save();
     }
   }
@@ -398,14 +442,41 @@ if (import.meta.main) {
     const route = url.pathname;
     if (route.startsWith("/api/operate/") && req.method === "POST") {
       const mode = route.slice("/api/operate/".length);
-      if (!["preview", "discover", "run", "confirm"].includes(mode)) {
+      if (!["preview", "discover", "run", "confirm", "resolve"].includes(mode)) {
         return new Response(null, { status: 404, headers });
       }
-      if (!localCommandRequest(req.headers)) {
+      if (!localCommandRequest(req.headers, Deno.args[1])) {
         return new Response(null, { status: 403, headers });
       }
       if (operation.status === "Running") return new Response(null, { status: 409, headers });
       let request = mode;
+      let subject: string | undefined;
+      if (mode === "resolve") {
+        let data;
+        try {
+          data = await req.json();
+        } catch {
+          return new Response(null, { status: 400, headers });
+        }
+        if (
+          !data ||
+          !["exclude", "link", "retry", "resume", "reseed", "recheck"].includes(data.action) ||
+          typeof data.target !== "string" ||
+          !/^(?:review-tracked-[a-f0-9]{32}-episodes|[me]-[1-9][0-9]{0,15})$/.test(data.target) ||
+          typeof data.revision !== "string" || !/^[A-Za-z0-9:.-]{1,80}$/.test(data.revision) ||
+          ["match", "candidate"].some((k) =>
+            data[k] != null && (!Number.isSafeInteger(data[k]) || data[k] <= 0)
+          )
+        ) return new Response(null, { status: 400, headers });
+        subject = data.target;
+        request = JSON.stringify({
+          action: data.action,
+          target: data.target,
+          revision: data.revision,
+          candidate: data.candidate,
+          match: data.match,
+        });
+      }
       if (mode === "confirm") {
         let data;
         try {
@@ -422,12 +493,34 @@ if (import.meta.main) {
         request = JSON.stringify({ review: data.review, id: data.id, revision: data.revision });
       }
       if (operation.status === "Running") return new Response(null, { status: 409, headers });
-      operation = { id: crypto.randomUUID(), mode, status: "Running", started: Date.now() };
+      operation = {
+        id: crypto.randomUUID(),
+        mode,
+        status: "Running",
+        started: Date.now(),
+        subject,
+      };
       history = [operation, ...history].slice(0, 50);
       void operate(operation, request).catch(() => console.error("Board history write failed"));
       return Response.json(operation, { status: 202, headers });
     }
     if (req.method !== "GET") return new Response(null, { status: 405, headers });
+    if (route === "/api/feed/stream") return stream(headers);
+    if (route === "/api/feed") {
+      const item = url.searchParams.get("item"), run = url.searchParams.get("run");
+      try {
+        const result = run
+          ? await runFeed(run, url.searchParams.get("kind") ?? "workflow")
+          : item
+          ? await itemFeed(item)
+          : await overview();
+        return result
+          ? Response.json(result, { headers })
+          : new Response(null, { status: 400, headers });
+      } catch {
+        return new Response(null, { status: 503, headers });
+      }
+    }
     if (route === "/api/board") {
       const [live, catalog] = await Promise.all([readLive(), readCatalog(false)]);
       return Response.json({
@@ -435,7 +528,7 @@ if (import.meta.main) {
         catalog: catalogResponse(catalog, url.searchParams.get("catalog")),
         operation,
         history,
-        capabilities: { operate: req.headers.get("host") === "127.0.0.1:9184" },
+        capabilities: { operate: Boolean(commandOrigin(req.headers, Deno.args[1])) },
         preview,
       }, { headers });
     }

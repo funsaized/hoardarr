@@ -708,14 +708,34 @@ type with Wanted, Available locally or Archived. Open a show to browse its seaso
 groups identity decisions, provider problems and transfer problems. Provider records include names,
 numbering and dates when available.
 
-**Activity** shows verified deliveries, recent board operations and the last successful preview.
-Open `http://127.0.0.1:9184/` on the operator host to preview a plan, refresh discovery, run the
-media pipeline or confirm a pending series match. The board accepts one operation at a time.
-Workflow history and the guest journal retain the underlying run details.
+The **Swamp feed** beside Downlink shows recent behavior and workflow runs. Open a run for its steps
+and available log lines. **Activity** has the longer feed and filters. A title’s **Item timeline**
+combines saved catalog changes, search results, transfer observations and delivery timestamps.
+Select a recorded step to inspect its workflow. Pause the feed to read a busy run.
 
-Transfer readings refresh every 15 seconds while downloads are active or queued, and every minute
-when idle. Catalog readings refresh once a minute. Open screens share a cache. The service reads
-sources on demand, and hidden tabs suspend requests.
+**Attention** groups episode conflicts, transfer problems and failed searches. Compare the provider
+name, episode number and catalog title before linking an episode. Exclude a provider episode to
+leave its catalog slot alone. Changed provider details reopen the decision. Retry search makes a
+title eligible for the next acquisition run. A provider sign-in error needs a working credential
+first. Paused downloads and paused seeds have separate resume commands.
+
+Each resolution calls the Swamp method `pipeline.resolveAttention`. For example, to retry a specific
+failed search from the operator CLI, use the item key and search timestamp from the dashboard’s
+technical details.
+
+```sh
+sudo hoardarr-operator resolve retry --target "$item_key" --revision "$searched_at"
+```
+
+For one read/write URL, set `guest.boardOrigin` to its exact HTTPS origin in the installation
+configuration before generating the native units. Bind the reverse proxy to the private network and
+preserve the request Host and Origin headers. Everyone admitted by that network can start a command.
+The local SSH tunnel can also reach the board at `http://127.0.0.1:9184/`.
+
+Transfer readings refresh every 15 seconds while active or queued downloads exist and every minute
+when idle. The board streams Swamp service messages as they arrive and checks run history about
+every seven seconds while you are viewing it. Catalog readings refresh once a minute. Tabs share
+server-side caches.
 
 To open the board on an enrolled host with the standard inventory, install the user tunnel unit and
 select the enrolled VM. Run these commands on the host after provisioning the image.

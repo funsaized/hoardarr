@@ -286,17 +286,17 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     `KillMode=control-group\nTimeoutStopSec=120\nRestart=on-failure\nRestartSec=10\n`;
   await Deno.writeTextFile(
     join(path, "hoardarr-board.service"),
-    `[Unit]\nDescription=Hoardarr operator board\nRequires=hoardarr-board-command.socket\nPartOf=hoardarr-swamp.service\nAfter=hoardarr-swamp.service hoardarr-egress-guard.service\nRequires=hoardarr-egress-guard.service\nRequiresMountsFor=${
+    `[Unit]\nDescription=Hoardarr operator board\nRequires=hoardarr-board-command.socket hoardarr-swamp-feed.socket\nPartOf=hoardarr-swamp.service\nAfter=hoardarr-swamp.service hoardarr-egress-guard.service\nRequires=hoardarr-egress-guard.service\nRequiresMountsFor=${
       q(g.projectRoot)
     }\n[Service]\n${common}RuntimeDirectory=hoardarr-board\nRuntimeDirectoryMode=0700\nIPAddressDeny=any\nIPAddressAllow=localhost\nExecStart=${direct}/usr/local/bin/deno run --no-config --allow-env=TORLINK_STATE_DIR --allow-read ${
       arg(
-        "--allow-write=/run/hoardarr-board,/run/hoardarr/board-command.sock," +
+        "--allow-write=/run/hoardarr-board,/run/hoardarr/board-command.sock,/run/hoardarr/swamp-feed.sock," +
           join(g.projectRoot, "state/maintenance/board-history.json") + "," +
           join(g.projectRoot, "state/maintenance/board-history.json.new"),
       )
-    } --allow-net=127.0.0.1:9161,unix:/run/hoardarr-board/http.sock,unix:/run/hoardarr/board-command.sock --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts ${
+    } --allow-net=127.0.0.1:9161,unix:/run/hoardarr-board/http.sock,unix:/run/hoardarr/board-command.sock,unix:/run/hoardarr/swamp-feed.sock --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts ${
       arg(join(g.projectRoot, "state/maintenance/board-history.json"))
-    }\n`,
+    } ${arg(g.boardOrigin ?? "")}\n`,
   );
   await Deno.writeTextFile(
     join(path, "hoardarr-board-command.socket"),
@@ -307,6 +307,14 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     `[Unit]\nDescription=Hoardarr dashboard operation\nBindsTo=hoardarr-board.service hoardarr-egress-guard.service\nAfter=hoardarr-board.service hoardarr-egress-guard.service\n[Service]\n${
       common.replace("Restart=on-failure", "Restart=no")
     }StandardInput=socket\nStandardOutput=socket\nStandardError=journal\nExecStart=${direct}/usr/bin/python3 /opt/hoardarr/deploy/board/command.py\n`,
+  );
+  await Deno.writeTextFile(
+    join(path, "hoardarr-swamp-feed.socket"),
+    `[Unit]\nDescription=Read the Swamp service journal\nPartOf=hoardarr-board.service\n[Socket]\nListenStream=/run/hoardarr/swamp-feed.sock\nAccept=yes\nSocketUser=${g.user}\nSocketMode=0600\nMaxConnections=2\n`,
+  );
+  await Deno.writeTextFile(
+    join(path, "hoardarr-swamp-feed@.service"),
+    "[Unit]\nDescription=Follow Swamp service messages\n[Service]\nDynamicUser=yes\nSupplementaryGroups=systemd-journal\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\nStandardInput=socket\nStandardOutput=socket\nStandardError=journal\nExecStart=/usr/bin/journalctl --follow --no-pager --quiet --lines=80 --unit=hoardarr-swamp.service --output=json --output-fields=MESSAGE,PRIORITY,_SYSTEMD_UNIT\n",
   );
   // A socket-activated root helper supplies fresh redacted status. Applications get no VPN control.
   await Deno.writeTextFile(
