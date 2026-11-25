@@ -162,6 +162,9 @@ export async function expandTargets(
 ): Promise<Target[]> {
   const { media, selection, category }: Intent = input.intent;
   const discoveredAt = new Date().toISOString();
+  if (!media.tmdbId) {
+    throw new Error("Local title requires a confirmed TMDB alias for metadata refresh");
+  }
   if (media.mediaKind === "movie") {
     const movie = Movie.parse(await get(`/movie/${media.tmdbId}`));
     if (movie.id !== media.tmdbId) throw new Error("TMDB movie identity changed");

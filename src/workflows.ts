@@ -168,6 +168,31 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       requestId: expr("inputs.requestId"),
     }, "request-targets"),
   );
+  const linkMovies = config.providers.discovery === "tmdb";
+  if (linkMovies) {
+    discovery.push(
+      skip(
+        call(
+          "find-aliases",
+          "request-provider",
+          "findMovieAliases",
+          { movies: expr("steps.known.outputs.movieAliases") },
+          "ingest-requests",
+          true,
+        ),
+        "size(steps.known.outputs.movieAliases) == 0",
+      ),
+    );
+    discovery.push(
+      skip(
+        method("link-aliases", "pipeline", "linkMovieAliases", {
+          ...owned,
+          records: records("find-aliases"),
+        }, "find-aliases"),
+        'size(steps.known.outputs.movieAliases) == 0 || !steps["find-aliases"].outputs.ok',
+      ),
+    );
+  }
   discovery.push(skip(
     call(
       "movies",
@@ -179,7 +204,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
         limit: config.interests.limit,
         excludeIds: expr("steps.known.outputs.movieIds"),
       },
-      "ingest-requests",
+      linkMovies ? "link-aliases" : "ingest-requests",
       true,
     ),
     `inputs.requestId != "" || ${!config.interests.movies}`,

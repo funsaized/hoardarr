@@ -1,3 +1,4 @@
+import { movieCatalogId } from "./catalog_identity.ts";
 /** User-directed local removal. Export is the operator's responsibility. */
 import { z } from "npm:zod@4.5.1";
 import { createHash } from "node:crypto";
@@ -55,7 +56,7 @@ export async function archive(
       r.attributes
     );
     for (const id of args.movieIds) {
-      if (!movies.some((r) => r.tmdbId === id)) throw new Error(`Unknown movie ID: ${id}`);
+      if (!movies.some((r) => movieCatalogId(r) === id)) throw new Error(`Unknown movie ID: ${id}`);
     }
     for (const id of args.showIds) {
       if (!episodes.some((r) => r.showTmdbId === id)) throw new Error(`Unknown show ID: ${id}`);
@@ -67,9 +68,14 @@ export async function archive(
       : await ctx.readModelData(ctx.globalArgs.destination ?? "local-destination", "receipt");
     const selected = [
       ...movies.filter((r) =>
-        args.all === "movies" || args.all === "both" || args.movieIds.includes(Number(r.tmdbId))
+        args.all === "movies" || args.all === "both" || args.movieIds.includes(movieCatalogId(r))
       )
-        .map((row) => ({ row, kind: "movie", id: Number(row.tmdbId), key: `m-${row.tmdbId}` })),
+        .map((row) => ({
+          row,
+          kind: "movie",
+          id: movieCatalogId(row),
+          key: `m-${movieCatalogId(row)}`,
+        })),
       ...episodes.filter((r) =>
         args.all === "tv" || args.all === "both" || args.showIds.includes(Number(r.showTmdbId))
       )

@@ -2,7 +2,7 @@
 const catalogPredicate =
   '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["transferObservation", "catalogIdentity"])';
 const catalogFields = [
-  "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "showName",
+  "catalogId", "localId", "tmdbEpisodeId", "tmdbId", "infoHash", "archivedAt", "showTmdbId", "showName",
   "seasonNumber", "episodeNumber", "episodeTitle", "title", "status", "transferredAt",
 ];
 const catalogProjection = 'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
@@ -95,7 +95,7 @@ async function live() {
   return transfers(downloads, seeds, saved);
 }
 function matchingObservation(row: Record<string, unknown>, records: Map<string, Record<string, unknown>>) {
-  const suffix = row.tmdbEpisodeId ? `episode-${row.tmdbEpisodeId}` : `movie-${row.tmdbId}`;
+  const suffix = row.tmdbEpisodeId ? `episode-${row.tmdbEpisodeId}` : `movie-${row.catalogId ?? row.tmdbId}`;
   const health = records.get("transfer-health-" + suffix);
   if (!health || health.hash !== row.infoHash) return undefined;
   const { decision, observedAt, idleMs, byteRate } = health;
@@ -127,8 +127,8 @@ async function catalog() {
     rows: results.filter((r: Record<string, unknown>) => !r.shows && !r.observationKey && !r.catalogKey).map((
       r: Record<string, unknown>,
     ) => ({
-      id: identities.get(r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.tmdbId}`) ??
-        (r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.tmdbId}`),
+      id: r.localId ?? identities.get(r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`) ??
+        (r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.catalogId ?? r.tmdbId}`),
       health: matchingObservation(r, observations),
       hash: r.infoHash,
       archived: !!r.archivedAt,

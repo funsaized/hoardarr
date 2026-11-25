@@ -506,3 +506,73 @@ Deno.test("a fresh archived movie request preserves earlier fulfillment and need
       }], []).status === "fulfilled",
     );
   }));
+
+Deno.test("explicit title and year create a frozen local movie request without TMDB", () =>
+  temporary(async (root) => {
+    const h = harness(root), resolutionId = crypto.randomUUID();
+    await h.run("requests", "resolve", {
+      mediaKind: "movie",
+      query: "Unlisted Film",
+      year: 2024,
+      local: true,
+      imdbId: "tt0123456",
+      resolutionId,
+    });
+    const args = {
+      resolutionId,
+      localId: resolutionId,
+      selection: { scope: "movie" },
+      idempotencyKey: "offline",
+      text: "Get Unlisted Film (2024)",
+    };
+    await h.run("requests", "submit", args);
+    await h.run("coordinator", "acquire", { owner: h.owner });
+    await h.expand(requestId("offline"));
+    await h.run("pipeline", "backfillIdentities", { owner: h.owner });
+    await h.run("pipeline", "plan", { owner: h.owner, phase: "acquisition" });
+    const request = h.request("offline"), target = request.targets![0];
+    assert(target.mediaKind === "movie" && !target.tmdbId && target.localId === resolutionId);
+    const catalog = h.store("movie-catalog").get("catalog-movie-" + target.catalogId)!.attributes;
+    assert(catalog.localId === resolutionId && catalog.tmdbId === undefined);
+    deepStrictEqual(h.store("pipeline").get("work-current")!.attributes.queries, [{
+      key: targetKey(target),
+      query: "Unlisted Film 2024",
+      category: "movies",
+    }]);
+    const pinned = structuredClone(h.request("offline"));
+    await h.run("pipeline", "ingest", {
+      owner: h.owner,
+      mediaKind: "movie",
+      records: [{
+        name: "digital-release-movie-42",
+        attributes: { tmdbId: 42, title: "Unlisted Film", year: 2024 },
+      }],
+    });
+    assert(
+      h.store("pipeline").has("review-movie-42") &&
+        !h.store("movie-catalog").has("catalog-movie-42"),
+    );
+    await h.run("pipeline", "linkMovieAliases", {
+      owner: h.owner,
+      records: [{
+        name: "movie-alias-evidence",
+        attributes: {
+          movies: [{
+            catalogId: target.catalogId,
+            localId: resolutionId,
+            imdbId: "tt0123456",
+            tmdbId: 42,
+          }],
+        },
+      }],
+    });
+    await h.run("pipeline", "backfillIdentities", { owner: h.owner });
+    const linked = h.store("movie-catalog").get("catalog-movie-" + target.catalogId)!.attributes;
+    assert(linked.tmdbId === 42 && linked.localId === target.localId);
+    deepStrictEqual(h.request("offline"), pinned);
+    await h.run("requests", "submit", args);
+    assert(
+      h.request("offline").ingestedAt === request.ingestedAt &&
+        h.store("request-metadata").size === 0,
+    );
+  }));

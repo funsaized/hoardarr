@@ -36,6 +36,7 @@ export const builtins: Descriptor[] = [
     version: "2026.07.03.1",
     capabilities: ["movies", "episodes"],
     methods: {
+      findMovieAliases: "findMovieAliases",
       movies: "digitalReleases",
       episodes: "airedEpisodes",
       resolveTitle: "resolveTitle",

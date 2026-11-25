@@ -33,6 +33,21 @@ export function identityIndex(saved: Identity[]) {
     }
   }
   const changed = new Map<string, Identity>();
+  function reserve(kind: Kind, catalogKey: string, id: string) {
+    const known = byKey.get(catalogKey);
+    if (known) {
+      if (known.kind !== kind || known.id !== id) {
+        throw new Error("Conflicting local catalog identity");
+      }
+      return known;
+    }
+    if (byId.has(id)) throw new Error("Local catalog identity already in use");
+    const entity = CatalogIdentity.parse({ id, kind, catalogKey, aliases: [] });
+    byId.add(id);
+    byKey.set(catalogKey, entity);
+    changed.set(catalogKey, entity);
+    return entity;
+  }
   function confirm(kind: Kind, catalogKey: string, alias: Alias) {
     const known = byKey.get(catalogKey), owner = byAlias.get(aliasKey(kind, alias));
     if (owner && owner.catalogKey !== catalogKey || known && known.kind !== kind) {
@@ -45,10 +60,27 @@ export function identityIndex(saved: Identity[]) {
       catalogKey,
       aliases: [...(known?.aliases ?? []), alias],
     };
+    byId.add(entity.id);
     byKey.set(catalogKey, entity);
     for (const id of entity.aliases) byAlias.set(aliasKey(kind, id), entity);
     changed.set(catalogKey, entity);
     return entity;
   }
-  return { confirm, changed, byKey };
+  return { confirm, reserve, changed, byKey };
+}
+
+/** Existing numeric keys remain the ownership keys for staging and delivery receipts. */
+export function movieCatalogId(movie: { catalogId?: unknown; tmdbId?: unknown }) {
+  return z.number().int().positive().parse(movie.catalogId ?? movie.tmdbId);
+}
+
+export const MovieIdentityFields = {
+  imdbId: z.string().regex(/^tt[0-9]{7,12}$/).optional(),
+  tmdbId: z.number().int().positive().optional(),
+  catalogId: z.number().int().positive().optional(),
+  localId: z.uuid().optional(),
+};
+export function hasMovieIdentity(value: { tmdbId?: number; catalogId?: number; localId?: string }) {
+  return value.tmdbId !== undefined ||
+    (value.catalogId !== undefined && value.localId !== undefined);
 }

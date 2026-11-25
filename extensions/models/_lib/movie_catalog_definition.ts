@@ -1,3 +1,4 @@
+import { hasMovieIdentity, movieCatalogId, MovieIdentityFields } from "./catalog_identity.ts";
 /** Hoardarr local movie catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4.5.1";
 import { catalogRelocationMethod } from "./migration_actions.ts";
@@ -31,7 +32,7 @@ const MovieStatusSchema = z.enum([
 ]);
 
 const DiscoveryRecordSchema = z.object({
-  tmdbId: z.number().int().positive(),
+  ...MovieIdentityFields,
   title: z.string().min(1).max(500),
   releaseDate: z
     .string()
@@ -46,7 +47,7 @@ const DiscoveryRecordSchema = z.object({
   discoveredAt: z.iso.datetime(),
   region: z.string().length(2).optional(),
   language: z.string().min(2).max(10).optional(),
-});
+}).refine(hasMovieIdentity, "Movie catalog identity required");
 
 const ReleaseSchema = z.object({
   infoHash: z.string().min(1).max(200),
@@ -107,7 +108,7 @@ const ReconcileArgsSchema = z.object({
 const PlanArgsSchema = z.object({});
 
 const MovieSchema = z.object({
-  tmdbId: z.number().int().positive(),
+  ...MovieIdentityFields,
   title: z.string().min(1).max(500),
   year: z.number().int().min(1800).max(2200).nullable(),
   infoHash: z.string().nullable(),
@@ -132,7 +133,7 @@ const MovieSchema = z.object({
   transferredAt: z.iso.datetime().nullable(),
   localCleanedAt: z.iso.datetime().nullable(),
   error: z.string().nullable(),
-}).passthrough();
+}).passthrough().refine(hasMovieIdentity, "Movie catalog identity required");
 
 const PlanSchema = z.object({
   generatedAt: z.iso.datetime(),
@@ -295,7 +296,11 @@ function isSelectable(movie: Movie, policy: Policy = moviePolicy): boolean {
 
 function createMovieFromDiscovery(discovery: DiscoveryRecord): Movie {
   return {
-    tmdbId: discovery.tmdbId,
+    ...(discovery.tmdbId !== undefined ? { tmdbId: discovery.tmdbId } : {}),
+    ...(discovery.imdbId ? { imdbId: discovery.imdbId } : {}),
+    ...(discovery.localId
+      ? { localId: discovery.localId, catalogId: movieCatalogId(discovery) }
+      : {}),
     title: discovery.title,
     year: discovery.year,
     infoHash: null,
@@ -531,19 +536,19 @@ function computePlan(movies: ReadonlyArray<Movie>, policy: Policy = moviePolicy)
   const cleanupPending: number[] = [];
   for (const movie of movies) {
     if (movie.status === "wanted" || movie.status === "selected") {
-      wanted.push(movie.tmdbId);
+      wanted.push(movieCatalogId(movie));
     } else if (movie.status === "failed" && movie.attempts < policy.maxAttempts) {
-      retryable.push(movie.tmdbId);
+      retryable.push(movieCatalogId(movie));
     } else if (movie.status === "downloading") {
-      downloading.push(movie.tmdbId);
+      downloading.push(movieCatalogId(movie));
     } else if (movie.status === "seeding") {
-      seeding.push(movie.tmdbId);
+      seeding.push(movieCatalogId(movie));
     } else if (movie.status === "seed-stopped") {
-      seedStopped.push(movie.tmdbId);
+      seedStopped.push(movieCatalogId(movie));
     } else if (movie.status === "transfer-ready") {
-      transferReady.push(movie.tmdbId);
+      transferReady.push(movieCatalogId(movie));
     } else if (movie.status === "cleanup-pending") {
-      cleanupPending.push(movie.tmdbId);
+      cleanupPending.push(movieCatalogId(movie));
     }
   }
   const uniqueSort = (ids: number[]) => [...new Set(ids)].sort((a, b) => a - b);
@@ -566,7 +571,7 @@ async function loadMovie(context: Context, tmdbId: number): Promise<Movie | null
 }
 
 async function writeMovie(context: Context, movie: Movie): Promise<{ name: string }> {
-  return await context.writeResource(SPEC_MOVIE, movieInstanceName(movie.tmdbId), movie);
+  return await context.writeResource(SPEC_MOVIE, movieInstanceName(movieCatalogId(movie)), movie);
 }
 
 async function loadAllMovies(context: Context): Promise<Movie[]> {
@@ -600,7 +605,10 @@ async function executeIngest(
   const handles: Array<{ name: string }> = [];
   let preserved = 0;
   for (const discovery of args.discoveries) {
-    const existing = await loadMovie(context, discovery.tmdbId);
+    const existing = await loadMovie(context, movieCatalogId(discovery));
+    if (
+      existing && existing.localId !== discovery.localId && (existing.localId || discovery.localId)
+    ) throw new Error("Catalog key has a different local identity");
     if (existing && TERMINAL_STATUSES.has(existing.status)) {
       preserved++;
       continue;
@@ -828,6 +836,37 @@ export const definition = {
     },
   },
   methods: {
+    linkMovieAlias: {
+      description: "Attach verified TMDB evidence to the same local movie and storage key.",
+      arguments: z.object({
+        catalogId: z.number().int().positive(),
+        localId: z.uuid(),
+        imdbId: z.string().regex(/^tt[0-9]{7,12}$/),
+        tmdbId: z.number().int().positive(),
+      }),
+      execute: async (
+        args: { catalogId: number; localId: string; imdbId: string; tmdbId: number },
+        context: Context,
+      ) => {
+        const movie = await loadMovie(context, args.catalogId);
+        if (
+          !movie || movie.localId !== args.localId || movie.imdbId !== args.imdbId ||
+          (movie.tmdbId && movie.tmdbId !== args.tmdbId)
+        ) throw new Error("Movie identity conflict");
+        const existing = await loadAllMovies(context);
+        if (
+          existing.some((r) =>
+            movieCatalogId(r) !== args.catalogId &&
+            (r.tmdbId === args.tmdbId || r.imdbId === args.imdbId)
+          )
+        ) throw new Error("Provider identity already claimed");
+        return {
+          dataHandles: movie.tmdbId === args.tmdbId
+            ? []
+            : [await writeMovie(context, { ...movie, tmdbId: args.tmdbId })],
+        };
+      },
+    },
     reacquireArchived: {
       description: "Requeue a previously archived movie and preserve its verified delivery.",
       arguments: z.object({ tmdbId: z.number().int().positive(), acceptedAt: z.iso.datetime() }),
@@ -841,6 +880,9 @@ export const definition = {
         if (!Array.isArray(previousDeliveries)) throw new Error("Invalid movie delivery history");
         const fresh = createMovieFromDiscovery({
           tmdbId: movie.tmdbId,
+          catalogId: movie.catalogId,
+          localId: movie.localId,
+          imdbId: movie.imdbId,
           title: movie.title,
           year: movie.year,
           overview: null,

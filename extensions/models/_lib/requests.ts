@@ -1,17 +1,20 @@
+import { hasMovieIdentity, movieCatalogId, MovieIdentityFields } from "./catalog_identity.ts";
 /** Durable request contracts and deterministic progress/priority calculations. */
 import { z } from "npm:zod@4.5.1";
 import { createHash } from "node:crypto";
 
 export const RequestId = z.string().regex(/^r-[a-f0-9]{64}$/);
 export const CandidateSchema = z.object({
-  tmdbId: z.number().int().positive(),
+  ...MovieIdentityFields,
   mediaKind: z.enum(["movie", "tv"]),
   title: z.string().min(1).max(500),
   year: z.number().int().nullable(),
-  url: z.url(),
-});
+  url: z.url().optional(),
+}).refine(hasMovieIdentity, "Media identity required");
 export const ResolveArgs = z.object({
   resolutionId: z.uuid(),
+  local: z.literal(true).optional(),
+  imdbId: MovieIdentityFields.imdbId,
   query: z.string().trim().min(1).max(500),
   mediaKind: z.enum(["movie", "tv"]),
   year: z.number().int().min(1800).max(2200).optional(),
@@ -51,13 +54,13 @@ export const IntentSchema = z.object({
 });
 export const MovieTarget = z.object({
   mediaKind: z.literal("movie"),
-  tmdbId: z.number().int().positive(),
+  ...MovieIdentityFields,
   title: z.string().min(1).max(500),
   year: z.number().int().min(1800).max(2200).nullable(),
   releaseDate: z.string().regex(/^\d{4}(-\d{2}(-\d{2})?)?$/).nullable(),
   overview: z.string().max(5000).nullable(),
   discoveredAt: z.iso.datetime(),
-});
+}).refine(hasMovieIdentity, "Media identity required");
 export const EpisodeTarget = z.object({
   mediaKind: z.literal("episode"),
   tmdbEpisodeId: z.number().int().positive(),
@@ -104,6 +107,7 @@ export const fingerprint = (intent: Intent) =>
   createHash("sha256").update(JSON.stringify({
     mediaKind: intent.media.mediaKind,
     tmdbId: intent.media.tmdbId,
+    ...(intent.media.localId ? { localId: intent.media.localId } : {}),
     scope: intent.selection.scope,
     ...(intent.selection.downloadAgain ? { downloadAgain: true } : {}),
     season: intent.selection.season ?? null,
@@ -111,7 +115,7 @@ export const fingerprint = (intent: Intent) =>
     category: intent.category,
   })).digest("hex");
 export const targetKey = (target: Target) =>
-  target.mediaKind === "movie" ? `m-${target.tmdbId}` : `e-${target.tmdbEpisodeId}`;
+  target.mediaKind === "movie" ? `m-${movieCatalogId(target)}` : `e-${target.tmdbEpisodeId}`;
 
 /** Reject provider evidence which would widen or change an accepted request. */
 export function validateTargets(request: MediaRequest, targets: Target[]): Target[] {
@@ -124,7 +128,10 @@ export function validateTargets(request: MediaRequest, targets: Target[]): Targe
     if (keys.has(targetKey(target))) throw new Error("Duplicate request target identity");
     keys.add(targetKey(target));
     if (target.mediaKind === "movie") {
-      if (media.mediaKind !== "movie" || target.tmdbId !== media.tmdbId) {
+      if (
+        media.mediaKind !== "movie" || movieCatalogId(target) !== movieCatalogId(media) ||
+        target.localId !== media.localId
+      ) {
         throw new Error("Movie target identity differs");
       }
     } else {
@@ -166,7 +173,7 @@ export function requestProgress(
   maxAttempts = { movie: 3, episode: 3 },
 ) {
   const rows = new Map<string, Row>([
-    ...movies.map((row) => [`m-${row.tmdbId}`, row] as const),
+    ...movies.map((row) => [`m-${movieCatalogId(row)}`, row] as const),
     ...episodes.map((row) => [`e-${row.tmdbEpisodeId}`, row] as const),
   ]);
   const items = (request.targets ?? []).map((target) => {

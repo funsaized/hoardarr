@@ -1,3 +1,4 @@
+import { movieCatalogId } from "../extensions/models/_lib/catalog_identity.ts";
 import { jsonCommand } from "./swamp.ts";
 import { type MediaRequest, requestProgress } from "../extensions/models/_lib/requests.ts";
 import type { SearchState } from "../extensions/models/_lib/tv_backlog.ts";
@@ -36,22 +37,23 @@ export async function movieSummary(repo: string, query?: string) {
   const rows = results.filter((r) => r.spec === "movie").map((r) => r.data);
   const matches = (id: unknown, title: unknown) =>
     !query || String(id) === query || String(title).toLowerCase() === query.toLowerCase();
-  const movies = rows.filter((r) => matches(r.tmdbId, r.title)).map((r) => {
-    const attempt = attempts["m-" + r.tmdbId];
+  const movies = rows.filter((r) => matches(movieCatalogId(r), r.title)).map((r) => {
+    const attempt = attempts["m-" + movieCatalogId(r)];
     return {
-      id: r.tmdbId,
+      id: movieCatalogId(r),
       title: r.title,
       year: r.year,
       stage: r.archivedAt ? "archived" : r.status,
       reason: r.error ?? r.noMatchReason ?? null,
       archivedAt: r.archivedAt ?? null,
       ...attempt,
-      missedSearches: missed["m-" + r.tmdbId] ?? 0,
+      missedSearches: missed["m-" + movieCatalogId(r)] ?? 0,
     };
   });
   const requests = results.filter((r) => r.spec === "request").map((r) => r.data as MediaRequest)
     .filter((r) =>
-      r.intent.media.mediaKind === "movie" && matches(r.intent.media.tmdbId, r.intent.media.title)
+      r.intent.media.mediaKind === "movie" &&
+      matches(movieCatalogId(r.intent.media), r.intent.media.title)
     )
     .map((r) => ({
       title: r.intent.media.title,

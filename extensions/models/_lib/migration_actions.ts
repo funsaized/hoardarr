@@ -99,7 +99,7 @@ export async function applyCatalogRelocation(
   const pending: { name: string; value: Record<string, unknown> }[] = [];
   for (const record of args.records) {
     const row = schema.parse(await context.readResource(record.name));
-    if (record.name !== `catalog-${spec}-${row[identityKey]}`) {
+    if (record.name !== `catalog-${spec}-${row.catalogId ?? row[identityKey]}`) {
       throw new Error("Catalog identity differs from relocation name");
     }
     const digest = inventoryDigest(row);

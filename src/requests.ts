@@ -14,9 +14,9 @@ import { join } from "node:path";
 
 export const REQUEST_HELP = `Usage: hoardarr request <resolve|submit|run|status|list> [--json]
 
-resolve --kind movie|tv --query TITLE [--year YYYY] [--tmdb-id ID]
+resolve --kind movie|tv --query TITLE [--year YYYY] [--tmdb-id ID] [--local [--imdb-id tt…]]
         Saves metadata candidates without acquiring media. Use the returned resolutionId.
-submit  --resolution UUID --tmdb-id ID --scope movie|episode|season|series|latest|remaining
+submit  --resolution UUID (--tmdb-id ID | --local-id UUID) --scope movie|episode|season|series|latest|remaining
         --key IDEMPOTENCY_KEY --text ORIGINAL_REQUEST [--season N] [--episode N]
         [--category tv|anime] [--defer] [--download-again (archived movie)]
         Accepts a resolved candidate and attempts the same owned media workflow immediately.
@@ -131,6 +131,8 @@ export async function requestCommand(
   if (operation === "resolve") {
     const args = ResolveArgs.strict().parse({
       resolutionId: crypto.randomUUID(),
+      imdbId: option("--imdb-id"),
+      local: argv.includes("--local") || undefined,
       query: option("--query"),
       mediaKind: option("--kind"),
       year: number("--year"),
@@ -149,6 +151,7 @@ export async function requestCommand(
   if (operation === "submit") {
     const args = requests.methods.submit.arguments.strict().parse({
       resolutionId: option("--resolution"),
+      localId: option("--local-id"),
       tmdbId: number("--tmdb-id"),
       selection: {
         scope: option("--scope"),

@@ -30,7 +30,7 @@ import {
   TransferObservation,
   TransferSample,
 } from "./_lib/transfer_observation.ts";
-import { CatalogIdentity, identityIndex } from "./_lib/catalog_identity.ts";
+import { CatalogIdentity, identityIndex, movieCatalogId } from "./_lib/catalog_identity.ts";
 const Globals = z.object({
   requestModel: z.string().optional(),
   libraryRoot: z.string().optional(),
@@ -95,6 +95,8 @@ const WorkSchema = z.object({
   rejectedIds: z.array(z.string()).default([]),
   stoppedIds: z.array(z.string()),
   deliveries: z.array(WorkItem),
+  movieAliases: z.array(z.object({ localId: z.uuid(), catalogId: z.number(), imdbId: z.string() }))
+    .default([]),
   movieIds: z.array(z.number()),
   episodeIds: z.array(z.number()),
 });
@@ -107,6 +109,8 @@ const resource = (schema: z.ZodType, description: string) => ({
 const catalog = (ctx: Context, kind: string) =>
   kind === "movie" ? ctx.globalArgs.movies : ctx.globalArgs.episodes;
 const idField = (kind: string) => kind === "movie" ? "tmdbId" : "tmdbEpisodeId";
+const catalogNumber = (row: Row, kind: string) =>
+  kind === "movie" ? movieCatalogId(row) : Number(row.tmdbEpisodeId);
 async function rows(ctx: Context, kind: string): Promise<Row[]> {
   return (await ctx.readModelData(catalog(ctx, kind), kind)).map((r) => r.attributes);
 }
@@ -144,7 +148,7 @@ async function recordTransferHealth(ctx: Context, fallback?: Row) {
   for (const kind of ["movie", "episode"] as const) {
     for (const row of await rows(ctx, kind)) {
       const torrent = samples.get(row.infoHash);
-      const key = `transfer-health-${kind}-${row[idField(kind)]}`;
+      const key = `transfer-health-${kind}-${catalogNumber(row, kind)}`;
       const saved = TransferObservation.safeParse(previous.get(key)).data;
       if (!torrent && !saved) continue;
       const sample = TransferSample.safeParse({
@@ -174,7 +178,7 @@ async function recordTransferHealth(ctx: Context, fallback?: Row) {
   return observations;
 }
 function workItem(row: Row, kind: "movie" | "episode"): Item {
-  const id = Number(row[idField(kind)]),
+  const id = Number(catalogNumber(row, kind)),
     season = String(row.seasonNumber).padStart(2, "0"),
     episode = String(row.episodeNumber).padStart(2, "0");
   return WorkItem.parse({
@@ -225,7 +229,7 @@ const LayoutSchema = z.object({
 
 async function layoutFor(ctx: Context, row: Row, kind: "movie" | "episode") {
   const id = `${kind === "movie" ? "movie" : "show"}-${
-    kind === "movie" ? row.tmdbId : row.showTmdbId
+    kind === "movie" ? movieCatalogId(row) : row.showTmdbId
   }`;
   const saved = (await ctx.readModelData("pipeline", "layout")).map((r) =>
     LayoutSchema.parse(r.attributes)
@@ -247,7 +251,7 @@ async function layoutFor(ctx: Context, row: Row, kind: "movie" | "episode") {
   return libraryNames(
     {
       mediaKind: kind,
-      id: Number(row[idField(kind)]),
+      id: Number(catalogNumber(row, kind)),
       title: layout.title,
       year: layout.year,
       seasonNumber: row.seasonNumber as number,
@@ -259,7 +263,9 @@ async function layoutFor(ctx: Context, row: Row, kind: "movie" | "episode") {
 }
 
 async function itemRow(ctx: Context, item: Item): Promise<Row> {
-  const row = (await rows(ctx, item.mediaKind)).find((r) => r[idField(item.mediaKind)] === item.id);
+  const row = (await rows(ctx, item.mediaKind)).find((r) =>
+    catalogNumber(r, item.mediaKind) === item.id
+  );
   if (!row) throw new Error(`Catalog item is missing: ${item.key}`);
   return row;
 }
@@ -299,6 +305,18 @@ export const model = {
   }],
   globalArguments: Globals,
   resources: {
+    identityReview: {
+      schema: z.object({
+        tmdbId: z.number().int().positive(),
+        title: z.string(),
+        year: z.number().nullable(),
+        localIds: z.array(z.uuid()),
+        reason: z.string(),
+      }),
+      description: "Movie identities awaiting review",
+      lifetime: "infinite",
+      garbageCollection: 2,
+    },
     catalogIdentity: {
       schema: CatalogIdentity,
       description:
@@ -560,7 +578,7 @@ export const model = {
           ["transfer-ready", "cleanup-pending"].includes(r.status) ||
           r.status === "transferred" &&
             !(r.mediaKind === "movie" ? movieRows : episodeRows).find((v) =>
-              v[idField(r.mediaKind)] === r.id
+              catalogNumber(v, r.mediaKind) === r.id
             )?.localCleanedAt
         );
         if (args.reorganize) {
@@ -613,9 +631,23 @@ export const model = {
           activeIds: [...new Set(active.map((r) => r.infoHash!))].slice(0, 100),
           stoppedIds: [...new Set(stopped.map((r) => r.infoHash!))].slice(0, 100),
           deliveries: deliveryBatch(delivery),
-          movieIds: movieRows.map((r) => r.tmdbId),
+          movieAliases: movieRows.filter((r) => r.localId && r.imdbId && !r.tmdbId).slice(0, 20)
+            .map(({ localId, catalogId, imdbId }) => ({ localId, catalogId, imdbId })),
+          movieIds: movieRows.flatMap((r) => typeof r.tmdbId === "number" ? [r.tmdbId] : []),
           episodeIds: episodeRows.map((r) => r.tmdbEpisodeId),
         });
+      },
+    },
+    linkMovieAliases: {
+      description: "Apply verified movie alias evidence while holding installation ownership.",
+      arguments: Records,
+      execute: async (args: z.infer<typeof Records>, ctx: Context) => {
+        await assertLease(ctx.repoDir, args.owner);
+        const evidence = getRecord(args.records, "movie-alias-evidence");
+        for (const row of (evidence?.movies ?? []) as Row[]) {
+          await invoke(ctx, ctx.globalArgs.movies, "linkMovieAlias", row);
+        }
+        return write(ctx, "summary", { ok: true });
       },
     },
     ingest: {
@@ -639,10 +671,28 @@ export const model = {
         ).map((r) => r.attributes).filter((r) =>
           args.mediaKind === "movie" ? r.tmdbId : r.tmdbEpisodeId
         );
-        const existing = new Set(
-          (await rows(ctx, args.mediaKind)).map((r) => r[idField(args.mediaKind)]),
-        );
-        const missing = discoveries.filter((r) => !existing.has(r[idField(args.mediaKind)]));
+        const catalogRows = await rows(ctx, args.mediaKind);
+        const existing = new Set(catalogRows.map((r) => r[idField(args.mediaKind)]));
+        const missing = [];
+        for (const discovery of discoveries) {
+          if (existing.has(discovery[idField(args.mediaKind)])) continue;
+          const matches = args.mediaKind === "movie"
+            ? catalogRows.filter((r) =>
+              r.localId && !r.tmdbId && r.year === discovery.year &&
+              String(r.title).normalize("NFKC").toLowerCase().trim() ===
+                String(discovery.title).normalize("NFKC").toLowerCase().trim()
+            )
+            : [];
+          if (matches.length) {
+            await ctx.writeResource("identityReview", "review-movie-" + discovery.tmdbId, {
+              tmdbId: discovery.tmdbId,
+              title: discovery.title,
+              year: discovery.year,
+              localIds: matches.map((r) => r.localId),
+              reason: "Confirm provider identity before admission",
+            });
+          } else missing.push(discovery);
+        }
         for (let offset = 0; offset < missing.length; offset += 500) {
           await invoke(ctx, catalog(ctx, args.mediaKind), "ingest", {
             discoveries: missing.slice(offset, offset + 500),
@@ -689,7 +739,7 @@ export const model = {
             query = queries.find((q) => q.key === key),
             movie = key.startsWith("m-");
           const selected = (movie ? currentMovies : currentEpisodes).some((r) =>
-            String(r[movie ? "tmdbId" : "tmdbEpisodeId"]) === id && r.status === "selected"
+            String(catalogNumber(r, movie ? "movie" : "episode")) === id && r.status === "selected"
           );
           const failed = Object.values(query?.sources ?? {}).filter((source) => !source.ok);
           const auth = failed.some((source) => /\b(401|403)\b/.test(source.error ?? ""));
@@ -803,7 +853,16 @@ export const model = {
           const id = z.number().int().positive().parse(value);
           index.confirm(kind, prefix + id, { provider: "tmdb", value: String(id) });
         }
-        for (const row of await rows(ctx, "movie")) legacy("movie", "m-", row.tmdbId);
+        for (const row of await rows(ctx, "movie")) {
+          const key = "m-" + movieCatalogId(row);
+          if (row.localId) index.reserve("movie", key, String(row.localId));
+          if (row.imdbId) {
+            index.confirm("movie", key, { provider: "imdb", value: String(row.imdbId) });
+          }
+          if (row.tmdbId) {
+            index.confirm("movie", key, { provider: "tmdb", value: String(row.tmdbId) });
+          }
+        }
         for (const row of await rows(ctx, "episode")) {
           legacy("series", "s-", row.showTmdbId);
           legacy("episode", "e-", row.tmdbEpisodeId);

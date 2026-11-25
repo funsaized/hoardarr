@@ -1,4 +1,5 @@
 /** Durable user intent; only the owned media workflow may ingest acquisition targets. */
+import { movieCatalogId } from "./_lib/catalog_identity.ts";
 import { z } from "npm:zod@4.5.1";
 import {
   assertAdmission,
@@ -43,7 +44,8 @@ type Context = Runtime & {
 const Owned = z.object({ owner: z.uuid(), requestId: RequestId.or(z.literal("")).optional() });
 const Submit = z.object({
   resolutionId: z.uuid(),
-  tmdbId: z.number().int().positive(),
+  tmdbId: z.number().int().positive().optional(),
+  localId: z.uuid().optional(),
   selection: ScopeSchema,
   category: z.enum(["tv", "anime"]).default("tv"),
   idempotencyKey: z.string().min(1).max(200),
@@ -109,30 +111,84 @@ export const model = {
         "Resolve explicit media identity without adding anything to acquisition catalogs",
       arguments: ResolveArgs,
       execute: async (args: z.infer<typeof ResolveArgs>, ctx: Context) => {
-        if (!ctx.globalArgs.supported) {
+        if (!ctx.globalArgs.supported && !args.local) {
           throw new Error("Configured discovery provider does not support scoped requests");
         }
         return await withOperatorGate(ctx.repoDir, false, async () => {
           await writable(ctx, async () => {});
-          const candidates = args.mediaKind === "movie"
-            ? (await ctx.readModelData(ctx.globalArgs.movies, "movie")).flatMap(({ attributes }) => {
-              const { tmdbId, title, year } = attributes;
-              if (typeof tmdbId !== "number" || typeof title !== "string") return [];
-              if (args.year !== undefined && args.year !== year) return [];
-              if (
-                args.tmdbId !== undefined
-                  ? args.tmdbId !== tmdbId
-                  : canonicalTitle(args.query) !== canonicalTitle(title)
-              ) return [];
-              return [{
-                tmdbId,
-                title,
-                year: typeof year === "number" ? year : null,
-                mediaKind: "movie",
-                url: `https://www.themoviedb.org/movie/${tmdbId}`,
-              }];
-            })
-            : [];
+          if (args.imdbId && !args.local) {
+            throw new Error("Use --local to confirm an external alias");
+          }
+          if (args.local && (args.mediaKind !== "movie" || !args.year || args.tmdbId)) {
+            throw new Error("Local confirmation requires movie title and year");
+          }
+          const candidates: z.infer<typeof ResolutionSchema>["candidates"] =
+            args.mediaKind === "movie"
+              ? (await ctx.readModelData(ctx.globalArgs.movies, "movie")).flatMap(
+                ({ attributes }) => {
+                  const { tmdbId, title, year } = attributes;
+                  if (
+                    typeof title !== "string" || (typeof tmdbId !== "number" && !attributes.localId)
+                  ) return [];
+                  if (args.year !== undefined && args.year !== year) return [];
+                  if (
+                    args.tmdbId !== undefined
+                      ? args.tmdbId !== tmdbId
+                      : canonicalTitle(args.query) !== canonicalTitle(title)
+                  ) return [];
+                  return [{
+                    ...(typeof tmdbId === "number" ? { tmdbId } : {}),
+                    ...(attributes.localId
+                      ? {
+                        localId: String(attributes.localId),
+                        catalogId: movieCatalogId(attributes),
+                      }
+                      : {}),
+                    ...(attributes.imdbId ? { imdbId: String(attributes.imdbId) } : {}),
+                    title,
+                    year: typeof year === "number" ? year : null,
+                    mediaKind: "movie" as const,
+                    ...(tmdbId ? { url: `https://www.themoviedb.org/movie/${tmdbId}` } : {}),
+                  }];
+                },
+              )
+              : [];
+          if (args.local && !candidates.length) {
+            const previous = await ctx.readResource("resolution-" + args.resolutionId);
+            if (previous) {
+              const saved = ResolutionSchema.parse(previous);
+              if (saved.query !== args.query || saved.year !== args.year || !saved.local) {
+                throw new Error("Resolution already exists");
+              }
+              candidates.push(...saved.candidates);
+            } else {
+              const accepted = (await all(ctx)).map((r) => r.intent.media).filter((m) =>
+                m.localId && m.year === args.year &&
+                canonicalTitle(m.title) === canonicalTitle(args.query)
+              );
+              if (accepted.length) {
+                candidates.push(...new Map(accepted.map((m) => [m.localId, m])).values());
+              } else {
+                // Retain numeric storage/receipt keys while keeping external IDs separate.
+                const catalogId = 2 ** 52 +
+                  Number.parseInt(args.resolutionId.replaceAll("-", "").slice(0, 12), 16);
+                candidates.push({
+                  catalogId,
+                  localId: args.resolutionId,
+                  imdbId: args.imdbId,
+                  title: args.query,
+                  year: args.year!,
+                  mediaKind: "movie",
+                });
+              }
+            }
+          }
+          if (args.local && candidates.length > 20) {
+            throw new Error("Too many matching movies; resolve by exact identity");
+          }
+          if (args.imdbId && candidates.some((c) => c.imdbId !== args.imdbId)) {
+            throw new Error("Existing candidate needs alias review");
+          }
           let resolution;
           if (candidates.length && candidates.length <= 20) {
             resolution = ResolutionSchema.parse({
@@ -171,15 +227,23 @@ export const model = {
       arguments: Submit,
       execute: async (args: z.infer<typeof Submit>, ctx: Context) =>
         writable(ctx, async () => {
-          if (!ctx.globalArgs.supported) {
+          if (!ctx.globalArgs.supported && !args.localId) {
             throw new Error("Configured discovery provider does not support scoped requests");
+          }
+          if (!!args.localId === !!args.tmdbId) {
+            throw new Error("Select exactly one movie or provider identity");
           }
           const id = requestId(args.idempotencyKey);
           const saved = await ctx.readResource(`request-${id}`);
           if (saved) {
             const prior = RequestSchema.parse(saved);
+            if (
+              args.localId
+                ? prior.intent.media.localId !== args.localId
+                : prior.intent.media.tmdbId !== args.tmdbId
+            ) throw new Error("Idempotency key already belongs to a different identity");
             const repeated = IntentSchema.parse({
-              media: { ...prior.intent.media, tmdbId: args.tmdbId },
+              media: prior.intent.media,
               selection: args.selection,
               category: args.category,
             });
@@ -191,8 +255,10 @@ export const model = {
           const resolution = ResolutionSchema.parse(
             await ctx.readResource(`resolution-${args.resolutionId}`),
           );
-          const media = resolution.candidates.find((c) => c.tmdbId === args.tmdbId);
-          if (!media) throw new Error("Selected TMDB identity was not in the resolved candidates");
+          const media = resolution.candidates.find((c) =>
+            args.localId ? c.localId === args.localId : c.tmdbId === args.tmdbId
+          );
+          if (!media) throw new Error("Selected identity was not in the resolved candidates");
           const intent = IntentSchema.parse({
             media,
             selection: args.selection,
@@ -200,7 +266,7 @@ export const model = {
           });
           const known = media.mediaKind === "movie"
             ? (await ctx.readModelData(ctx.globalArgs.movies, "movie")).find(
-              ({ attributes }) => attributes.tmdbId === media.tmdbId,
+              ({ attributes }) => movieCatalogId(attributes) === movieCatalogId(media),
             )?.attributes
             : undefined;
           if (
@@ -212,14 +278,35 @@ export const model = {
             );
           }
           const acceptedAt = new Date().toISOString();
-          const target = known && MovieTarget.parse({
+          if (media.localId) {
+            if (known && known.localId !== media.localId) {
+              throw new Error("Catalog identity conflict");
+            }
+            const others = (await all(ctx)).map((r) => r.intent.media);
+            if (
+              others.some((m) =>
+                m.localId && m.localId !== media.localId &&
+                (m.catalogId === media.catalogId || (m.imdbId && m.imdbId === media.imdbId) ||
+                  (m.year === media.year &&
+                    canonicalTitle(m.title) === canonicalTitle(media.title)))
+              )
+            ) {
+              throw new Error(
+                "A matching request was accepted. Resolve again to select its local identity",
+              );
+            }
+          }
+          const target = (known || media.localId) && MovieTarget.parse({
             mediaKind: "movie",
             tmdbId: media.tmdbId,
-            title: known.title,
-            year: known.year ?? null,
+            ...(media.localId
+              ? { localId: media.localId, catalogId: media.catalogId, imdbId: media.imdbId }
+              : {}),
+            title: known?.title ?? media.title,
+            year: known?.year ?? media.year,
             releaseDate: null,
-            overview: known.overview ?? null,
-            discoveredAt: known.discoveredAt ?? acceptedAt,
+            overview: known?.overview ?? null,
+            discoveredAt: known?.discoveredAt ?? acceptedAt,
           });
           const request = RequestSchema.parse({
             id,
@@ -277,7 +364,7 @@ export const model = {
           : [];
         const movies = new Set(
           (await ctx.readModelData(ctx.globalArgs.movies, "movie")).map((r) =>
-            `m-${r.attributes.tmdbId}`
+            `m-${movieCatalogId(r.attributes)}`
           ),
         );
         const episodes = new Set(
@@ -323,7 +410,7 @@ export const model = {
           );
           if (request.intent.selection.downloadAgain) {
             await invoke(ctx, ctx.globalArgs.movies, "reacquireArchived", {
-              tmdbId: request.intent.media.tmdbId,
+              tmdbId: movieCatalogId(request.intent.media),
               acceptedAt: request.acceptedAt,
             });
           }
