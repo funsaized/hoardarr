@@ -342,11 +342,31 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
 
   // File operations stay inside meaningful, independently resumable Swamp methods.
   const item = expr("inputs.item");
-  const delivery: Node[] = [method("prepare", "pipeline", "prepare", {
+  const delivery: Node[] = [method("reserve", "pipeline", "prepare", {
+    deferFiles: true,
     ...owned,
     item,
     preview: expr("inputs.preview"),
   })];
+  const hasFiles =
+    "has(steps.reserve.outputs.fileInputs) && steps.reserve.outputs.fileInputs != null";
+  delivery.push(
+    skip(
+      call(
+        "files",
+        "files-provider",
+        "prepare",
+        expr("steps.reserve.outputs.fileInputs"),
+        "reserve",
+      ),
+      `!(${hasFiles})`,
+    ),
+  );
+  delivery.push(method("prepare", "pipeline", "collectPreparation", {
+    ...owned,
+    prepared: expr("steps.reserve.outputs"),
+    records: expr(`${hasFiles} ? steps.files.outputs.records : []`),
+  }, "files"));
   delivery.push(
     skip(
       call(
@@ -401,17 +421,18 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
         child("observe", "hoardarr-observation", { owner }),
         "inputs.dryRun || inputs.reorganize",
       ),
-      method("delivery-plan", "pipeline", "plan", {
+      method("delivery-plan", "pipeline", "planDeliveries", {
         owner,
-        phase: "delivery",
+        parallel: config.providers.destination === "local",
+        preview: expr("inputs.dryRun"),
         reorganize: expr("inputs.reorganize"),
       }, "observe"),
     ]),
     name: "initial",
     dependsOn: [{ job: "ownership", condition: { type: "succeeded" } }],
   };
-  const deliveryJob = {
-    name: "delivery",
+  const deliveryJob = (lane: "first" | "second") => ({
+    name: lane === "first" ? "delivery" : "delivery-second",
     concurrency: 1,
     weight: 0,
     dependsOn: [{ job: "initial", condition: { type: "succeeded" } }],
@@ -427,12 +448,13 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       forEach: {
         item: "item",
         in: expr(
-          "data.query(\"modelName == 'pipeline' && name == 'work-current' && workflowRunId == '\" + run.id + \"' && stepName == 'delivery-plan'\")[0].attributes.deliveries",
+          "data.query(\"modelName == 'pipeline' && name == 'deliveryPlan-current' && workflowRunId == '\" + run.id + \"' && stepName == 'delivery-plan'\")[0].attributes." +
+            lane,
         ),
       },
       concurrency: 1,
     }],
-  };
+  });
   const noOnline = "!inputs.acquire || (inputs.dryRun && !inputs.refresh)";
   const online = {
     ...job([
@@ -471,7 +493,10 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
     steps: [method("final-plan", "pipeline", "plan", { owner, phase: "summary" })],
     dependsOn: [
       { job: "ownership", condition: { type: "succeeded" } },
-      ...["initial", "delivery", "online"].map((name) => ({ job: name, condition: terminal })),
+      ...["initial", "delivery", "delivery-second", "online"].map((name) => ({
+        job: name,
+        condition: terminal,
+      })),
     ],
     weight: 0,
   };
@@ -501,7 +526,8 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
         weight: 0,
       },
       initial,
-      deliveryJob,
+      deliveryJob("first"),
+      deliveryJob("second"),
       online,
       finalJob,
       recoverJob,
@@ -524,7 +550,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       },
     ],
     mainInputs,
-    2,
+    3,
   );
   if (config.schedule.enabled) {
     root.trigger = {

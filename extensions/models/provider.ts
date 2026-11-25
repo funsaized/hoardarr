@@ -12,7 +12,7 @@ const Args = z.object({
 /** Swamp behavior implementing provider operations. */
 export const model = {
   type: "@funsaized/hoardarr/provider",
-  version: "2026.11.12.1",
+  version: "2026.11.25.2",
   upgrades: [{
     toVersion: "2026.11.09.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -20,6 +20,10 @@ export const model = {
   }, {
     toVersion: "2026.11.12.1",
     description: "Preserve catalog state while enabling named imports and phase-specific planning",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.25.2",
+    description: "Preserve settings for pipelined local delivery",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
@@ -60,16 +64,21 @@ export const model = {
         await assertLease(ctx.repoDir, args.owner);
         const method = ctx.globalArgs.descriptor.methods[args.operation];
         if (!method) throw new Error(`Unsupported operation: ${args.operation}`);
-        if (["add", "control", "stage", "prepare", "deliver", "cleanup"].includes(args.operation)) {
+        if (
+          !(args.operation === "prepare" && args.inputs.preview === true) &&
+          ["add", "control", "stage", "prepare", "deliver", "cleanup"].includes(args.operation)
+        ) {
           await recordExternalIntent(
             ctx.repoDir,
             args.owner,
             `${ctx.globalArgs.definition}.${method}`,
           );
         }
-        const before = new Map(
-          (await ctx.readModelData(ctx.globalArgs.definition)).map((r) => [r.name, r.version]),
-        );
+        const before = args.tolerateFailure
+          ? new Map(
+            (await ctx.readModelData(ctx.globalArgs.definition)).map((r) => [r.name, r.version]),
+          )
+          : undefined;
         const effectName = `effect-${args.owner}`;
         const mutation = ["add", "control"].includes(args.operation);
         const priorPending = mutation && (await ctx.readResource?.(effectName))?.pending === true;
@@ -89,9 +98,11 @@ export const model = {
         }
         const records = result.ok
           ? result.resources
-          : (await ctx.readModelData(ctx.globalArgs.definition)).filter((r) =>
+          : before
+          ? (await ctx.readModelData(ctx.globalArgs.definition)).filter((r) =>
             r.version !== before.get(r.name)
-          );
+          )
+          : [];
         const handle = await ctx.writeResource("result", "result-current", {
           ok: result.ok,
           operation: args.operation,

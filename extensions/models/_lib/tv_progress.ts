@@ -5,7 +5,9 @@ export function tvProgress(rows: Record<string, unknown>[], attempts: SearchStat
   const groups = new Map<number, Record<string, unknown>[]>();
   for (const row of rows) {
     const id = seriesCatalogId(row);
-    groups.set(id, [...(groups.get(id) ?? []), row]);
+    const group = groups.get(id);
+    if (group) group.push(row);
+    else groups.set(id, [row]);
   }
   return [...groups].sort(([a], [b]) => a - b).map(([id, episodes]) => ({
     catalogId: id,

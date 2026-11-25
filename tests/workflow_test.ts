@@ -37,18 +37,20 @@ Deno.test("all deployment modes reconcile in-flight work without waiting or swit
       steps(root).find((s) => s.name === "readiness")?.task.inputs?.operation === "assertReady",
     );
     const jobs = root.jobs as { name: string; dependsOn: { job: string }[] }[];
-    assert(root.concurrency === 2);
-    for (const name of ["delivery", "online"]) {
+    assert(root.concurrency === 3);
+    for (const name of ["delivery", "delivery-second", "online"]) {
       deepStrictEqual(jobs.find((j) => j.name === name)?.dependsOn.map((d) => d.job), ["initial"]);
     }
     deepStrictEqual(
       jobs.find((j) => j.name === "final-plan")?.dependsOn.map((d) => d.job),
-      ["ownership", "initial", "delivery", "online"],
+      ["ownership", "initial", "delivery", "delivery-second", "online"],
     );
     assert(
       !work.some((s) => s.name === "capacity") || work.find((s) => s.name === "capacity")?.guard,
     );
     deepStrictEqual(steps(graph.find((w) => w.name === "hoardarr-delivery")!).map((s) => s.name), [
+      "reserve",
+      "files",
       "prepare",
       "publish",
       "commit",

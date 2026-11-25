@@ -419,3 +419,64 @@ Deno.test("an expired detached switch gets a bounded search while new switches a
     await plan();
     deepStrictEqual(queries, []);
   }));
+
+Deno.test("delivery plan isolates overlapping source, hash and library claims and serializes cleanup", () =>
+  temporary(async (root) => {
+    const owner = crypto.randomUUID();
+    const movies = Array.from(
+      { length: 6 },
+      (_, i) => ({
+        tmdbId: i + 1,
+        title: "Title " + i,
+        year: 2026,
+        status: "transfer-ready",
+        infoHash: String(i),
+        releaseName: "source-" + i,
+      }),
+    );
+    movies[2].releaseName = "2";
+    movies[4].infoHash = movies[1].infoHash;
+    const saved = new Map<string, Record<string, unknown>>();
+    const ctx = {
+      repoDir: root,
+      signal: new AbortController().signal,
+      globalArgs: model.globalArguments.parse({}),
+      readModelData: async (name: string) =>
+        name === "movie-catalog"
+          ? movies.map((attributes) => ({ name: String(attributes.tmdbId), attributes }))
+          : [],
+      writeResource: async (_spec: string, name: string, value: Record<string, unknown>) => {
+        saved.set(name, value);
+        return { name };
+      },
+      runModel: async () => {
+        throw Error("Unexpected catalog mutation");
+      },
+    };
+    await coordinator.methods.acquire.execute({ owner }, ctx);
+    async function plan() {
+      await model.methods.planDeliveries.execute({
+        owner,
+        preview: false,
+        reorganize: false,
+        parallel: true,
+      }, ctx);
+      return model.resources.deliveryPlan.schema.parse(saved.get("deliveryPlan-current")) as {
+        first: { id: number }[];
+        second: { id: number }[];
+      };
+    }
+    const batch = await plan();
+    assert(batch.second.length > 0);
+    for (const id of [2, 3, 5]) assert(batch.first.some((item) => item.id === id));
+    deepStrictEqual([...batch.first, ...batch.second].map((item) => item.id).sort(), [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+    ]);
+    movies[0].status = "cleanup-pending";
+    assert((await plan()).second.length === 0);
+  }));

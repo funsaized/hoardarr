@@ -216,6 +216,22 @@ function transition(ctx: Context, item: Item, patch: Row) {
     transitions: [{ [idField(item.mediaKind)]: item.id, ...patch }],
   });
 }
+async function markDetached(
+  ctx: Context,
+  kind: "movie" | "episode",
+  detached: (hash: string) => boolean,
+) {
+  const transitions = (await rows(ctx, kind))
+    .filter((row) =>
+      row.status === "seed-stopped" && typeof row.infoHash === "string" && detached(row.infoHash)
+    )
+    .map((row) => ({ [idField(kind)]: catalogNumber(row, kind), to: "transfer-ready" }));
+  for (let i = 0; i < transitions.length; i += 500) {
+    await invoke(ctx, catalog(ctx, kind), "transition", {
+      transitions: transitions.slice(i, i + 500),
+    });
+  }
+}
 const getRecord = (records: RecordData[], name: string): Row | undefined =>
   records.find((r) => r.name === name)?.attributes;
 async function write(ctx: Context, spec: string, data: Row) {
@@ -231,6 +247,7 @@ const PreparedSchema = z.object({
   transfer: TransferSchema.optional(),
   directory: z.string().optional(),
   stem: z.string().optional(),
+  fileInputs: z.record(z.string(), z.unknown()).optional(),
   moves: z.array(z.object({ from: z.string(), to: z.string() })).optional(),
 });
 const LayoutSchema = z.object({
@@ -240,13 +257,22 @@ const LayoutSchema = z.object({
   directory: z.string(),
 });
 
-async function layoutFor(ctx: Context, row: Row, kind: "movie" | "episode") {
+async function layouts(ctx: Context) {
+  return (await ctx.readModelData("pipeline", "layout")).map((r) =>
+    LayoutSchema.parse(r.attributes)
+  );
+}
+
+async function layoutFor(
+  ctx: Context,
+  row: Row,
+  kind: "movie" | "episode",
+  known?: z.infer<typeof LayoutSchema>[],
+) {
   const id = `${kind === "movie" ? "movie" : "show"}-${
     kind === "movie" ? movieCatalogId(row) : seriesCatalogId(row)
   }`;
-  const saved = (await ctx.readModelData("pipeline", "layout")).map((r) =>
-    LayoutSchema.parse(r.attributes)
-  );
+  const saved = known ?? await layouts(ctx);
   let layout = saved.find((r) => r.id === id);
   const override = ctx.globalArgs.titleOverrides?.[id];
   if (!layout || (override && override !== layout.title)) {
@@ -260,6 +286,9 @@ async function layoutFor(ctx: Context, row: Row, kind: "movie" | "episode") {
     }
     layout = { id, title, year: year ?? null, directory };
     await ctx.writeResource("layout", `layout-${id}`, layout);
+    const index = saved.findIndex((entry) => entry.id === id);
+    if (index < 0) saved.push(layout);
+    else saved[index] = layout;
   }
   return libraryNames(
     {
@@ -275,6 +304,39 @@ async function layoutFor(ctx: Context, row: Row, kind: "movie" | "episode") {
   );
 }
 
+/** Shared paths and torrent identities must stay in the same serial job. */
+function deliveryLanes(entries: { item: Item; claims: string[] }[]) {
+  const uses = new Map<string, number>();
+  for (const { claims } of entries) {
+    for (const claim of new Set(claims)) uses.set(claim, (uses.get(claim) ?? 0) + 1);
+  }
+  const first: Item[] = [], second: Item[] = [];
+  for (const { item, claims } of entries) {
+    const shared = claims.some((claim) => uses.get(claim)! > 1);
+    (shared || first.length <= second.length ? first : second).push(item);
+  }
+  return { first, second };
+}
+
+function preparedResult(base: z.infer<typeof PreparedSchema>, records: RecordData[]) {
+  const key = base.key.replace(/^m-/, "");
+  const problem = records.find((r) => r.name === `problem-${key}`);
+  const manifest = records.find((r) => r.name === `manifest-${key}`);
+  const preview = records.find((r) => r.name === `preview-${key}`);
+  if (manifest && manifest.attributes.key !== key) {
+    throw new Error("Manifest belongs to another item");
+  }
+  if (!problem && !manifest && !preview) throw new Error("File preparation returned no evidence");
+  return PreparedSchema.parse({
+    ...base,
+    fileInputs: undefined,
+    ready: !!manifest && !base.preview,
+    error: problem ? String(problem.attributes.error) : null,
+    ...(manifest ? { transfer: TransferSchema.parse(manifest.attributes) } : {}),
+    ...(preview ? { moves: preview.attributes.moves } : {}),
+  });
+}
+
 async function itemRow(ctx: Context, item: Item): Promise<Row> {
   const row = (await rows(ctx, item.mediaKind)).find((r) =>
     catalogNumber(r, item.mediaKind) === item.id
@@ -285,7 +347,7 @@ async function itemRow(ctx: Context, item: Item): Promise<Row> {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.25.1",
+  version: "2026.11.25.2",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -318,6 +380,10 @@ export const model = {
   }, {
     toVersion: "2026.11.25.1",
     description: "Process frozen archive requests under existing ownership",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.25.2",
+    description: "Preserve settings for pipelined local delivery",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
@@ -417,6 +483,10 @@ export const model = {
       lifetime: "infinite",
       garbageCollection: 100,
     },
+    deliveryPlan: resource(
+      z.object({ first: z.array(WorkItem), second: z.array(WorkItem) }),
+      "Disjoint delivery jobs for the current owner",
+    ),
     prepared: resource(PreparedSchema, "Prepared import or a per-item problem"),
     import: resource(
       z.object({ key: z.string(), cleanup: z.boolean(), error: z.string().nullable() }),
@@ -555,18 +625,19 @@ export const model = {
         const state =
           ((await ctx.readModelData("pipeline", "searchState"))[0]?.attributes.attempts ??
             {}) as SearchState;
-        const ordered = prioritizeEpisodes(
-          episodeRows as unknown as EpisodeWork[],
-          state,
-          episodeRows.length,
-          new Date(),
-        );
+        const workByKey = new Map(all.map((item) => [item.key, item]));
+        const ordered = acquisition
+          ? prioritizeEpisodes(
+            episodeRows as unknown as EpisodeWork[],
+            state,
+            episodeRows.length,
+            new Date(),
+          )
+          : [];
         const searchableEpisodes = ordered.filter((r) =>
           eligible.has(`e-${episodeCatalogId(r)}`) &&
-          !episodeRows.some((row) =>
-            episodeCatalogId(row) === episodeCatalogId(r) && row.status === "selected"
-          )
-        ).map((row) => all.find((r) => r.key === `e-${episodeCatalogId(row)}`)!);
+          workByKey.get(`e-${episodeCatalogId(r)}`)?.status !== "selected"
+        ).map((row) => workByKey.get(`e-${episodeCatalogId(row)}`)!);
         const now = new Date().toISOString();
         const requested = new Set(
           requestRows.filter((r) => r.id === args.requestId)
@@ -667,7 +738,7 @@ export const model = {
           ).map(episodeCatalogId),
         );
         const tvSelected = prioritizeRequests(
-          [...selectedEpisodes].map((id) => all.find((r) => r.key === `e-${id}`)!)
+          [...selectedEpisodes].map((id) => workByKey.get(`e-${id}`)!)
             .filter((r) => r.input),
           requestRows,
           Math.min(ctx.globalArgs.episodeDownloadLimit ?? 8, ctx.globalArgs.batchLimit),
@@ -689,13 +760,18 @@ export const model = {
         const active = all.filter((r) =>
           ["downloading", "seeding"].includes(r.status) && r.infoHash
         );
-        const stopped = all.filter((r) => r.status === "seed-stopped" && r.infoHash);
+        const activeHashes = new Set(active.map((r) => r.infoHash));
+        const stopped = all.filter((r) =>
+          r.status === "seed-stopped" && r.infoHash && !activeHashes.has(r.infoHash)
+        );
+        const cleanedKeys = new Set([
+          ...movieRows.filter((r) => r.localCleanedAt).map((r) => `m-${movieCatalogId(r)}`),
+          ...episodeRows.filter((r) => r.localCleanedAt).map((r) => `e-${episodeCatalogId(r)}`),
+        ]);
         const delivery = all.filter((r) =>
           ["transfer-ready", "cleanup-pending"].includes(r.status) ||
           r.status === "transferred" &&
-            !(r.mediaKind === "movie" ? movieRows : episodeRows).find((v) =>
-              catalogNumber(v, r.mediaKind) === r.id
-            )?.localCleanedAt
+            !cleanedKeys.has(r.key)
         );
         if (args.reorganize) {
           for (const kind of ["movie", "episode"] as const) {
@@ -1329,11 +1405,7 @@ export const model = {
             ...(pendingSwitches.length ? { pendingSwitches } : {}),
           });
           // Reconcile a remove that succeeded before its acknowledgement was persisted.
-          for (const row of await rows(ctx, kind)) {
-            if (row.status === "seed-stopped" && row.infoHash && !present.has(row.infoHash)) {
-              await transition(ctx, workItem(row, kind), { to: "transfer-ready" });
-            }
-          }
+          await markDetached(ctx, kind, (hash) => !present.has(hash));
         }
         const observations = await recordTransferHealth(ctx, snapshot);
         const summary = await write(ctx, "summary", { ok: true });
@@ -1348,24 +1420,89 @@ export const model = {
         const outcomes = (getRecord(args.records, "operation-control")?.results ?? []) as Row[];
         const removed = new Set(outcomes.filter((r) => r.ok).map((r) => r.id));
         for (const kind of ["movie", "episode"] as const) {
-          for (const row of await rows(ctx, kind)) {
-            if (row.status === "seed-stopped" && removed.has(row.infoHash)) {
-              await transition(
-                ctx,
-                workItem(row, kind),
-                { to: "transfer-ready" },
-              );
+          await markDetached(ctx, kind, (hash) => removed.has(hash));
+        }
+        return write(ctx, "summary", { ok: true });
+      },
+    },
+    planDeliveries: {
+      description: "Assign local imports to disjoint serial jobs under the installation lease.",
+      arguments: Owned.extend({
+        reorganize: z.boolean(),
+        parallel: z.boolean(),
+        preview: z.boolean(),
+      }),
+      execute: async (
+        args: { owner: string; reorganize: boolean; parallel: boolean; preview: boolean },
+        ctx: Context,
+      ) => {
+        await assertLease(ctx.repoDir, args.owner);
+        const entries: { item: Item; claims: string[] }[] = [];
+        if (!args.preview || args.reorganize) {
+          const known = await layouts(ctx);
+          for (const kind of ["movie", "episode"] as const) {
+            for (const row of await rows(ctx, kind)) {
+              const ready = row.status === "transfer-ready";
+              const cleanup = row.status === "cleanup-pending" ||
+                row.status === "transferred" && !row.localCleanedAt;
+              const relocate = args.reorganize && row.status === "transferred" && !row.archivedAt &&
+                !cleanup;
+              if (!ready && !cleanup && !relocate) continue;
+              const names = cleanup ? undefined : await layoutFor(ctx, row, kind, known);
+              if (
+                relocate && row.layoutVersion === 1 && row.libraryRelativeDir === names?.directory
+              ) continue;
+              const item = workItem(row, kind);
+              const staging = kind === "movie" ? String(item.id) : item.key;
+              const source = item.releaseName ?? String(item.id);
+              const claims = [
+                "stage:" + staging,
+                "stage:" + source,
+                "library:" + names?.directory,
+                ...(item.infoHash ? ["hash:" + item.infoHash] : []),
+              ]
+                .map((path) => path.normalize("NFC").toLowerCase());
+              entries.push({ item, claims });
             }
           }
         }
-        return write(ctx, "summary", { ok: true });
+        // Historic manifests can refer to a previous library tree during cleanup or relocation.
+        const parallel = args.parallel && !args.reorganize &&
+          entries.every(({ item }) => item.status === "transfer-ready");
+        return write(
+          ctx,
+          "deliveryPlan",
+          parallel ? deliveryLanes(entries) : { first: entries.map((e) => e.item), second: [] },
+        );
+      },
+    },
+    collectPreparation: {
+      description: "Bind the file provider's per-item evidence to this import.",
+      arguments: Records.extend({ prepared: PreparedSchema }),
+      execute: async (
+        args: z.infer<typeof Records> & { prepared: z.infer<typeof PreparedSchema> },
+        ctx: Context,
+      ) => {
+        await assertLease(ctx.repoDir, args.owner);
+        const base = args.prepared;
+        const value = base.fileInputs ? preparedResult(base, args.records) : base;
+        return {
+          dataHandles: [await ctx.writeResource("prepared", `prepared-${base.key}`, value)],
+        };
       },
     },
     prepare: {
       description:
         "Prepare canonical filenames and one manifest from catalog metadata, or preview the same mapping.",
-      arguments: Owned.extend({ item: WorkItem, preview: z.boolean().default(false) }),
-      execute: async (args: { owner: string; item: Item; preview?: boolean }, ctx: Context) => {
+      arguments: Owned.extend({
+        item: WorkItem,
+        preview: z.boolean().default(false),
+        deferFiles: z.boolean().default(false),
+      }),
+      execute: async (
+        args: { owner: string; item: Item; preview?: boolean; deferFiles?: boolean },
+        ctx: Context,
+      ) => {
         await assertLease(ctx.repoDir, args.owner);
         const row = await itemRow(ctx, args.item);
         const save = (value: Row) =>
@@ -1387,10 +1524,7 @@ export const model = {
           };
         }
         const names = await layoutFor(ctx, row, args.item.mediaKind);
-        if (!args.preview) {
-          await recordExternalIntent(ctx.repoDir, args.owner, `${ctx.globalArgs.files}.prepare`);
-        }
-        const prepared = await invoke(ctx, ctx.globalArgs.files, "prepare", {
+        const fileInputs = {
           owner: args.owner,
           tmdbId: args.item.id,
           mediaKind: args.item.mediaKind,
@@ -1402,24 +1536,20 @@ export const model = {
           stem: names.stem,
           ...(row.status === "transferred" ? { previousLibraryPath: row.remotePath } : {}),
           preview: !!args.preview,
-        });
-        const problem = prepared.find((r) => r.name.startsWith("problem-"))?.attributes;
-        const key = args.item.mediaKind === "movie" ? String(args.item.id) : `e-${args.item.id}`;
-        const manifest = getRecord(prepared, `manifest-${key}`);
-        const preview = getRecord(prepared, `preview-${key}`);
-        return {
-          dataHandles: [
-            await save({
-              directory: names.directory,
-              stem: names.stem,
-              preview: !!args.preview,
-              ready: !!manifest && !args.preview,
-              error: problem ? String(problem.error) : null,
-              ...(manifest ? { transfer: TransferSchema.parse(manifest) } : {}),
-              ...(preview ? { moves: preview.moves } : {}),
-            }),
-          ],
         };
+        const base = PreparedSchema.parse({
+          key: args.item.key,
+          ready: false,
+          directory: names.directory,
+          stem: names.stem,
+          preview: !!args.preview,
+        });
+        if (args.deferFiles) return { dataHandles: [await save({ ...base, fileInputs })] };
+        if (!args.preview) {
+          await recordExternalIntent(ctx.repoDir, args.owner, `${ctx.globalArgs.files}.prepare`);
+        }
+        const prepared = await invoke(ctx, ctx.globalArgs.files, "prepare", fileInputs);
+        return { dataHandles: [await save(preparedResult(base, prepared))] };
       },
     },
     commit: {
@@ -1441,6 +1571,9 @@ export const model = {
             }),
           ],
         });
+        if (args.prepared.key !== args.item.key) {
+          throw new Error("Prepared item does not match delivery");
+        }
         if (args.prepared.preview) return result(false, args.prepared.error);
         const problem = args.records.find((r) => r.name.startsWith("problem-"))?.attributes;
         const error = args.prepared.error ?? (problem ? String(problem.error) : null);

@@ -1,9 +1,10 @@
 # Which work can run together?
 
 The downloader continues receiving and seeding files while Hoardarr runs. One media workflow owns
-the installation at a time. Within that workflow, delivery and online discovery can run together.
-The delivery job imports one title at a time. Swamp also serializes calls to the same writable
-behavior. Increasing the workflow concurrency alone would leave those limits in place.
+the installation at a time. Within that workflow, delivery and online discovery can run together. Up
+to two local imports can run at once. One can stage and hash a title while the other publishes a
+verified copy. Download planning can use the pipeline behavior while the file provider hashes the
+source.
 
 | Mechanism           | What it protects                                                                                            | When it releases                                                       |
 | ------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
@@ -28,13 +29,13 @@ ownership. See the
 
 ## Limits on parallelism
 
-Today a slow import can hold the lease for an entire reconciliation. Moving more work into parallel
-jobs requires a claim per delivery, including its catalog identity and destination paths. Episodes
-can share a season directory. Separate workers would need to coordinate directory cleanup and avoid
-changing the same catalog row or detaching a torrent another worker still needs. Installation-wide
-maintenance would also need to wait for every outstanding claim.
+For each run, Hoardarr groups imports by catalog item, torrent hash, source name, staging path and
+library directory. Imports that share any of these resources run in the first delivery job, in
+catalog order. Hoardarr distributes independent imports between the two jobs. Episodes in the same
+season directory stay together.
 
-A practical next step is to measure time waiting for behavior locks separately from time spent
-copying and hashing files. Those measurements can identify which operation to split first. Automatic
-takeover of a failed worker would also need evidence that its previous writer has stopped and a
-journal that can reconcile its last external action.
+Each job finishes one title before starting another. Both use the same file and destination
+providers, so two copies or two staging operations still run in sequence. A run with pending
+cleanup, library reorganization or a remote destination uses one delivery job. The installation
+lease covers both jobs through completion, including receipt verification and cleanup. Maintenance
+waits for the owner to release it.

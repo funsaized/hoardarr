@@ -51,21 +51,24 @@ export function prioritizeEpisodes<T extends EpisodeWork>(
   for (const recent of [true, false]) {
     const groups = new Map<number, T[]>();
     for (const e of due.filter((e) => (String(e.airDate ?? "") >= recentSince) === recent)) {
-      groups.set(seriesCatalogId(e), [...(groups.get(seriesCatalogId(e)) ?? []), e]);
+      const id = seriesCatalogId(e);
+      const group = groups.get(id);
+      if (group) group.push(e);
+      else groups.set(id, [e]);
     }
     for (const group of groups.values()) {
       group.sort((a, b) =>
         String(b.airDate ?? "").localeCompare(String(a.airDate ?? "")) ||
         b.seasonNumber - a.seasonNumber || b.episodeNumber - a.episodeNumber ||
         episodeCatalogId(a) - episodeCatalogId(b)
-      );
+      ).reverse();
     }
     const shows = [...groups.keys()].sort((a, b) =>
       (served.get(a) ?? "").localeCompare(served.get(b) ?? "") || a - b
     );
     while (shows.some((id) => groups.get(id)!.length) && result.length < limit) {
       for (const id of shows) {
-        const episode = groups.get(id)!.shift();
+        const episode = groups.get(id)!.pop();
         if (episode) result.push(episode);
         if (result.length === limit) break;
       }
