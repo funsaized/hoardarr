@@ -17,7 +17,7 @@ export const Resolution = z.object({
   revision: z.string().min(1).max(80),
   candidate: z.number().int().positive().optional(),
   match: z.number().int().positive().optional(),
-}).strict();
+});
 type Input = z.infer<typeof Resolution>;
 type Row = Record<string, unknown>;
 type Context = Runtime & {

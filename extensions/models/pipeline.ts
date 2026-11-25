@@ -356,7 +356,7 @@ async function itemRow(ctx: Context, item: Item): Promise<Row> {
 /** Swamp behavior implementing pipeline operations. */
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.25.4",
+  version: "2026.11.25.5",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -401,6 +401,10 @@ export const model = {
   }, {
     toVersion: "2026.11.25.4",
     description: "Preserve catalog settings for operator resolutions",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.25.5",
+    description: "Accept resolution commands with installed pipeline settings",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,

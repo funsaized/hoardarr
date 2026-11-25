@@ -1,6 +1,16 @@
-import { episodeRevision, resolveAttention } from "../extensions/models/_lib/attention.ts";
+import {
+  episodeRevision,
+  Resolution,
+  resolveAttention,
+} from "../extensions/models/_lib/attention.ts";
 import { trackedKey } from "../extensions/models/_lib/tracked_tv.ts";
 import type { RecordData, RunResult } from "../extensions/models/_lib/runtime.ts";
+
+Deno.test("Swamp can pass pipeline globals alongside resolution arguments", () => {
+  const command = { action: "retry", target: "m-1", revision: "2026-11-25T18:00:00.000Z" };
+  const parsed = Resolution.parse({ movies: "movie-catalog", batchLimit: 10, ...command });
+  if (JSON.stringify(parsed) !== JSON.stringify(command)) throw Error("Unexpected command fields");
+});
 
 Deno.test("review decisions validate current evidence before writing and release the owner", async () => {
   const tracked = { name: "Orbit", tmdbId: 20, category: "tv" as const },
