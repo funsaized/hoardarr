@@ -70,9 +70,10 @@ export const ConfigSchema = z.object({
     episode: PolicySchema.default(episodePolicy),
   }).strict().default({ movie: moviePolicy, episode: episodePolicy }),
   search: z.object({
+    perSource: z.number().int().min(1).max(16).default(2),
     concurrency: z.number().int().min(1).max(16).default(4),
     timeoutSeconds: z.number().int().min(1).max(300).default(45),
-  }).strict().default({ concurrency: 4, timeoutSeconds: 45 }),
+  }).strict().default({ concurrency: 4, timeoutSeconds: 45, perSource: 2 }),
   download: z.object({
     seedTime: z.string().regex(/^\d+[smhd]?$/).default("5m"),
     concurrency: z.number().int().min(1).max(16).default(4),

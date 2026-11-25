@@ -18,6 +18,7 @@ models:
   - public_guest_network.ts
   - torlink_migration.ts
   - tracked_tv.ts
+  - torlink_search.ts
   - torlink_telemetry.ts
   - public_movie_catalog.ts
   - public_episode_catalog.ts

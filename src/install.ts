@@ -362,7 +362,12 @@ async function installUnlocked(
     await define(
       `${role === "downloader" ? "download" : role}-provider`,
       "@funsaized/hoardarr/provider",
-      { definition: name, descriptor },
+      {
+        definition: name,
+        descriptor: config.guest && id === "torlink" && role === "search"
+          ? { ...descriptor, methods: { ...descriptor.methods, search: "boundedSearch" } }
+          : descriptor,
+      },
     );
   }
   const requestSupported = Boolean(
@@ -452,7 +457,9 @@ async function installUnlocked(
   for (
     const name of [
       "media",
-      ...(config.guest && config.providers.downloader === "torlink" ? ["hoardarr-transfer-sampling"] : []),
+      ...(config.guest && config.providers.downloader === "torlink"
+        ? ["hoardarr-transfer-sampling"]
+        : []),
       "hoardarr-observation",
       "hoardarr-discovery",
       "hoardarr-acquisition",

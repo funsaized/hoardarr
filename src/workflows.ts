@@ -228,8 +228,18 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
   discovery.push(savedIngest("ingest-episodes", "episode", "episodes"));
 
   if (config.providers.discovery === "tmdb" && config.interests.shows.length) {
-    discovery.push(skip(method("tracked-tv-refresh", "tracked-tv", "refresh", {}, "ingest-episodes"), 'inputs.requestId != ""'));
-    discovery.push(skip(method("tracked-tv-ingest", "pipeline", "ingestTracked", owned, "tracked-tv-refresh"), 'inputs.requestId != ""'));
+    discovery.push(
+      skip(
+        method("tracked-tv-refresh", "tracked-tv", "refresh", {}, "ingest-episodes"),
+        'inputs.requestId != ""',
+      ),
+    );
+    discovery.push(
+      skip(
+        method("tracked-tv-ingest", "pipeline", "ingestTracked", owned, "tracked-tv-refresh"),
+        'inputs.requestId != ""',
+      ),
+    );
   }
 
   const acquisition: Node[] = [call("health", "download-provider", "health")];
@@ -249,7 +259,12 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
       "search",
       {
         queries: expr('steps["search-plan"].outputs.queries'),
-        ...(config.providers.search === "torlink" ? { timeoutSeconds: config.search.timeoutSeconds } : {}),
+        ...(native && config.providers.search === "torlink"
+          ? { perSource: config.search.perSource }
+          : {}),
+        ...(config.providers.search === "torlink"
+          ? { timeoutSeconds: config.search.timeoutSeconds }
+          : {}),
         ...(config.torlink.interface ? { interface: config.torlink.interface } : {}),
       },
       "search-plan",
