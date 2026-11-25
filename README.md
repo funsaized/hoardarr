@@ -96,8 +96,8 @@ large batch can take time. Between runs the downloader keeps working.
 
 On the native profile, startup checks the installation identity, enrolled storage and commissioning
 record. Compose relies on Gluetun's firewall and container network namespace. You operate both
-through the CLI or Swamp. Pi comes with the native profile. The native queue board gives you a
-read-only view of downloads and deliveries. [Open the board](#live-queue-board).
+through the CLI or Swamp. Pi comes with the native profile. The native queue board shows transfers
+and episode coverage. Operators can also start a media run. [Open the board](#live-queue-board).
 
 ## Installation
 
@@ -691,11 +691,23 @@ enrolled management transport.
 
 ### Live queue board
 
-The native appliance serves a purple queue board from a private guest socket. It shows Torlink's
-waiting order, active transfers and seeds alongside Hoardarr's backlog and verified deliveries.
-Select a stage to filter the list or a title for its details. Delivered today follows your browser's
-local date. Each source has its own timestamp. If a source goes offline, its last reading stays
-visible with a stale indicator.
+Open **Transfers** to see Torlink’s waiting order, active downloads and seeds alongside the catalog
+backlog. Select a title to inspect its transfer. Switching stages clears the selection. Delivered
+today uses your browser’s local date.
+
+Open **Tracked library** to search movies and shows. Expand a show to see its known episodes in
+season order. Downloaded includes episodes that have reached seeding, delivery or archival.
+Remaining counts episodes still wanted, including failed downloads. Ignored episodes count toward
+the known total. Select the remaining count to list outstanding episodes by show. Select it again to
+return to the full library.
+
+The operating mode controls run the same commands as the guest CLI. **Preview plan** calculates the
+next plan and shows the titles selected for acquisition or delivery, along with the time of the
+catalog reading. **Refresh discovery** updates the catalog, and **Run media pipeline** processes
+deliveries and acquisitions. To start an operation, read the key with
+`sudo cat /run/hoardarr-board/operator.key` in the guest and enter it in the board. The key rotates
+when the board service restarts. The board shows the result and accepts one operation at a time.
+Workflow history and the guest journal retain the details.
 
 Transfer readings refresh every 15 seconds while downloads are active or queued, and every minute
 when idle. Catalog readings refresh once a minute. Open screens share a cache. The service reads

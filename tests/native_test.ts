@@ -137,6 +137,12 @@ Deno.test("native board follows the media service through starts and maintenance
     const swamp = await Deno.readTextFile(root + "/hoardarr-swamp.service");
     assert(board.includes("PartOf=hoardarr-swamp.service"));
     assert(board.includes("unix:/run/hoardarr-board/http.sock"));
+    const socket = "/run/hoardarr/board-command.sock";
+    assert(board.includes("--allow-write=/run/hoardarr-board," + socket));
+    assert(board.includes("unix:" + socket));
+    const worker = await Deno.readTextFile(root + "/hoardarr-board-command@.service");
+    assert(worker.includes("User=" + config.guest!.user));
+    assert(worker.includes("StandardInput=socket"));
     assert(/^Wants=.*hoardarr-board\.service/m.test(swamp));
   });
 });

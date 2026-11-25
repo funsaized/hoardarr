@@ -44,7 +44,8 @@ function freshness() {
 function render() {
   if (!snapshot) return;
   const { live, catalog } = snapshot;
-  const byHash = new Map(catalog.rows.filter((r) => r.hash).map((r) => [r.hash.toLowerCase(), r]));
+  const activeCatalog = catalog.rows.filter((r) => !r.archived);
+  const byHash = new Map(activeCatalog.filter((r) => r.hash).map((r) => [r.hash.toLowerCase(), r]));
   const joined = new Set();
   const rows = live.rows.map((t) => {
     const c = byHash.get(t.id.toLowerCase());
@@ -52,7 +53,7 @@ function render() {
     return { ...t, id: c?.id ?? t.id, title: c?.title ?? t.title, release: t.title };
   });
   rows.push(
-    ...catalog.rows.filter((c) => !joined.has(c.id)).map((c) => ({
+    ...activeCatalog.filter((c) => !joined.has(c.id)).map((c) => ({
       ...c,
       state: ["downloading", "seeding"].includes(c.state)
         ? "awaiting downloader observation"
@@ -82,13 +83,14 @@ function render() {
     ? "Partial · stale data"
     : "●  Connected";
   byId("health").classList.toggle("stale", offline || live.stale || catalog.stale);
+  if (!groups.get(current).some((r) => r.id === selected)) selected = undefined;
   stages.forEach((s, i) => {
     const b = byId("stages").children[i];
     b.lastChild.textContent = unknown(s) ? "—" : groups.get(s).length;
     b.setAttribute("aria-pressed", s === current);
   });
   function list(node, items, empty) {
-    const previous = document.activeElement?.dataset.id;
+    const previous = node.contains(document.activeElement) && document.activeElement.dataset.id;
     node.replaceChildren();
     for (const r of items) {
       const b = element("button", "", "row");
@@ -103,7 +105,8 @@ function render() {
         b.append(p);
       }
       b.onclick = () => {
-        selected = r.id;
+        if (node.id === "next") current = "Waiting";
+        selected = selected === r.id ? undefined : r.id;
         render();
       };
       node.append(b);
@@ -142,17 +145,223 @@ function render() {
       if (v != null) dl.append(element("dt", k), element("dd", String(v)));
     }
   }
+  renderPreview(snapshot.preview);
+  const op = snapshot.operation;
+  byId("operation").textContent = op?.mode ? modes[op.mode].label + " · " + op.status : "Idle";
+  byId("execute").disabled = offline || !op || op.status === "Running";
+  if (!byId("library").hidden) library();
   freshness();
 }
 for (const stage of stages) {
   const b = element("button", "");
   b.append(element("small", stage), element("strong", "—"));
   b.onclick = () => {
+    selected = undefined;
     current = stage;
     render();
   };
   byId("stages").append(b);
 }
+const modes = {
+  preview: {
+    label: "Preview plan",
+    button: "Start preview",
+    help: "Calculate the next media plan from the saved catalog.",
+  },
+  discover: {
+    label: "Refresh discovery",
+    button: "Refresh catalog",
+    help: "Discover media and update the catalog without starting downloads.",
+  },
+  run: {
+    label: "Run media pipeline",
+    button: "Start media run",
+    help: "Reconcile transfers, deliver ready files and acquire eligible releases.",
+  },
+};
+function modeChanged() {
+  const mode = modes[byId("commands").elements.workflow.value];
+  byId("mode-help").textContent = mode.help;
+  byId("execute").textContent = mode.button;
+}
+byId("mode").onchange = modeChanged;
+modeChanged();
+byId("commands").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = byId("execute");
+  button.disabled = true;
+  try {
+    const mode = byId("commands").elements.workflow.value;
+    const res = await fetch("/api/operate/" + mode, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + byId("key").value.trim() },
+    });
+    byId("feedback").textContent = res.ok
+      ? modes[mode].label + " accepted."
+      : res.status === 403
+      ? "Operator key rejected."
+      : res.status === 409
+      ? "Another operation is running."
+      : "Operation unavailable.";
+    if (res.ok) snapshot.operation = await res.json();
+  } catch {
+    byId("feedback").textContent = "Connection lost. Check operation status before retrying.";
+  }
+  render();
+  await update();
+};
+for (const button of byId("views").children) {
+  button.onclick = () => {
+    for (const other of byId("views").children) {
+      const active = other === button;
+      other.setAttribute("aria-pressed", active);
+      byId(other.dataset.view).hidden = !active;
+    }
+    selected = undefined;
+    render();
+  };
+}
+function renderPreview(plan) {
+  byId("preview").hidden = !plan;
+  if (!plan) return;
+  byId("preview-time").textContent = "Catalog plan recorded " +
+    new Date(plan.observed).toLocaleString();
+  const groups = byId("plan-groups");
+  groups.replaceChildren();
+  if (!plan.acquisitions.length && !plan.deliveries.length) {
+    groups.append(
+      element("p", "No acquisitions or deliveries are planned from this catalog reading."),
+    );
+    return;
+  }
+  for (
+    const [label, titles] of [["Acquisitions", plan.acquisitions], ["Deliveries", plan.deliveries]]
+  ) {
+    const column = element("div", "");
+    column.append(element("h3", label + " · " + titles.length));
+    const list = element("ul", "");
+    for (const title of titles) list.append(element("li", title));
+    column.append(list);
+    groups.append(column);
+  }
+}
+const remainingButton = byId("remaining");
+const expandedSeries = new Set();
+const collapsedRemaining = new Set();
+remainingButton.onclick = () => {
+  remainingButton.setAttribute(
+    "aria-pressed",
+    remainingButton.getAttribute("aria-pressed") !== "true",
+  );
+  library();
+};
+function library() {
+  const { rows, shows, observed } = snapshot.catalog;
+  const titles = byId("titles");
+  const focused = document.activeElement.closest("#titles details")?.dataset.id;
+  titles.replaceChildren();
+  const series = new Map((shows ?? []).map((s) => [s.id, { name: s.name, episodes: [] }]));
+  const movies = [];
+  const downloaded = (r) =>
+    ["seeding", "seed-stopped", "transfer-ready", "cleanup-pending", "transferred"].includes(
+      r.state,
+    );
+  const remaining = (r) => !downloaded(r) && !r.archived && r.state !== "ignored";
+  let total = 0, done = 0, left = 0;
+  for (const r of rows) {
+    if (!r.showId) {
+      movies.push(r);
+      continue;
+    }
+    if (!series.has(r.showId)) series.set(r.showId, { name: r.show, episodes: [] });
+    series.get(r.showId).episodes.push(r);
+    total++;
+    if (downloaded(r)) done++;
+    if (remaining(r)) left++;
+  }
+  remainingButton.hidden = !observed;
+  remainingButton.textContent = left + " remaining";
+  const onlyRemaining = remainingButton.getAttribute("aria-pressed") === "true";
+  byId("totals").textContent = observed
+    ? series.size + " shows  /  " + movies.length + " movies  /  " + total +
+      " known episodes  /  " + done + " downloaded  /  "
+    : "Waiting for catalog.";
+  const query = byId("filter").value.trim().toLowerCase();
+  for (const [id, show] of [...series].sort((a, b) => a[1].name.localeCompare(b[1].name))) {
+    if (!show.name.toLowerCase().includes(query)) continue;
+    const eps = show.episodes;
+    const visible = onlyRemaining ? eps.filter(remaining) : eps;
+    if (!visible.length && onlyRemaining) continue;
+    const d = element("details", "", "series");
+    d.dataset.id = String(id);
+    const summary = element("summary", "");
+    summary.append(
+      element("b", show.name),
+      element(
+        "span",
+        eps.length
+          ? eps.filter(downloaded).length + "/" + eps.length + " downloaded · " +
+            eps.filter(remaining).length + " remaining"
+          : "No known episodes",
+        "meta",
+      ),
+    );
+    d.append(summary);
+    const fill = () => {
+      if (!d.open || d.children.length > 1) return;
+      for (const ep of visible.sort((a, b) => a.season - b.season || a.episode - b.episode)) {
+        const line = element("div", "", "episode");
+        line.append(
+          element(
+            "b",
+            "S" + String(ep.season).padStart(2, "0") + "E" + String(ep.episode).padStart(2, "0"),
+          ),
+          element("span", ep.episodeTitle || "Untitled episode"),
+          element("small", ep.archived ? "archived" : ep.state),
+        );
+        d.append(line);
+      }
+    };
+    d.open = onlyRemaining ? !collapsedRemaining.has(id) : expandedSeries.has(id);
+    fill();
+    d.ontoggle = () => {
+      if (!d.isConnected) return;
+      if (onlyRemaining) {
+        if (d.open) collapsedRemaining.delete(id);
+        else collapsedRemaining.add(id);
+      } else if (d.open) expandedSeries.add(id);
+      else expandedSeries.delete(id);
+      fill();
+    };
+    titles.append(d);
+    if (focused === String(id)) summary.focus({ preventScroll: true });
+  }
+  for (const m of (onlyRemaining ? [] : movies).sort((a, b) => a.title.localeCompare(b.title))) {
+    if (!m.title.toLowerCase().includes(query)) continue;
+    const div = element("div", "", "movie");
+    div.append(
+      element("b", m.title),
+      element("span", "Movie · " + (m.archived ? "archived" : m.state), "meta"),
+    );
+    titles.append(div);
+  }
+  if (observed && !titles.children.length) {
+    titles.append(
+      element(
+        "p",
+        query
+          ? "No matching titles."
+          : onlyRemaining
+          ? "No remaining episodes."
+          : "No tracked titles yet.",
+        "empty",
+      ),
+    );
+  }
+}
+byId("filter").oninput = () => {
+  if (snapshot) library();
+};
 async function update() {
   clearTimeout(timer);
   if (document.hidden || loading) return;
@@ -169,7 +378,8 @@ async function update() {
     else byId("health").textContent = "Board unavailable · retrying";
   } finally {
     loading = false;
-    const fast = offline || snapshot?.live.stale || snapshot?.catalog.stale ||
+    const fast = snapshot?.operation?.status === "Running" || offline || snapshot?.live.stale ||
+      snapshot?.catalog.stale ||
       snapshot?.live.rows.some((r) => ["queued", "downloading"].includes(r.state));
     if (!document.hidden) timer = setTimeout(update, fast ? 15000 : 60000);
   }

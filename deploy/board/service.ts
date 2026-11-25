@@ -1,6 +1,6 @@
 // The browser only sees these projections. Provider responses can include private locators.
 const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName == "episode")';
+  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"])';
 type Transfer = {
   id: string;
   name: string;
@@ -85,24 +85,38 @@ async function catalog() {
   }).output();
   if (!result.success) throw new Error("Catalog unavailable");
   const { results } = JSON.parse(new TextDecoder().decode(result.stdout));
-  return results.filter((r: Record<string, unknown>) => !r.archivedAt).map((
-    r: Record<string, unknown>,
-  ) => ({
-    id: r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.tmdbId}`,
-    hash: r.infoHash,
-    title: r.showName
-      ? `${r.showName} · S${String(r.seasonNumber).padStart(2, "0")}E${
-        String(r.episodeNumber).padStart(2, "0")
-      }`
-      : r.title,
-    state: r.status,
-    delivered: r.transferredAt,
-    reason: r.error
-      ? "Recorded error · inspect operator status"
-      : r.noMatchReason
-      ? "Waiting for an eligible release"
-      : null,
+  const configured = results.find((row: { shows?: unknown[] }) => Array.isArray(row.shows));
+  const shows = (configured?.shows ?? []).map((s: { tmdbId: number; name: string }) => ({
+    id: s.tmdbId,
+    name: s.name,
   }));
+  return {
+    shows,
+    rows: results.filter((r: Record<string, unknown>) => !r.shows).map((
+      r: Record<string, unknown>,
+    ) => ({
+      id: r.tmdbEpisodeId ? `e-${r.tmdbEpisodeId}` : `m-${r.tmdbId}`,
+      hash: r.infoHash,
+      archived: !!r.archivedAt,
+      showId: r.showTmdbId,
+      show: r.showName,
+      season: r.seasonNumber,
+      episode: r.episodeNumber,
+      episodeTitle: r.episodeTitle,
+      title: r.showName
+        ? `${r.showName} · S${String(r.seasonNumber).padStart(2, "0")}E${
+          String(r.episodeNumber).padStart(2, "0")
+        }`
+        : r.title,
+      state: r.status,
+      delivered: r.transferredAt,
+      reason: r.error
+        ? "Recorded error · inspect operator status"
+        : r.noMatchReason
+        ? "Waiting for an eligible release"
+        : null,
+    })),
+  };
 }
 export function cache<T>(load: () => Promise<T>, interval: (value: T) => number) {
   let data: T | undefined,
@@ -147,6 +161,37 @@ if (import.meta.main) {
   ) {
     assets.set(route, { body: await Deno.readFile(new URL(file, import.meta.url)), type });
   }
+  const key = crypto.randomUUID();
+  await Deno.writeTextFile("/run/hoardarr-board/operator.key", key + "\n", { mode: 0o600 });
+  let preview: { observed: string; acquisitions: string[]; deliveries: string[] } | null = null;
+  let operation = { mode: "", status: "Idle", started: 0 };
+  async function operate(mode: string) {
+    operation = { mode, status: "Running", started: Date.now() };
+    try {
+      const socket = await Deno.connect({
+        transport: "unix",
+        path: "/run/hoardarr/board-command.sock",
+      });
+      try {
+        const out = socket.writable.getWriter();
+        await out.write(new TextEncoder().encode(mode + "\n"));
+        out.releaseLock();
+        const result = await new Response(socket.readable).text();
+        if (mode === "preview" && result.startsWith("{")) {
+          preview = JSON.parse(result);
+          operation.status = "Succeeded";
+        } else {operation.status = result.trim() === "OK"
+            ? "Succeeded"
+            : "Failed · inspect operator journal";}
+      } finally {
+        try {
+          socket.close();
+        } catch { /* already closed */ }
+      }
+    } catch {
+      operation.status = "Failed · operator unavailable";
+    }
+  }
   Deno.serve({ path: "/run/hoardarr-board/http.sock" }, async (req) => {
     const headers = {
       "Cache-Control": "no-store",
@@ -154,11 +199,33 @@ if (import.meta.main) {
       "Content-Security-Policy":
         "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
     };
-    if (req.method !== "GET") return new Response(null, { status: 405, headers });
     const route = new URL(req.url).pathname;
+    if (route.startsWith("/api/operate/") && req.method === "POST") {
+      const mode = route.slice("/api/operate/".length);
+      if (!["preview", "discover", "run"].includes(mode)) {
+        return new Response(null, { status: 404, headers });
+      }
+      if (req.headers.get("authorization") !== "Bearer " + key) {
+        return new Response(null, { status: 403, headers });
+      }
+      if (operation.status === "Running") return new Response(null, { status: 409, headers });
+      void operate(mode);
+      return Response.json(operation, { status: 202, headers });
+    }
+    if (req.method !== "GET") return new Response(null, { status: 405, headers });
     if (route === "/api/board") {
       const [live, catalog] = await Promise.all([readLive(), readCatalog(false)]);
-      return Response.json({ live, catalog }, { headers });
+      const saved = catalog.rows;
+      return Response.json({
+        live,
+        catalog: {
+          ...catalog,
+          rows: "rows" in saved ? saved.rows : [],
+          shows: "shows" in saved ? saved.shows : [],
+        },
+        operation,
+        preview,
+      }, { headers });
     }
     const asset = assets.get(route);
     return asset

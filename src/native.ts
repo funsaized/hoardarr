@@ -286,9 +286,19 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     `KillMode=control-group\nTimeoutStopSec=120\nRestart=on-failure\nRestartSec=10\n`;
   await Deno.writeTextFile(
     join(path, "hoardarr-board.service"),
-    `[Unit]\nDescription=Hoardarr read-only queue board\nPartOf=hoardarr-swamp.service\nAfter=hoardarr-swamp.service hoardarr-egress-guard.service\nRequires=hoardarr-egress-guard.service\nRequiresMountsFor=${
+    `[Unit]\nDescription=Hoardarr operator board\nRequires=hoardarr-board-command.socket\nPartOf=hoardarr-swamp.service\nAfter=hoardarr-swamp.service hoardarr-egress-guard.service\nRequires=hoardarr-egress-guard.service\nRequiresMountsFor=${
       q(g.projectRoot)
-    }\n[Service]\n${common}RuntimeDirectory=hoardarr-board\nRuntimeDirectoryMode=0700\nIPAddressDeny=any\nIPAddressAllow=localhost\nExecStart=${direct}/usr/local/bin/deno run --no-config --allow-env=TORLINK_STATE_DIR --allow-read --allow-write=/run/hoardarr-board --allow-net=127.0.0.1:9161,unix:/run/hoardarr-board/http.sock --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts\n`,
+    }\n[Service]\n${common}RuntimeDirectory=hoardarr-board\nRuntimeDirectoryMode=0700\nIPAddressDeny=any\nIPAddressAllow=localhost\nExecStart=${direct}/usr/local/bin/deno run --no-config --allow-env=TORLINK_STATE_DIR --allow-read --allow-write=/run/hoardarr-board,/run/hoardarr/board-command.sock --allow-net=127.0.0.1:9161,unix:/run/hoardarr-board/http.sock,unix:/run/hoardarr/board-command.sock --allow-run=/usr/local/bin/swamp /opt/hoardarr/deploy/board/service.ts\n`,
+  );
+  await Deno.writeTextFile(
+    join(path, "hoardarr-board-command.socket"),
+    `[Unit]\nDescription=Hoardarr operator command socket\nPartOf=hoardarr-board.service\n[Socket]\nListenStream=/run/hoardarr/board-command.sock\nAccept=yes\nSocketUser=${g.user}\nSocketMode=0600\nMaxConnections=1\n`,
+  );
+  await Deno.writeTextFile(
+    join(path, "hoardarr-board-command@.service"),
+    `[Unit]\nDescription=Hoardarr dashboard operation\nBindsTo=hoardarr-board.service hoardarr-egress-guard.service\nAfter=hoardarr-board.service hoardarr-egress-guard.service\n[Service]\n${
+      common.replace("Restart=on-failure", "Restart=no")
+    }StandardInput=socket\nStandardOutput=socket\nStandardError=journal\nExecStart=${direct}/usr/bin/python3 /opt/hoardarr/deploy/board/command.py\n`,
   );
   // A socket-activated root helper supplies fresh redacted status. Applications get no VPN control.
   await Deno.writeTextFile(
