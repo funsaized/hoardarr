@@ -1,5 +1,6 @@
 /// <reference lib="deno.ns" />
 import { model, testing } from "./movie_catalog.ts";
+import { model as publicModel } from "./public_movie_catalog.ts";
 
 type CatalogContext = Parameters<typeof testing.executeIngest>[1];
 type Movie = ReturnType<typeof testing.schemas.movie.parse>;
@@ -1388,6 +1389,8 @@ Deno.test("malformed catalog records block planning instead of becoming empty wo
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
   assertEquals(model.version, "2026.11.26.3", "model version");
+  assertEquals(publicModel.version, model.version, "public and local versions agree");
+  assertEquals(publicModel.upgrades.at(-1)?.toVersion, publicModel.version, "public upgrade chain");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {
