@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-all
 import { Resolution } from "../extensions/models/_lib/attention.ts";
+import { previewIdentities } from "../src/identity.ts";
 import { movieSummary } from "../src/movies.ts";
 /** Hoardarr operator CLI. All scheduled execution remains a Swamp workflow. */
 import { ARCHIVE_HELP, archiveCommand } from "../src/archive.ts";
@@ -49,6 +50,7 @@ init       Prepare and install a demo or compose-vpn-local profile (--profile NA
 apply      Generate and validate definitions from the selected configuration.
 doctor     Check runtime, extension loading and configured filesystem paths.
 confirm-series Choose a TVmaze series (--review KEY --id ID --revision TIME).
+identity   preview tracked-episode links, remaining conflicts and air-time holds.
 resolve    exclude|link|retry|resume|reseed|recheck --target KEY --revision VALUE [--candidate ID] [--match ID].
 plan       Preview catalog work; --refresh also refreshes discovery.
 run        Reconcile discovery, downloads, verified delivery and cleanup.
@@ -200,6 +202,11 @@ async function mainUnlocked(argv: string[]): Promise<void> {
     return;
   }
   const config = await readConfig(configPath);
+  if (action === "identity") {
+    if (argv[1] !== "preview") throw Error("Use identity preview");
+    output(await previewIdentities(repo, config.interests.shows));
+    return;
+  }
   if (action === "movies") {
     const args = argv.slice(1, argv.includes("--dir") ? argv.indexOf("--dir") : undefined).filter(
       (a) => a !== "--json",

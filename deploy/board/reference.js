@@ -7,6 +7,10 @@ export const commandGroups = [
       "doctor [--live]",
       "Check the installation and its providers. Add --live to probe the running downloader.",
     ],
+    [
+      "identity preview",
+      "Preview tracked episode matches and the evidence for each remaining conflict.",
+    ],
     ["movies", "Summarize movie progress, archived titles and search problems."],
     ["movies explain TITLE_OR_TMDB_ID", "Trace one movie through saved searches and the library."],
     ["swamp help", "Discover the Swamp CLI available through the guest operator."],
@@ -217,6 +221,10 @@ export const stepDescriptions = {
   "discovery-provider.movies": "Discover eligible movies within the configured interests.",
   "discovery-provider.episodes": "Discover episodes for configured shows.",
   "tracked-tv.refresh": "Refresh provider series and episode records for tracked shows.",
+  "tracked-tv.resolveQuestions":
+    "Ask the configured curator about a batch of unresolved identities.",
+  "pipeline.applyIdentityAnswers":
+    "Recheck curator answers against current catalog evidence and apply verified links.",
   "pipeline.ingestTracked":
     "Add eligible aired episodes and flag conflicting identities for review.",
   "download-provider.health": "Check that the downloader responds.",

@@ -1193,3 +1193,9 @@ button.event:focus-visible {
     line-height: .9rem;
   }
 }
+
+.search-group > summary {
+  cursor: pointer;
+  padding: 0.75rem 0.5rem;
+  font-weight: 600;
+}

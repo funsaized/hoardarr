@@ -1,3 +1,4 @@
+import { IdentityLink } from "./identity_resolution.ts";
 import { SwitchCandidate } from "./switch_release.ts";
 /** Hoardarr local episode catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4.5.1";
@@ -12,7 +13,7 @@ import {
   rankEligible,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.25.4";
+const MODEL_VERSION = "2026.11.26.1";
 const SPEC_EPISODE = "episode";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -1000,6 +1001,10 @@ export const definition = {
     toVersion: "2026.11.25.4",
     description: "Preserve catalog slots when linking TVmaze episodes",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.26.1",
+    description: "Retain verified catalog links and source numbering",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: GlobalArgumentsSchema,
   resources: {
@@ -1024,6 +1029,39 @@ export const definition = {
     },
   },
   methods: {
+    linkIdentities: {
+      description:
+        "Attach a batch of verified provider aliases without changing receipt, numbering or transfer state",
+      arguments: z.object({ links: z.array(IdentityLink).max(30000) }),
+      execute: async ({ links }: { links: IdentityLink[] }, context: Context) => {
+        const rows = await loadAllEpisodes(context);
+        const result = [];
+        for (const link of links) {
+          const row = rows.find((r) => episodeCatalogId(r) === link.match);
+          const alias = link.provider === "tvmaze" ? "tvmazeEpisodeId" : "tmdbEpisodeId";
+          const series = link.provider === "tvmaze" ? "tvmazeSeriesId" : "showTmdbId";
+          if (
+            !row || row.seasonNumber !== link.season || row.episodeNumber !== link.number ||
+            (row[series] && row[series] !== link.series) ||
+            (row[alias] && row[alias] !== link.candidate) ||
+            rows.some((r) => r !== row && r[alias] === link.candidate)
+          ) throw Error("Identity evidence changed before catalog commit");
+          if (row[alias] === link.candidate) continue;
+          const saved = {
+            ...row,
+            [series]: link.series,
+            [alias]: link.candidate,
+            identityLinks: {
+              ...(row.identityLinks as Record<string, unknown> ?? {}),
+              [link.provider]: { ...link, at: new Date().toISOString() },
+            },
+          };
+          result.push(await writeEpisode(context, saved));
+          Object.assign(row, saved);
+        }
+        return { dataHandles: result };
+      },
+    },
     linkReviewedTvmaze: {
       description: "Link an operator-reviewed TVmaze episode to an existing catalog slot",
       arguments: z.object({

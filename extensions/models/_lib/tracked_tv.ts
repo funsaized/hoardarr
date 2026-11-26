@@ -24,6 +24,7 @@ export const Episode = z.object({
   number: z.number().int().nullable(),
   airdate: z.string().nullish(),
   airstamp: z.string().nullish(),
+  alternate: z.array(z.object({ list: id, season: id, number: id })).max(8).optional(),
 });
 export const TrackedEpisodeList = z.object({
   tracked: TrackedSeries,

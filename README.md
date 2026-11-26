@@ -469,7 +469,15 @@ The launcher starts Pi in the root-managed, non-delegated `hoardarragent.slice`.
 process group can use DevVM's proxy. Media services and commands launched by `hoardarr-operator` run
 outside that group, with their existing VPN guard, direct environment and restricted privileges. Pi
 retains the management user's authorized sudo access. Scheduled media processing needs no running Pi
-session or model calls.
+session.
+
+After a media run releases the library, an enrolled Pi can review unresolved movie, series and
+episode identities. Hoardarr sends catalog and provider evidence in batches of up to six episodes
+from one season, or one movie or series at a time. The curator returns a decision and a reason.
+Hoardarr checks the current evidence again before applying a link. Unanswered cases stay in
+**Attention** while other titles continue. Run `sudo hoardarr-operator identity preview` to inspect
+tracked episodes against the current catalog. Set `guest.identityAgent: false` to disable curator
+calls.
 
 Try asking: “Give me a read-only health summary,” “Download Severance (2022) season 1 episode 3,” or
 “Finish the remaining episodes of The Good Place (2016).” Include a year for ambiguous titles.
@@ -712,12 +720,13 @@ timeline**, choose **Newest first** for recent changes or **Oldest first** to fo
 through delivery. Dates and times are local. A starting byte count gives the downloader a baseline.
 Two comparable readings with the same byte count produce a “No new bytes” entry.
 
-**Attention** explains how to handle each group of issues. Hover over an episode action or focus it
-with the keyboard to read its effect. On a phone, tap it to review the same explanation before
-confirming. Link a provider record when its title, number and air date identify the catalog episode.
-Exclude it to skip the record while that evidence stays the same. Fix provider sign-in before
-retrying a failed search. For a second opinion, open **Resolution guide & agent help** and copy the
-question into a guest `hoardarr-agent` session.
+**Attention** groups failed searches by outcome. Expand a group to see the affected titles. Episode
+reviews group the remaining candidates by season. Hover over an episode action or focus it with the
+keyboard to read its effect. On a phone, tap it to review the same explanation before confirming.
+Link a provider record when its title, number and air date identify the catalog episode. Exclude it
+to skip the record while that evidence stays the same. Fix provider sign-in before retrying a failed
+search. For a second opinion, open **Resolution guide & agent help** and copy the question into a
+guest `hoardarr-agent` session.
 
 **Reference** lists operator commands by task and explains their effects. Choose **Workflow steps**
 to see which commands the installed workflows use for discovery, acquisition, delivery and recovery.

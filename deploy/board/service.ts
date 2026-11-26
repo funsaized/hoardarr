@@ -17,6 +17,7 @@ const catalogFields = [
   "tvmazeSeriesId",
   "tvmazeEpisodeId",
   "numbering",
+  "identityLinks",
   "showName",
   "seasonNumber",
   "episodeNumber",
@@ -35,7 +36,7 @@ export const catalogProjection =
   'specName == "releaseSwitch" ? {"switchKey": attributes.key, "phase": attributes.phase, "oldHash": attributes.oldHash, "newHash": attributes.candidate.infoHash, "rank": attributes.candidate.rank, "updatedAt": attributes.updatedAt} : ' +
   'specName == "feedReview" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason} : ' +
   'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "retryAt": attributes.retryAt, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
-  'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "provider": "provider" in attributes ? attributes.provider : "tmdb", "entityType": "entityType" in attributes ? attributes.entityType : null, "localIds": "localIds" in attributes ? attributes.localIds : null, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
+  'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "details": "details" in attributes ? attributes.details : [], "provider": "provider" in attributes ? attributes.provider : "tmdb", "entityType": "entityType" in attributes ? attributes.entityType : null, "localIds": "localIds" in attributes ? attributes.localIds : null, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
   'specName == "searchState" ? {"searchAttempts": attributes.attempts} : ' +
   'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
   'specName == "transferObservation" ? {' +
@@ -245,6 +246,13 @@ async function catalog() {
             sourceUrl: "https://www.tvmaze.com/shows/" + r.tvmazeSeriesId,
           }
           : {}),
+        identityLinks: Object.values(
+          (r.identityLinks ?? {}) as Record<
+            string,
+            { provider?: string; actor?: string; reason?: string }
+          >,
+        )
+          .map((link) => ({ provider: link.provider, actor: link.actor, reason: link.reason })),
         show: r.showName,
         season: r.seasonNumber,
         episode: r.episodeNumber,

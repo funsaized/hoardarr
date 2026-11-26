@@ -321,6 +321,20 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     join(path, "hoardarr-swamp-feed@.service"),
     "[Unit]\nDescription=Follow Swamp service messages\n[Service]\nDynamicUser=yes\nSupplementaryGroups=systemd-journal\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\nStandardInput=socket\nStandardOutput=socket\nStandardError=journal\nExecStart=/usr/bin/journalctl --follow --no-pager --quiet --lines=80 --unit=hoardarr-swamp.service --output=json --output-fields=MESSAGE,PRIORITY,_SYSTEMD_UNIT\n",
   );
+  if (g.identityAgent !== false) {
+    await Deno.writeTextFile(
+      join(path, "hoardarr-identity-agent.socket"),
+      `[Unit]\nDescription=Hoardarr identity curator\nPartOf=hoardarr-swamp.service\n[Socket]\nListenStream=/run/hoardarr/identity-agent.sock\nAccept=yes\nSocketUser=${g.user}\nSocketMode=0600\nMaxConnections=1\nTriggerLimitIntervalSec=1h\nTriggerLimitBurst=12\n`,
+    );
+    await Deno.writeTextFile(
+      join(path, "hoardarr-identity-agent@.service"),
+      `[Unit]\nDescription=Resolve a bounded batch of media identities\nRequires=hoardarr-egress-guard.service\nAfter=hoardarr-egress-guard.service\n[Service]\nSlice=hoardarragent.slice\nUser=${g.user}\nGroup=${g.gid}\nIPAddressDeny=any\nIPAddressAllow=192.168.5.2/32\nEnvironmentFile=-/etc/environment\nNoNewPrivileges=yes\nCapabilityBoundingSet=\nProtectSystem=strict\nProtectHome=tmpfs\nBindReadOnlyPaths=${
+        q("-" + g.home + "/.pi/agent/auth.json:/run/hoardarr-curator-auth.json")
+      }\nInaccessiblePaths=${
+        q("-" + g.projectRoot)
+      }\nPrivateTmp=yes\nPrivateDevices=yes\nProtectKernelTunables=yes\nProtectControlGroups=yes\nRestrictSUIDSGID=yes\nUMask=0077\nRuntimeMaxSec=90\nMemoryMax=768M\nTasksMax=64\nStandardInput=socket\nStandardOutput=socket\nStandardError=journal\nExecStart=/usr/bin/python3 -I /opt/hoardarr/deploy/devvm/pi/resolve.py\n`,
+    );
+  }
   // A socket-activated root helper supplies fresh redacted status. Applications get no VPN control.
   await Deno.writeTextFile(
     join(path, "hoardarr-vpn-status.socket"),
@@ -353,7 +367,9 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     // A failed initial downloader preflight must not cancel the control server's
     // start job. Each service retries its own protected VPN/storage preflight.
     const dependency = name === "hoardarr-swamp"
-      ? `Wants=${after} hoardarr-board.service\n`
+      ? `Wants=${after} hoardarr-board.service${
+        g.identityAgent !== false ? " hoardarr-identity-agent.socket" : ""
+      }\n`
       : `Requires=${after}\n`;
     const unit =
       `[Unit]\nDescription=${name}\n${dependency}Requires=hoardarr-vpn-status.socket hoardarr-egress-guard.service\nAfter=${after} hoardarr-vpn-status.socket hoardarr-egress-guard.service\nRequiresMountsFor=${

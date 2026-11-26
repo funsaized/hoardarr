@@ -1,3 +1,5 @@
+import { askCurator, CuratorAttempt, resolveQuestions } from "./_lib/identity_agent.ts";
+import { checkedAnswer, seriesQuestion, Verdict } from "./_lib/identity_resolution.ts";
 import { z } from "npm:zod@4.5.1";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -62,14 +64,36 @@ export async function observeSeries(tracked: ShowConfig, get: (path: string) => 
 }
 export const model = {
   type: "@funsaized/hoardarr/tracked-tv",
-  version: "2026.11.25.3",
+  version: "2026.11.26.1",
   upgrades: [{
     toVersion: "2026.11.25.3",
     description: "Preserve tracked shows when adding operator series decisions",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.26.1",
+    description: "Keep tracked series and retain versioned curator answers",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: z.object({ shows: z.array(TrackedSeries).max(100) }),
   resources: {
+    identityAnswer: {
+      schema: Verdict,
+      description: "Curator decision on one revision of provider evidence",
+      lifetime: "infinite",
+      garbageCollection: 1,
+    },
+    curatorAttempt: {
+      schema: CuratorAttempt,
+      description: "Durable attempt count and next eligible curator call",
+      lifetime: "30d",
+      garbageCollection: 1,
+    },
+    curatorRun: {
+      schema: z.object({ accepted: z.number().int() }),
+      description: "Number of curator answers ready for catalog reconciliation",
+      lifetime: "1d",
+      garbageCollection: 2,
+    },
     episodeList: {
       description: "Last successful TVmaze episode list for a tracked series",
       schema: cache,
@@ -89,6 +113,8 @@ export const model = {
         id: z.number().int().positive(),
         revision: z.iso.datetime(),
         confirmedAt: z.iso.datetime(),
+        actor: z.enum(["agent", "operator"]).optional(),
+        reason: z.string().max(600).optional(),
       }),
       lifetime: "infinite",
       garbageCollection: 2,
@@ -101,6 +127,34 @@ export const model = {
     },
   },
   methods: {
+    resolveQuestions: {
+      description: "Submit a bounded season batch to the enrolled native curator",
+      arguments: z.object({}),
+      execute: async (_: unknown, ctx: Context) => {
+        const questions = [];
+        const allowed = new Set(["identity-tmdb-episodes", "identity-tmdb-movies"]);
+        for (const tracked of ctx.globalArgs.shows) {
+          const key = trackedKey(tracked);
+          allowed.add("identity-" + key + "-episodes");
+          const state = status.safeParse(await ctx.readResource(key + "-status")).data;
+          if (
+            state?.state === "confirm-series" && state.choices?.length &&
+            !(await ctx.readResource(key + "-decision"))
+          ) {
+            questions.push(seriesQuestion(key, tracked, state.choices));
+          }
+        }
+        const accepted = await resolveQuestions(
+          ctx,
+          askCurator,
+          questions,
+          (name) => allowed.has(name),
+        );
+        return {
+          dataHandles: [await ctx.writeResource("curatorRun", "curator-run", { accepted })],
+        };
+      },
+    },
     confirmSeries: {
       description:
         "Confirm a saved TVmaze series candidate from the current tracked-series review.",
@@ -178,7 +232,24 @@ export const model = {
           const key = trackedKey(tracked);
           const prior = await ctx.readResource(key + "-status");
           const next = Date.parse(String(prior?.retryAt)) || 0;
-          const decision = await ctx.readResource(key + "-decision");
+          let decision = await ctx.readResource(key + "-decision");
+          if (!decision && prior?.state === "confirm-series") {
+            const state = status.parse(prior);
+            if (state.choices?.length) {
+              const q = seriesQuestion(key, tracked, state.choices);
+              const v = checkedAnswer(q, await ctx.readResource("answer-" + q.revision));
+              if (v?.action === "link") {
+                decision = {
+                  id: v.match,
+                  revision: state.retryAt,
+                  confirmedAt: new Date().toISOString(),
+                  actor: "agent",
+                  reason: v.reason,
+                };
+                await ctx.writeResource("seriesDecision", key + "-decision", decision);
+              }
+            }
+          }
           if (
             next > Date.now() &&
             !(prior?.state === "confirm-series" && decision && decision.revision === prior.retryAt)
@@ -208,6 +279,47 @@ export const model = {
             const result = await observeSeries(tracked, get);
             const retryAt = new Date(Date.now() + 3600000).toISOString();
             if (result.state === "ready") {
+              // Only one-to-one entries identify an ordinary episode in another order.
+              try {
+                const lists = z.array(z.object({ id: z.number().int().positive() })).parse(
+                  await get("/shows/" + result.show.id + "/alternatelists"),
+                );
+                const byId = new Map(result.episodes.map((e) => [e.id, e]));
+                for (const list of lists.slice(0, 4)) {
+                  const values = z.array(
+                    z.object({
+                      season: z.number().int().nullish(),
+                      number: z.number().int().nullish(),
+                      _embedded: z.object({ episodes: z.array(z.object({ id: z.number().int() })) })
+                        .optional(),
+                    }),
+                  ).parse(
+                    await get("/alternatelists/" + list.id + "/alternateepisodes?embed=episodes"),
+                  );
+                  for (const v of values) {
+                    const ids = v._embedded?.episodes;
+                    if (ids?.length !== 1 || !v.season || !v.number) continue;
+                    const ep = byId.get(ids[0].id);
+                    if (ep && (ep.alternate?.length ?? 0) < 8) {
+                      (ep.alternate ??= []).push({
+                        list: list.id,
+                        season: v.season,
+                        number: v.number,
+                      });
+                    }
+                  }
+                }
+              } catch (error) {
+                ctx.signal.throwIfAborted();
+                if (error instanceof RateLimit) {
+                  limited = true;
+                  dataHandles.push(
+                    await ctx.writeResource("backoff", "tvmaze-backoff", {
+                      retryAt: new Date(error.retryAt).toISOString(),
+                    }),
+                  );
+                }
+              }
               reading = {
                 tracked,
                 show: result.show,

@@ -48,6 +48,7 @@ export type Projection = {
   reviewKey?: string;
   reason?: string;
   ids?: number[];
+  details?: { id: number; reason: string; action: string }[];
   retryAt?: string;
   choices?: { id: number; name: string; premiered?: string }[];
   discovery?: boolean;
@@ -180,8 +181,9 @@ export function reviewRows(records: Projection[]) {
         candidate?.revision && decision?.revision === candidate.revision &&
         ["link", "exclude"].includes(decision.action)
       ) continue;
+      const explanation = r.details?.find((d) => d.id === id);
       candidates.push(
-        candidate ??
+        candidate && explanation ? { ...candidate, note: explanation.reason } : candidate ??
           { id, kind, provider, note: "Provider details unavailable" },
       );
     }

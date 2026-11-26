@@ -406,7 +406,7 @@ function nav(s) {
       btn("view", [
         name,
         id === "attention" && Boolean(snapshot?.catalog.observed) &&
-        tag("span", "count", String(review.length)),
+        tag("span", "count", String(attentionCount())),
         id === "activity" && snapshot?.operation?.status === "Running" &&
         tag("span", "count", "Live"),
       ], { "data-id": id, "data-key": id, "aria-current": s.view === id ? "page" : null })
@@ -548,8 +548,20 @@ const attentionGuides = {
     "Inspect the last provider response and check whether discovery can reach it.",
   "Search problems": "Check the search result, fix any sign-in issue, then retry.",
 };
+function searchGroups() {
+  const groups = new Map();
+  for (const r of review.filter((r) => issue(r) === "Search problems")) {
+    const key = r.search.outcome;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  return groups;
+}
+function attentionCount() {
+  return review.filter((r) => issue(r) !== "Search problems").length + searchGroups().size;
+}
 function attention() {
-  draw("tools", titlebar("Attention", review.length + " items"));
+  draw("tools", titlebar("Attention", attentionCount() + " issues"));
   draw(
     "results",
     Object.keys(attentionGuides).map(
@@ -564,15 +576,24 @@ function attention() {
             tag("h2", "", group),
             tag("p", "", attentionGuides[group]),
           ),
-          list.map((r) =>
-            row(r, {
-              sub: group === "Search problems"
-                ? label(r.search?.outcome)
-                : r.reason || condition(r),
-              symbol: "!",
-              kind: "alert",
-            })
-          ),
+          group === "Search problems"
+            ? [...searchGroups()].map(([outcome, items]) =>
+              tag(
+                "details",
+                "search-group",
+                tag("summary", "", label(outcome) + " · " + items.length + " affected titles"),
+                items.map((r) => row(r, { sub: label(outcome), symbol: "!", kind: "alert" })),
+              )
+            )
+            : list.map((r) =>
+              row(r, {
+                sub: group === "Search problems"
+                  ? label(r.search?.outcome)
+                  : r.reason || condition(r),
+                symbol: "!",
+                kind: "alert",
+              })
+            ),
         );
       },
     ),
@@ -1222,7 +1243,17 @@ function itemContents(r) {
       "div",
       "detail-part",
       el("h3", {}, "Provider records"),
-      r.candidates.map((c) => candidate(c, r)),
+      [...new Set(r.candidates.map((c) => c.number?.match(/^S\d+/)?.[0] ?? ""))].map((season) => {
+        const items = r.candidates.filter((c) => (c.number?.match(/^S\d+/)?.[0] ?? "") === season);
+        return season
+          ? tag(
+            "details",
+            "search-group",
+            tag("summary", "", season + " · " + items.length + " episodes"),
+            items.map((c) => candidate(c, r)),
+          )
+          : items.map((c) => candidate(c, r));
+      }),
     ),
     itemTimeline(r),
     facts([
@@ -1258,6 +1289,12 @@ function itemContents(r) {
       ["Verified delivery", when(r.delivered)],
       ["Staging cleanup", when(r.cleaned)],
       ["Search details", r.review ? null : reason],
+      ...(r.identityLinks ?? []).map(
+        (link) => [
+          link.provider + " identity · " + (link.actor === "agent" ? "Curator" : "Catalog rules"),
+          link.reason,
+        ],
+      ),
       ["Observed", age(r.live ? snapshot.live.observed : snapshot.catalog.observed)],
     ]),
     message && el("output", { role: "status" }, message),

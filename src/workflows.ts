@@ -548,6 +548,24 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
           condition: { type: "or", conditions: [{ type: "succeeded" }, { type: "skipped" }] },
         }],
       },
+      ...(native && config.guest?.identityAgent !== false &&
+          config.providers.discovery === "tmdb"
+        ? [{
+          name: "curate-identities",
+          weight: 0,
+          dependsOn: [{ job: "release", condition: { type: "succeeded" } }],
+          steps: [
+            skip(
+              method("curate", "tracked-tv", "resolveQuestions"),
+              'inputs.dryRun || inputs.reorganize || !inputs.acquire || inputs.requestId != ""',
+            ),
+            skip(
+              method("apply-answers", "pipeline", "applyIdentityAnswers", {}, "curate"),
+              'inputs.dryRun || inputs.reorganize || !inputs.acquire || inputs.requestId != "" || steps.curate.outputs.accepted == 0',
+            ),
+          ],
+        }]
+        : []),
     ],
     mainInputs,
     3,

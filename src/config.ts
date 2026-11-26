@@ -17,6 +17,7 @@ export const ConfigSchema = z.object({
   profile: z.enum(["compose-vpn-local", "demo", "devvm-nordvpn-local"]),
   guest: z.object({
     installationId: z.uuid(),
+    identityAgent: z.boolean().optional(),
     boardOrigin: z.string().url().refine((value) => {
       const url = new URL(value);
       return url.protocol === "https:" && url.origin === value;
