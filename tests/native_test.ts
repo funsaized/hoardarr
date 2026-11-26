@@ -146,3 +146,24 @@ Deno.test("native board follows the media service through starts and maintenance
     assert(/^Wants=.*hoardarr-board\.service/m.test(swamp));
   });
 });
+
+Deno.test("native curator mounts the enrolled login credential and keeps the media project inaccessible", async () => {
+  if (Deno.build.os !== "linux") return;
+  const account = (await Deno.readTextFile("/etc/passwd")).split("\n").map((s) => s.split(":"))
+    .find((a) => a[0] && Number(a[2]) === Deno.uid())!;
+  const { guestAssets } = await import("../src/native.ts");
+  await temporary(async (root) => {
+    const config = nativeConfig(root);
+    Object.assign(config.guest!, {
+      user: account[0],
+      uid: Number(account[2]),
+      gid: Number(account[3]),
+    });
+    await guestAssets(config, root, root + "/units");
+    const unit = await Deno.readTextFile(root + "/units/hoardarr-identity-agent@.service");
+    assert(unit.includes(account[5] + "/.pi/agent/auth.json:/run/hoardarr-curator-auth.json"));
+    assert(!unit.includes(config.guest!.home + "/.pi/"));
+    assert(unit.includes('InaccessiblePaths="-' + root + '"'));
+    assert(unit.includes("NoNewPrivileges=yes") && unit.includes("IPAddressDeny=any"));
+  });
+});

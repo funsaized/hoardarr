@@ -322,15 +322,22 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     "[Unit]\nDescription=Follow Swamp service messages\n[Service]\nDynamicUser=yes\nSupplementaryGroups=systemd-journal\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\nStandardInput=socket\nStandardOutput=socket\nStandardError=journal\nExecStart=/usr/bin/journalctl --follow --no-pager --quiet --lines=80 --unit=hoardarr-swamp.service --output=json --output-fields=MESSAGE,PRIORITY,_SYSTEMD_UNIT\n",
   );
   if (g.identityAgent !== false) {
+    // DevVM enrolls Pi under the login account. The media runtime has a separate persistent HOME.
+    const accounts = Deno.build.os === "linux" ? await Deno.readTextFile("/etc/passwd") : "";
+    const login = accounts.split("\n").map((line) => line.split(":")).find((a) =>
+      a[0] === g.user && Number(a[2]) === g.uid && Number(a[3]) === g.gid
+    );
+    const credential = login?.[5]?.startsWith("/")
+      ? "BindReadOnlyPaths=" +
+        q("-" + login[5] + "/.pi/agent/auth.json:/run/hoardarr-curator-auth.json") + "\n"
+      : "";
     await Deno.writeTextFile(
       join(path, "hoardarr-identity-agent.socket"),
       `[Unit]\nDescription=Hoardarr identity curator\nPartOf=hoardarr-swamp.service\n[Socket]\nListenStream=/run/hoardarr/identity-agent.sock\nAccept=yes\nSocketUser=${g.user}\nSocketMode=0600\nMaxConnections=1\nTriggerLimitIntervalSec=1h\nTriggerLimitBurst=12\n`,
     );
     await Deno.writeTextFile(
       join(path, "hoardarr-identity-agent@.service"),
-      `[Unit]\nDescription=Resolve a bounded batch of media identities\nRequires=hoardarr-egress-guard.service\nAfter=hoardarr-egress-guard.service\n[Service]\nSlice=hoardarragent.slice\nUser=${g.user}\nGroup=${g.gid}\nIPAddressDeny=any\nIPAddressAllow=192.168.5.2/32\nEnvironmentFile=-/etc/environment\nNoNewPrivileges=yes\nCapabilityBoundingSet=\nProtectSystem=strict\nProtectHome=tmpfs\nBindReadOnlyPaths=${
-        q("-" + g.home + "/.pi/agent/auth.json:/run/hoardarr-curator-auth.json")
-      }\nInaccessiblePaths=${
+      `[Unit]\nDescription=Resolve a bounded batch of media identities\nRequires=hoardarr-egress-guard.service\nAfter=hoardarr-egress-guard.service\n[Service]\nSlice=hoardarragent.slice\nUser=${g.user}\nGroup=${g.gid}\nIPAddressDeny=any\nIPAddressAllow=192.168.5.2/32\nEnvironmentFile=-/etc/environment\nNoNewPrivileges=yes\nCapabilityBoundingSet=\nProtectSystem=strict\nProtectHome=tmpfs\n${credential}InaccessiblePaths=${
         q("-" + g.projectRoot)
       }\nPrivateTmp=yes\nPrivateDevices=yes\nProtectKernelTunables=yes\nProtectControlGroups=yes\nRestrictSUIDSGID=yes\nUMask=0077\nRuntimeMaxSec=90\nMemoryMax=768M\nTasksMax=64\nStandardInput=socket\nStandardOutput=socket\nStandardError=journal\nExecStart=/usr/bin/python3 -I /opt/hoardarr/deploy/devvm/pi/resolve.py\n`,
     );
