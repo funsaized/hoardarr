@@ -80,6 +80,7 @@ const Globals = z.object({
   stallMinutes: z.number().int().positive().default(30),
   transferSampleMaxGapMinutes: z.number().int().positive().default(15),
   discoveryModel: z.string().default("movie-discovery"),
+  disabledSearchSources: z.array(z.string()).default([]),
   titleOverrides: z.record(z.string(), z.string()).default({}),
 });
 type Context = Runtime & { globalArgs: z.infer<typeof Globals> };
@@ -795,7 +796,7 @@ async function ingestDiscoveries(
 }
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.26.1",
+  version: "2026.11.26.2",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -848,6 +849,10 @@ export const model = {
   }, {
     toVersion: "2026.11.26.1",
     description: "Reconcile catalog identities against versioned evidence",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.26.2",
+    description: "Preserve settings while allowing retired search sources to be cleared",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
@@ -1523,6 +1528,7 @@ export const model = {
             };
           } else delete issues[source];
         }
+        for (const source of ctx.globalArgs.disabledSearchSources) delete issues[source];
         await ctx.writeResource("searchState", "searchState-current", { attempts, missed, issues });
         if (ctx.globalArgs.requestModel) {
           await ctx.writeResource(

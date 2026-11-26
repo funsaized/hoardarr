@@ -1,4 +1,5 @@
 import { z } from "npm:zod@4.5.1";
+export const disabledTorlinkSearchSources: readonly string[] = ["bittorrented"];
 const groups = {
   movies: ["yts", "tpb-movies", "bittorrented"],
   tv: ["eztv", "tpb-tv", "bittorrented"],
@@ -66,7 +67,11 @@ export async function boundedSearch(
     sources: {} as Record<string, Outcome>,
     results: [] as Result[],
   }));
-  const tasks = queries.flatMap((q, i) => groups[q.category].map((source) => ({ i, source })));
+  const tasks = queries.flatMap((q, i) =>
+    groups[q.category].filter((source) => !disabledTorlinkSearchSources.includes(source)).map(
+      (source) => ({ i, source }),
+    )
+  );
   const busy = new Map<string, number>();
   async function worker() {
     for (;;) {

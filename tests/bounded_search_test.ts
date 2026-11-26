@@ -43,8 +43,23 @@ Deno.test("source fan-out honors shared and per-source limits, retains healthy r
   const rows = await boundedSearch(queries, 2, 1, until, run);
   strictEqual(peak, 2);
   strictEqual(calls.get("eztv"), 1);
+  deepStrictEqual([...calls.keys()].sort(), ["eztv", "tpb-tv"]);
   strictEqual(until.eztv, retryAt);
   deepStrictEqual(rows.map((r) => [r.ok, r.count]), queries.map(() => [true, 1]));
   await boundedSearch(queries.slice(0, 1), 1, 1, until, run);
   strictEqual(calls.get("eztv"), 1);
+});
+
+Deno.test("native movie search skips BitTorrented", async () => {
+  const [row] = await boundedSearch(
+    [{ category: "movies", key: "m-1", query: "Example" }],
+    2,
+    1,
+    { bittorrented: Date.now() + 60000 },
+    async () => ({
+      outcome: { ok: true, count: 0, error: null, code: null },
+      results: [],
+    }),
+  );
+  deepStrictEqual(Object.keys(row.sources).sort(), ["tpb-movies", "yts"]);
 });

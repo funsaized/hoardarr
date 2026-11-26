@@ -143,7 +143,10 @@ Deno.test("TV search budgets persist no-match and provider failure independently
     const ctx: Runtime & { globalArgs: ReturnType<typeof model.globalArguments.parse> } = {
       repoDir: root,
       signal: new AbortController().signal,
-      globalArgs: model.globalArguments.parse({ episodeSearchLimit: 20 }),
+      globalArgs: model.globalArguments.parse({
+        episodeSearchLimit: 20,
+        disabledSearchSources: ["bittorrented"],
+      }),
       readModelData: async (name, spec) =>
         name === "episode-catalog"
           ? episodes.map((e) => ({ name: `catalog-episode-${e.tmdbEpisodeId}`, attributes: e }))
@@ -171,6 +174,14 @@ Deno.test("TV search budgets persist no-match and provider failure independently
     await model.methods.plan.execute({ owner }, ctx);
     const queries = saved.get("work-current")!.attributes.queries as { key: string }[];
     assert(queries.length === 20);
+    const issue = {
+      message: "HTTP 401",
+      affected: [queries[0].key],
+      observedAt: new Date().toISOString(),
+    };
+    await ctx.writeResource("searchState", "searchState-current", {
+      issues: { bittorrented: issue, eztv: issue },
+    });
     await model.methods.select.execute({
       owner,
       searchOk: false,
@@ -185,6 +196,7 @@ Deno.test("TV search budgets persist no-match and provider failure independently
     >;
     assert(state[queries[0].key.slice(2)].outcome === "provider-error");
     assert(state[queries[1].key.slice(2)].outcome === "no-releases");
+    deepStrictEqual(saved.get("searchState-current")!.attributes.issues, { eztv: issue });
     await model.methods.plan.execute({ owner }, ctx);
     assert(
       (saved.get("work-current")!.attributes.queries as unknown[]).length === 10,

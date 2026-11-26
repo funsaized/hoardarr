@@ -19,6 +19,7 @@ import {
 } from "./native.ts";
 import { inhibitAdmissions } from "./maintenance.ts";
 import { fileHash } from "../extensions/models/local_destination.ts";
+import { disabledTorlinkSearchSources } from "../extensions/models/torlink_search.ts";
 export const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const pins = {
   "@funsaized/torlink": "2026.11.05.1",
@@ -431,6 +432,9 @@ async function installUnlocked(
     maxEpisodeAttempts: config.policies.episode.maxAttempts,
     seedTime: config.download.seedTime,
     discoveryModel: actual.discovery,
+    ...(config.guest && config.providers.search === "torlink"
+      ? { disabledSearchSources: disabledTorlinkSearchSources }
+      : {}),
     titleOverrides: config.library.titleOverrides,
     movieEnabled: config.interests.movies,
     episodeSearchLimit: config.television.searchesPerRun,
