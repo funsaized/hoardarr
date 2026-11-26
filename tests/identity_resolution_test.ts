@@ -85,13 +85,14 @@ Deno.test("agent answers require current independently corroborated evidence", (
     [],
   );
   for (
-    const v of [{ ...answer, match: 999 }, { ...answer, evidence: ["date", "title"] }, {
+    const v of [{ ...answer, match: 999 }, { ...answer, evidence: ["release", "title"] }, {
       ...answer,
       evidence: ["alternate-order", "title"],
     }, { ...answer, reason: "" }]
   ) strictEqual(checkedAnswer(question, v), null);
   equal(plan([{ ...disagreements, tvmazeEpisodeId: 98 }]).questions, []);
   equal(plan([row], [ep, { ...ep, id: 2 }]).links, []);
+  ok(checkedAnswer(question, { ...answer, evidence: ["date", "title"] }));
   const changed = plan([{ ...disagreements, airDate: "2020-02-01" }]).questions[0];
   strictEqual(checkedAnswer(changed, { ...answer, revision: changed.revision }), null);
 });

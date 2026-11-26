@@ -329,7 +329,7 @@ export async function guestAssets(config: Config, repo: string, output?: string)
     );
     const credential = login?.[5]?.startsWith("/")
       ? "BindReadOnlyPaths=" +
-        q("-" + login[5] + "/.pi/agent/auth.json:/run/hoardarr-curator-auth.json") + "\n"
+        q("-" + login[5] + "/.pi/agent/auth.json") + ":/run/hoardarr-curator-auth.json\n"
       : "";
     await Deno.writeTextFile(
       join(path, "hoardarr-identity-agent.socket"),

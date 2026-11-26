@@ -17,7 +17,9 @@ Return a JSON array, one object per revision, with revision, action (link, diffe
 match (one listed numeric catalog ID, or null for unresolved), a brief reason, and evidence (an array
 drawn from series, number, title, date, release, alternate-order, alias, year). Link only with corroboration.
 A number or generic title alone cannot identify an episode. A minor date difference may reflect a
-regional premiere when the distinctive title, series and season/episode agree. Different means the
+regional premiere when the distinctive title, series and season/episode agree. Cite date for an
+exact date or a difference of up to two days in the same numbered slot. Cite number only for the
+same season and episode. Different means the
 named catalog candidate is another episode. Use unresolved when evidence is insufficient. For films use a shared external ID to link. For series compare confirmed IDs, title and premiere year, including competing candidates."""
 def fact(value):
     keys = {'id','title','season','number','date','release','alternate'}
@@ -97,6 +99,7 @@ def answer(raw):
 if __name__=='__main__':
     try:
         result=answer(sys.stdin.buffer.readline(64001))
-    except (ValueError,TypeError,OSError,subprocess.SubprocessError):
+    except (ValueError,TypeError,OSError,subprocess.SubprocessError) as error:
+        print("Curator unavailable ("+type(error).__name__+")",file=sys.stderr)
         result={'unavailable':True}
     print(json.dumps(result,separators=(',',':')))

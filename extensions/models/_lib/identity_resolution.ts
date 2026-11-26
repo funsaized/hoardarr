@@ -203,14 +203,16 @@ export function checkedVerdict(question: IdentityCase, raw: unknown) {
     const alternate = !!i.alternate?.some((s) =>
       s.season === match.season && s.number === match.number
     );
+    const days = Math.abs(Date.parse(i.date ?? "") - Date.parse(match.date ?? "")) / 86400000;
+    // A regional premiere offset corroborates a date only in the same numbered slot.
     // Evidence claims must be observable in this exact pair.
     if (
-      v.evidence.includes("date") && !equalDate || v.evidence.includes("number") && !slot ||
+      v.evidence.includes("date") && !(equalDate || slot && days <= 2) ||
+      v.evidence.includes("number") && !slot ||
       v.evidence.includes("release") && !match.release ||
       v.evidence.includes("alternate-order") && !alternate
     ) return null;
     if (!equalTitle || !v.evidence.includes("title")) return null;
-    const days = Math.abs(Date.parse(i.date ?? "") - Date.parse(match.date ?? "")) / 86400000;
     if (slot && !(days <= 2) && !match.release && !alternate) return null;
     if (!slot && !(match.release && (equalDate || alternate))) return null;
     if (

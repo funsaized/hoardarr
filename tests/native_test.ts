@@ -161,7 +161,7 @@ Deno.test("native curator mounts the enrolled login credential and keeps the med
     });
     await guestAssets(config, root, root + "/units");
     const unit = await Deno.readTextFile(root + "/units/hoardarr-identity-agent@.service");
-    assert(unit.includes(account[5] + "/.pi/agent/auth.json:/run/hoardarr-curator-auth.json"));
+    assert(unit.includes(account[5] + '/.pi/agent/auth.json":/run/hoardarr-curator-auth.json'));
     assert(!unit.includes(config.guest!.home + "/.pi/"));
     assert(unit.includes('InaccessiblePaths="-' + root + '"'));
     assert(unit.includes("NoNewPrivileges=yes") && unit.includes("IPAddressDeny=any"));
