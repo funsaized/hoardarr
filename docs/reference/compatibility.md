@@ -59,7 +59,7 @@ Read [third-party notices](../../THIRD_PARTY_NOTICES.md) before redistributing b
 ## Native Pi
 
 Pi is a DevVM shared tool. Enrollment records its resolved build; updates require validation before
-refreshing enrollment. Provider API keys stay in the isolated DevVM host login store. Pi
-subscription logins are unsupported. The operator uses only `openai/gpt-5.4-mini` with low
-reasoning. Hoardarr retains its operator instructions, request commands and model-free media
-workflows. Linux project mounts use `cache=none`; writable mapped databases belong on guest ext4.
+refreshing enrollment. Provider API keys stay in the isolated DevVM host login store. Pi requires an
+API key in this deployment. The operator uses only `openai/gpt-6-luna` with `xhigh` reasoning.
+Hoardarr retains its operator instructions, request commands and model-free media workflows. Linux
+project mounts use `cache=none`; writable mapped databases belong on guest ext4.

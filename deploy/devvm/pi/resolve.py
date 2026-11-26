@@ -67,7 +67,6 @@ def answer(raw):
     if len(cases)>1 and len({(q['provider'],q['series'],q['incoming']['season']) for q in cases})!=1:
         raise ValueError('mixed season')
     auth=Path('/run/hoardarr-curator-auth.json')
-    settings=json.loads(Path('/opt/hoardarr/deploy/devvm/pi/.pi/settings.json').read_text())
     with tempfile.TemporaryDirectory() as work:
         work=Path(work)
         agent=work/'.pi/agent'
@@ -84,9 +83,10 @@ def answer(raw):
         env={k:os.environ[k] for k in ('HTTPS_PROXY','HTTP_PROXY','NO_PROXY','https_proxy','http_proxy','no_proxy',
              'SSL_CERT_FILE','NODE_EXTRA_CA_CERTS','NODE_USE_ENV_PROXY') if k in os.environ}
         env.update(HOME=str(work),PATH='/usr/bin:/bin',PI_CODING_AGENT_DIR=str(agent),PI_SKIP_VERSION_CHECK='1',PI_TELEMETRY='0')
+        # The unattended curator has an independent model and request deadline.
         cmd=[binary,'--print','--no-tools','--no-mcp','--no-session','--no-extensions','--no-context-files',
-             '--no-skills','--no-prompt-templates','--no-themes','--no-approve','--provider',settings['defaultProvider'],
-             '--model',settings['defaultModel'],'--thinking',settings['defaultThinkingLevel'],'--system-prompt',POLICY,
+             '--no-skills','--no-prompt-templates','--no-themes','--no-approve','--provider','openai',
+             '--model','gpt-5.4-mini','--thinking','low','--system-prompt',POLICY,
              '--',json.dumps(cases,ensure_ascii=True,separators=(',',':'))]
         result=subprocess.run(cmd,cwd=work,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL,check=True,timeout=80)

@@ -3,11 +3,11 @@
     "+codemode"
   ],
   "defaultProvider": "openai",
-  "defaultModel": "gpt-5.4-mini",
+  "defaultModel": "gpt-6-luna",
   "enabledModels": [
-    "openai/gpt-5.4-mini"
+    "openai/gpt-6-luna"
   ],
-  "defaultThinkingLevel": "low",
+  "defaultThinkingLevel": "xhigh",
   "showCacheMissNotices": true,
   "compaction": {
     "enabled": true,

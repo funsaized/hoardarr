@@ -204,9 +204,9 @@ Pi keeps its standard `~/.pi/agent` directory in the guest home. DevVM imports s
 `devvm agent import pi`, saves reviewed settings with `devvm agent save pi`, and exports sessions
 with `devvm history export`. These commands use the selected isolated Hoardarr inventory. Hoardarr's
 writable workspace is `~/.local/share/hoardarr/operator`. Its project settings select only
-`openai/gpt-5.4-mini`, use low reasoning, and enable `codemode` and compaction. Pi uses this model
-for operator tasks without automatic model switching. The launcher passes this selection explicitly,
-including runs without user interaction. Explicit command options can override it for a session.
+`openai/gpt-6-luna` with `xhigh` reasoning and enable `codemode` and compaction. The launcher passes
+these defaults to Pi for interactive and scripted runs. Command options can override them for a
+session.
 
 The launcher starts Pi in the root-managed, non-delegated `hoardarragent.slice`. This operator
 process group can use DevVM's proxy. Media services and commands launched by `hoardarr-operator` run

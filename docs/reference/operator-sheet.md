@@ -112,4 +112,4 @@ Run `hoardarr-agent` in the guest. On the host, use
 before updating shared tools; enrollment rejects unqualified changes. See
 [operator agent setup](../how-to/operate-native.md#open-the-operator-agent).
 
-The operator uses `openai/gpt-5.4-mini` with low reasoning and one enabled model.
+The operator uses `openai/gpt-6-luna` with `xhigh` reasoning.
