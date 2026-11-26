@@ -129,6 +129,33 @@ const baseMovie = (
   ...overrides,
 });
 
+Deno.test("movie year repair preserves identity and completed deliveries across retries", async () => {
+  const waiting = baseMovie({ year: 2015, noMatchReason: "no-releases" });
+  const delivered = baseMovie({ tmdbId: 2, year: 2015, status: "transferred" });
+  const { context, store } = makeContext({
+    "catalog-movie-1": waiting,
+    "catalog-movie-2": delivered,
+  });
+  const args = {
+    movies: [{
+      catalogId: 1,
+      tmdbId: 1,
+      digitalReleaseDate: "2015-10-06",
+      originalReleaseDate: "1990-11-16",
+    }, { catalogId: 2, tmdbId: 2, originalReleaseDate: "1990-11-16" }],
+  };
+  await model.methods.repairMovieYears.execute(args, context);
+  await model.methods.repairMovieYears.execute(args, context);
+  assertEquals(store.writes.length, 1, "completed and already verified rows require no write");
+  const repaired = store.resources.get("catalog-movie-1")!;
+  assertEquals(repaired.year, 1990, "original release year is the matching year");
+  assertEquals(repaired.digitalReleaseDate, "2015-10-06", "preserve the regional release date");
+  assertEquals(repaired.tmdbId, 1, "catalog identity stays stable");
+  assertEquals(repaired.noMatchReason, null, "old search verdict is obsolete");
+  assert(typeof repaired.yearCorrectedAt === "string", "correction marks older cooldown obsolete");
+  assertEquals(store.resources.get("catalog-movie-2"), delivered, "delivery history preserved");
+});
+
 Deno.test("evaluateRelease applies the deterministic policy", () => {
   const movie = { title: "Example Movie", year: 2026 };
   const ok = testing.evaluateRelease(movie, {
@@ -1360,7 +1387,7 @@ Deno.test("malformed catalog records block planning instead of becoming empty wo
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.11.18.1", "model version");
+  assertEquals(model.version, "2026.11.26.3", "model version");
   assert("movie" in model.resources, "movie spec");
   assert("plan" in model.resources, "plan spec");
   for (const method of ["ingest", "select", "transition", "reconcile", "plan"]) {

@@ -796,7 +796,7 @@ async function ingestDiscoveries(
 }
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.26.2",
+  version: "2026.11.26.3",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -853,6 +853,10 @@ export const model = {
   }, {
     toVersion: "2026.11.26.2",
     description: "Preserve settings while allowing retired search sources to be cleared",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.26.3",
+    description: "Retry waiting movies when their verified original release year changes",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
@@ -1127,10 +1131,16 @@ export const model = {
           requestRows.filter((r) => r.id === args.requestId)
             .flatMap((r) => (r.targets ?? []).map(targetKey)),
         );
+        const correctedYears = new Map(
+          movieRows.filter((row) => typeof row.yearCorrectedAt === "string").map((
+            row,
+          ) => [`m-${movieCatalogId(row)}`, String(row.yearCorrectedAt)]),
+        );
         const dueMovies = all.filter((r) =>
           r.mediaKind === "movie" && (ctx.globalArgs.movieEnabled || explicit.has(r.key)) &&
           eligible.has(r.key) && r.status !== "selected" &&
           (!state[r.key] || state[r.key].outcome === "selected" ||
+            (correctedYears.get(r.key) ?? "") > state[r.key].searchedAt ||
             state[r.key].nextSearchAt <= now) &&
           (!args.requestId || requested.has(r.key))
         ).sort((a, b) =>
@@ -1398,6 +1408,46 @@ export const model = {
           await invoke(ctx, ctx.globalArgs.movies, "linkMovieAlias", row);
         }
         return write(ctx, "summary", { ok: true });
+      },
+    },
+    repairMovieYears: {
+      description: "Verify missing original release dates for waiting TMDB movies.",
+      arguments: Owned,
+      execute: async ({ owner }: z.infer<typeof Owned>, ctx: Context) => {
+        await assertLease(ctx.repoDir, owner);
+        const waiting = (await rows(ctx, "movie")).filter((row) =>
+          typeof row.tmdbId === "number" && !row.originalReleaseDate && !row.archivedAt &&
+          (row.status === "wanted" ||
+            row.status === "failed" && Number(row.attempts) < ctx.globalArgs.maxMovieAttempts)
+        );
+        let count = 0;
+        for (let offset = 0; offset < waiting.length; offset += 50) {
+          const batch = new Map(
+            waiting.slice(offset, offset + 50).map((row) => [
+              row.tmdbId,
+              movieCatalogId(row),
+            ]),
+          );
+          const records = await invoke(
+            ctx,
+            ctx.globalArgs.discoveryModel,
+            "lookupMovieReleaseDates",
+            {
+              ids: [...batch.keys()],
+            },
+          );
+          const verified =
+            (getRecord(records, "movie-release-dates-current")?.movies ?? []) as Row[];
+          const movies = verified.filter((row) => batch.has(row.tmdbId)).map((row) => ({
+            ...row,
+            catalogId: batch.get(row.tmdbId),
+          }));
+          if (movies.length) {
+            count +=
+              (await invoke(ctx, ctx.globalArgs.movies, "repairMovieYears", { movies })).length;
+          }
+        }
+        return write(ctx, "summary", { ok: true, count });
       },
     },
     ingest: {

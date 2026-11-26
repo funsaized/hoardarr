@@ -217,6 +217,7 @@ export const stepDescriptions = {
   "request-provider.requestTargets": "Look up titles and episodes within the requested scope.",
   "request-provider.findMovieAliases": "Look up provider identities for locally identified movies.",
   "pipeline.linkMovieAliases": "Associate confirmed provider identities with existing movies.",
+  "pipeline.repairMovieYears": "Verify original release years for movies awaiting a download.",
   "pipeline.ingestReleaseFeeds": "Read configured movie release feeds within the discovery budget.",
   "discovery-provider.movies": "Discover eligible movies within the configured interests.",
   "discovery-provider.episodes": "Discover episodes for configured shows.",

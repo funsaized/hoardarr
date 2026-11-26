@@ -3,6 +3,51 @@ import { model } from "./pipeline.ts";
 import { model as coordinator } from "./coordinator.ts";
 import type { Runtime } from "./_lib/runtime.ts";
 import { assert, rejects, temporary } from "../../tests/helpers.ts";
+
+Deno.test("a corrected movie year bypasses only the older search cooldown", () =>
+  temporary(async (root) => {
+    const owner = crypto.randomUUID();
+    const movie = {
+      tmdbId: 1,
+      title: "Home Alone",
+      year: 1990,
+      yearCorrectedAt: "2026-11-26T14:00:00.000Z",
+      status: "wanted",
+      infoHash: null,
+      releaseName: null,
+    };
+    const attempt = {
+      searchedAt: "2026-11-26T12:00:00.000Z",
+      nextSearchAt: "2199-11-27T12:00:00.000Z",
+      outcome: "no-releases",
+    };
+    let work: Record<string, unknown> = {};
+    const ctx: Runtime & { globalArgs: ReturnType<typeof model.globalArguments.parse> } = {
+      repoDir: root,
+      signal: new AbortController().signal,
+      globalArgs: model.globalArguments.parse({}),
+      writeResource: async (_spec, name, attributes) => {
+        if (name === "work-current") work = attributes;
+        return { name };
+      },
+      readModelData: async (name, spec) =>
+        name === "movie-catalog"
+          ? [{ name: "catalog-movie-1", attributes: movie }]
+          : spec === "searchState"
+          ? [{ name: "searchState-current", attributes: { attempts: { "m-1": attempt } } }]
+          : [],
+      runModel: async () => ({
+        ok: true,
+        resources: [{ name: "plan-current", attributes: { wanted: [1], retryable: [] } }],
+      }),
+    };
+    await coordinator.methods.acquire.execute({ owner }, ctx);
+    await model.methods.plan.execute({ owner }, ctx);
+    deepStrictEqual(work.queries, [{ key: "m-1", query: "Home Alone 1990", category: "movies" }]);
+    attempt.searchedAt = "2026-11-26T15:00:00.000Z";
+    await model.methods.plan.execute({ owner }, ctx);
+    deepStrictEqual(work.queries, []);
+  }));
 Deno.test("pipeline requires fresh health capabilities and reconciles an interrupted detach", () =>
   temporary(async (root) => {
     const owner = crypto.randomUUID(), transitions: Record<string, unknown>[] = [];

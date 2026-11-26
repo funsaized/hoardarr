@@ -225,6 +225,12 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
     feeds.length ? movieGuard + ' || steps["release-feeds"].outputs.remaining == 0' : movieGuard,
   ));
   discovery.push(savedIngest("ingest-movies", "movie", "movies"));
+  if (linkMovies) {
+    discovery.push(skip(
+      method("repair-movie-years", "pipeline", "repairMovieYears", owned, "ingest-movies"),
+      'inputs.requestId != ""',
+    ));
+  }
   discovery.push(skip(
     call(
       "episodes",
@@ -235,7 +241,7 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
         limit: 20000,
         excludeIds: expr("steps.known.outputs.episodeIds"),
       },
-      "ingest-movies",
+      linkMovies ? "repair-movie-years" : "ingest-movies",
       true,
     ),
     `inputs.requestId != "" || ${config.interests.shows.length === 0}`,

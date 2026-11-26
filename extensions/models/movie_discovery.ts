@@ -1,6 +1,7 @@
 import { resolutionKey as trackedResolutionKey } from "./_lib/tracked_tv.ts";
 /** Weekly TMDB digital-release discovery extension for Hoardarr. @module */
 import { z } from "npm:zod@4.5.1";
+import { readTmdbMovie, tmdbReader } from "./_lib/request_metadata.ts";
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -10,6 +11,8 @@ const TMDB_DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGES = 10;
 const SPEC_MOVIE = "digitalReleaseMovie";
 const SPEC_RUN = "digitalReleaseRun";
+const SPEC_MOVIE_DATES = "movieReleaseDates";
+const MOVIE_DATES_INSTANCE = "movie-release-dates-current";
 const SPEC_EPISODE = "airedEpisode";
 const SPEC_EPISODE_RUN = "airedEpisodeRun";
 const MOVIE_INSTANCE_PREFIX = "digital-release-movie-";
@@ -50,12 +53,21 @@ const DiscoveredMovieSchema = z.object({
     .string()
     .regex(/^\d{4}(-\d{2}(-\d{2})?)?$/)
     .nullable(),
+  digitalReleaseDate: z.string().regex(/^\d{4}(-\d{2}(-\d{2})?)?$/).nullable().optional(),
+  originalReleaseDate: z.iso.date().optional(),
   year: z.number().int().min(1800).max(2200).nullable(),
   overview: z.string().max(5000).nullable(),
   isoWeek: z.string().regex(/^\d{4}-W\d{2}$/),
   discoveredAt: z.iso.datetime(),
   region: z.string().length(2),
   language: z.string().min(2).max(10),
+});
+
+const MovieDatesArgs = z.object({ ids: z.array(z.number().int().positive()).min(1).max(50) });
+const MovieDates = z.object({
+  tmdbId: z.number().int().positive(),
+  originalReleaseDate: z.iso.date(),
+  digitalReleaseDate: DiscoveredMovieSchema.shape.digitalReleaseDate,
 });
 
 const WeekRunSchema = z.object({
@@ -182,6 +194,52 @@ type FetchDeps = {
   fetchImpl: typeof fetch;
   now?: () => Date;
 };
+
+function originalDateReader(context: Context, fetchImpl: typeof fetch) {
+  const read = tmdbReader(context, fetchImpl);
+  return async (id: number) => {
+    const { release_date } = await readTmdbMovie(id, read);
+    const date = z.iso.date().safeParse(release_date);
+    return date.success && yearFromRelease(date.data) !== null ? date.data : null;
+  };
+}
+
+async function lookupMovieReleaseDates(
+  { ids }: z.infer<typeof MovieDatesArgs>,
+  context: Context,
+  deps: FetchDeps = { fetchImpl: fetch },
+) {
+  const getOriginalDate = originalDateReader(context, deps.fetchImpl);
+  const movies: z.infer<typeof MovieDates>[] = [];
+  for (let offset = 0; offset < ids.length; offset += 5) {
+    context.signal.throwIfAborted();
+    const results = await Promise.allSettled(
+      ids.slice(offset, offset + 5).map(async (tmdbId) => {
+        const originalReleaseDate = await getOriginalDate(tmdbId);
+        if (!originalReleaseDate) return null;
+        const discovery = await context.readResource(movieInstanceName(tmdbId));
+        return MovieDates.parse({
+          tmdbId,
+          originalReleaseDate,
+          digitalReleaseDate: discovery?.digitalReleaseDate ?? discovery?.releaseDate,
+        });
+      }),
+    );
+    context.signal.throwIfAborted();
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) movies.push(result.value);
+    }
+  }
+  if (movies.length < ids.length) {
+    context.logger.warning("Some original movie release dates could not be verified", {
+      requested: ids.length,
+      verified: movies.length,
+    });
+  }
+  return {
+    dataHandles: [await context.writeResource(SPEC_MOVIE_DATES, MOVIE_DATES_INSTANCE, { movies })],
+  };
+}
 
 function isoWeek(date: Date): string {
   // ponytail: ISO 8601 week - copy-once, deterministic. UTC anchor avoids
@@ -506,6 +564,7 @@ function toDiscovered(
   region: string,
   language: string,
   discoveredAt: string,
+  originalReleaseDate?: string,
 ): DiscoveredMovie | null {
   const title = (raw.title ?? raw.original_title ?? "").trim();
   if (title.length === 0) return null;
@@ -514,7 +573,9 @@ function toDiscovered(
     tmdbId: raw.id,
     title,
     releaseDate,
-    year: yearFromRelease(releaseDate),
+    digitalReleaseDate: releaseDate,
+    ...(originalReleaseDate ? { originalReleaseDate } : {}),
+    year: yearFromRelease(originalReleaseDate ?? null),
     overview: raw.overview ?? null,
     isoWeek: week,
     discoveredAt,
@@ -545,6 +606,7 @@ async function executeNowPlaying(
   }
   const discoveredAt = new Date().toISOString();
   const seen = new Set<number>();
+  const getOriginalDate = originalDateReader(context, deps.fetchImpl);
   const excluded = new Set(excludeIds);
   const existingThisWeek = new Set<number>();
   const movies: DiscoveredMovie[] = [];
@@ -563,7 +625,6 @@ async function executeNowPlaying(
     for (const [index, raw] of response.results.entries()) {
       if (seen.has(raw.id)) continue;
       seen.add(raw.id);
-      if (excluded.has(raw.id)) continue;
       const prior = await context.readResource(movieInstanceName(raw.id));
       if (prior !== null) {
         if (prior.isoWeek === week) existingThisWeek.add(raw.id);
@@ -573,12 +634,15 @@ async function executeNowPlaying(
         }
         continue;
       }
-      const movie = toDiscovered(raw, week, region, language, discoveredAt);
-      if (!movie) {
+      if (excluded.has(raw.id)) continue;
+      const title = (raw.title ?? raw.original_title ?? "").trim();
+      const originalReleaseDate = title ? await getOriginalDate(raw.id) : null;
+      if (!originalReleaseDate) {
         skippedInvalid++;
         continue;
       }
-      movies.push(movie);
+      const movie = toDiscovered(raw, week, region, language, discoveredAt, originalReleaseDate);
+      if (movie) movies.push(movie);
       if (existingThisWeek.size + movies.length === limit) {
         remainingOnPage = index < response.results.length - 1;
         break;
@@ -632,6 +696,12 @@ async function executeNowPlaying(
 export const extension = {
   type: "@keeb/tmdb-lookup",
   resources: {
+    [SPEC_MOVIE_DATES]: {
+      description: "Verified original release dates for waiting catalog movies.",
+      schema: z.object({ movies: z.array(MovieDates) }),
+      lifetime: "7d" as const,
+      garbageCollection: 2,
+    },
     resolvedShow: {
       description: "Persisted automatic series identity or pending lookup",
       schema: z.object({
@@ -677,6 +747,13 @@ export const extension = {
   },
   methods: [
     {
+      lookupMovieReleaseDates: {
+        description: "Look up original release dates by exact TMDB movie ID.",
+        arguments: MovieDatesArgs,
+        execute: lookupMovieReleaseDates,
+      },
+    },
+    {
       digitalReleases: {
         description:
           "Fetch new popular digital releases once per ISO week, excluding known TMDB ids and paging until the limit is met.",
@@ -706,6 +783,7 @@ export const testing = {
   tmdbNowPlaying,
   tmdbGet,
   executeNowPlaying,
+  lookupMovieReleaseDates,
   executeAiredEpisodes,
   schemas: {
     args: NowPlayingArgsSchema,

@@ -33,6 +33,7 @@ type ContextBundle = {
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
   reads: string[];
   fetchCalls: string[];
+  detailCalls: string[];
   logs: LogCall[];
 };
 
@@ -48,6 +49,7 @@ function makeContext(
   const writes: ContextBundle["writes"] = [];
   const reads: ContextBundle["reads"] = [];
   const fetchCalls: ContextBundle["fetchCalls"] = [];
+  const detailCalls: string[] = [];
   const logs: LogCall[] = options.logs ?? [];
   const fetchImpl: typeof fetch = (input) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -103,10 +105,23 @@ function makeContext(
   };
   return {
     context,
-    fetchImpl: options.fetchImpl ?? fetchImpl,
+    fetchImpl: (input, init) => {
+      const path = new URL(input.toString()).pathname;
+      const match = path.match(/^\/3\/movie\/(\d+)$/);
+      if (match) {
+        detailCalls.push(path);
+        return Promise.resolve(Response.json({
+          id: Number(match[1]),
+          title: "Verified movie",
+          release_date: "1990-11-16",
+        }));
+      }
+      return (options.fetchImpl ?? fetchImpl)(input, init);
+    },
     writes,
     reads,
     fetchCalls,
+    detailCalls,
     logs,
   };
 }
@@ -240,6 +255,10 @@ Deno.test("nowPlaying fetches, writes one movie per id, and prefixes the instanc
   );
   const movieWrites = env.writes.filter((w) => w.spec === "digitalReleaseMovie");
   assertEquals(movieWrites.length, 3, "one movie record per id");
+  assertEquals(env.detailCalls, ["/3/movie/101", "/3/movie/202", "/3/movie/303"], "details by ID");
+  assertEquals(movieWrites[0]!.data.year, 1990, "movie year comes from unfiltered details");
+  assertEquals(movieWrites[0]!.data.originalReleaseDate, "1990-11-16", "original date retained");
+  assertEquals(movieWrites[0]!.data.digitalReleaseDate, "2026-08-14", "regional date retained");
   for (const write of movieWrites) {
     assert(
       write.name.startsWith("digital-release-movie-"),
@@ -262,6 +281,26 @@ Deno.test("nowPlaying fetches, writes one movie per id, and prefixes the instanc
     "TMDB id 303",
   );
   assertEquals(result.dataHandles.length, 4, "three movies + one run marker");
+});
+
+Deno.test("movie date repair keeps verified identities when another details request fails", async () => {
+  const resources = new Map<string, Record<string, unknown>>([
+    ["digital-release-movie-101", { releaseDate: "2015-10-06" }],
+  ]);
+  const env = makeContext({ resources });
+  await testing.lookupMovieReleaseDates({ ids: [101, 202] }, env.context, {
+    fetchImpl: (input) =>
+      Promise.resolve(
+        input.toString().includes("/movie/101")
+          ? Response.json({ id: 101, title: "Fixture", release_date: "1990-11-16" })
+          : Response.json({ id: 999, title: "Wrong identity", release_date: "2000-01-01" }),
+      ),
+  });
+  assertEquals(env.writes[0]?.data.movies, [{
+    tmdbId: 101,
+    originalReleaseDate: "1990-11-16",
+    digitalReleaseDate: "2015-10-06",
+  }], "only verified movie dates qualify for catalog repair");
 });
 
 Deno.test("nowPlaying runs the marker last and reports honest page totals", async () => {

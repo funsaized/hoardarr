@@ -44,6 +44,8 @@ export async function movieSummary(repo: string, query?: string) {
       id: movieCatalogId(r),
       title: r.title,
       year: r.year,
+      originalReleaseDate: r.originalReleaseDate ?? null,
+      digitalReleaseDate: r.digitalReleaseDate ?? null,
       stage: r.archivedAt ? "archived" : r.status,
       reason: r.error ?? r.noMatchReason ?? null,
       archivedAt: r.archivedAt ?? null,

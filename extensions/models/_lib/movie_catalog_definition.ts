@@ -12,11 +12,12 @@ import {
   rankEligible,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.18.1";
+const MODEL_VERSION = "2026.11.26.3";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
 const TITLE_YEAR_REGEX = /(^|[^0-9])(\d{4})([^0-9]|$)/;
+const DigitalReleaseDate = z.string().regex(/^\d{4}(-\d{2}(-\d{2})?)?$/).nullable().optional();
 const REJECT_RESOLUTION_REGEX = /\b(cam|hdcam|ts|telesync|hdts|tc|telecine|hdtc)\b/i;
 const REJECT_EXTENSION_REGEX = /\.(exe|bat|cmd|sh|zip|rar|7z|tar|gz|bz2|xz|iso|img)$/i;
 
@@ -42,6 +43,8 @@ const DiscoveryRecordSchema = z.object({
     .regex(/^\d{4}(-\d{2}(-\d{2})?)?$/)
     .nullable(),
   year: z.number().int().min(1800).max(2200).nullable(),
+  originalReleaseDate: z.iso.date().optional(),
+  digitalReleaseDate: DigitalReleaseDate,
   overview: z.string().max(5000).nullable(),
   isoWeek: z
     .string()
@@ -73,6 +76,15 @@ const SelectArgsSchema = z.object({
 
 const IngestArgsSchema = z.object({
   discoveries: z.array(DiscoveryRecordSchema).min(1).max(500),
+});
+
+const RepairYearsArgs = z.object({
+  movies: z.array(z.object({
+    catalogId: z.number().int().positive(),
+    tmdbId: z.number().int().positive(),
+    originalReleaseDate: z.iso.date(),
+    digitalReleaseDate: DigitalReleaseDate,
+  })).min(1).max(50),
 });
 
 const TransitionSchema = z.object({
@@ -117,6 +129,9 @@ const MovieSchema = z.object({
   ...MovieIdentityFields,
   title: z.string().min(1).max(500),
   year: z.number().int().min(1800).max(2200).nullable(),
+  originalReleaseDate: z.iso.date().optional(),
+  digitalReleaseDate: DigitalReleaseDate,
+  yearCorrectedAt: z.iso.datetime().optional(),
   infoHash: z.string().nullable(),
   acquisitionLocator: z.string().max(32000).nullable().optional(),
   rankedReleases: z.array(ReleaseSchema.extend({
@@ -310,6 +325,12 @@ function createMovieFromDiscovery(discovery: DiscoveryRecord): Movie {
     ...(discovery.releaseEvidence ? { releaseEvidence: discovery.releaseEvidence } : {}),
     title: discovery.title,
     year: discovery.year,
+    ...(discovery.originalReleaseDate
+      ? { originalReleaseDate: discovery.originalReleaseDate }
+      : {}),
+    ...(discovery.digitalReleaseDate !== undefined
+      ? { digitalReleaseDate: discovery.digitalReleaseDate }
+      : {}),
     infoHash: null,
     releaseName: null,
     localPath: null,
@@ -334,9 +355,38 @@ function mergeDiscovery(existing: Movie, discovery: DiscoveryRecord): Movie {
   return {
     ...existing,
     title: discovery.title || existing.title,
-    year: discovery.year ?? existing.year,
+    year: existing.originalReleaseDate ? existing.year : discovery.year ?? existing.year,
+    ...(discovery.digitalReleaseDate !== undefined
+      ? { digitalReleaseDate: discovery.digitalReleaseDate }
+      : {}),
     discoveredAt: existing.discoveredAt ?? discovery.discoveredAt,
   };
+}
+
+async function repairMovieYears(args: z.infer<typeof RepairYearsArgs>, context: Context) {
+  const dataHandles: Array<{ name: string }> = [];
+  const correctedAt = new Date().toISOString();
+  for (const dates of args.movies) {
+    const movie = await loadMovie(context, dates.catalogId);
+    if (
+      !movie || movie.tmdbId !== dates.tmdbId || movie.archivedAt || movie.originalReleaseDate ||
+      !isSelectable(movie, context.globalArgs?.policy ?? moviePolicy)
+    ) continue;
+    const year = Number(dates.originalReleaseDate.slice(0, 4));
+    if (year < 1800 || year > 2200) continue;
+    dataHandles.push(
+      await writeMovie(context, {
+        ...movie,
+        originalReleaseDate: dates.originalReleaseDate,
+        ...(dates.digitalReleaseDate !== undefined
+          ? { digitalReleaseDate: dates.digitalReleaseDate }
+          : {}),
+        year,
+        ...(year !== movie.year ? { yearCorrectedAt: correctedAt, noMatchReason: null } : {}),
+      }),
+    );
+  }
+  return { dataHandles };
 }
 
 function validateTransitionBatch(transitions: Transition[]): string | null {
@@ -829,6 +879,10 @@ export const definition = {
     toVersion: "2026.11.18.1",
     description: "Retain existing settings and acquisition history",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.26.3",
+    description: "Keep separate regional digital and original movie release dates",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: z.object({
     policy: PolicySchema.default(moviePolicy),
@@ -925,6 +979,8 @@ export const definition = {
           imdbId: movie.imdbId,
           title: movie.title,
           year: movie.year,
+          originalReleaseDate: movie.originalReleaseDate,
+          digitalReleaseDate: movie.digitalReleaseDate,
           overview: null,
           releaseDate: null,
           discoveredAt: movie.discoveredAt ?? args.acceptedAt,
@@ -1005,6 +1061,11 @@ export const definition = {
       arguments: IngestArgsSchema,
       execute: (args: { discoveries: DiscoveryRecord[] }, context: Context) =>
         executeIngest(args, context),
+    },
+    repairMovieYears: {
+      description: "Apply verified original release dates to waiting movies by TMDB identity.",
+      arguments: RepairYearsArgs,
+      execute: repairMovieYears,
     },
     select: {
       description:

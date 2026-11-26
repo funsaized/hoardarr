@@ -45,6 +45,12 @@ const Episode = z.object({
 const yearOf = (date?: string | null) =>
   date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? Number(date.slice(0, 4)) : null;
 
+export async function readTmdbMovie(id: number, get: Get) {
+  const movie = Movie.parse(await get(`/movie/${id}`));
+  if (movie.id !== id) throw new Error("TMDB movie identity changed");
+  return movie;
+}
+
 export function tmdbReader(ctx: MetadataContext, fetchImpl: typeof fetch = fetch): Get {
   return async (path) => {
     if (!ctx.globalArgs.apiKey) throw new Error("TMDB credential is not configured");
@@ -166,8 +172,7 @@ export async function expandTargets(
     throw new Error("Local title requires a confirmed TMDB alias for metadata refresh");
   }
   if (media.mediaKind === "movie") {
-    const movie = Movie.parse(await get(`/movie/${media.tmdbId}`));
-    if (movie.id !== media.tmdbId) throw new Error("TMDB movie identity changed");
+    const movie = await readTmdbMovie(media.tmdbId, get);
     return [{
       mediaKind: "movie",
       tmdbId: movie.id,
