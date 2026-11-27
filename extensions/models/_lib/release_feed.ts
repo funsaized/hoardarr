@@ -21,7 +21,8 @@ export const FeedReview = z.object({
   title: z.string(),
   reason: z.string(),
   feed: FeedName,
-  state: z.enum(["pending", "admitted", "known"]),
+  state: z.enum(["pending", "deferred", "admitted", "known"]),
+  eligibleAt: z.iso.datetime().optional(),
 });
 export function weekStart(now: Date) {
   const utc = new Date(now);
@@ -60,12 +61,18 @@ export async function ingestReleaseFeeds(
       const key = createHash("sha256").update(JSON.stringify([feed, record.name])).digest("hex");
       const parsed = Suggestion.safeParse(record.attributes);
       const s = parsed.data;
-      const review = (reason: string, state: "pending" | "known" | "admitted" = "pending") =>
+      const review = (
+        reason: string,
+        state: "pending" | "known" | "admitted" | "deferred" = "pending",
+      ) =>
         ctx.writeResource("feedReview", "feed-" + key, {
           title: s?.title ?? record.name,
           feed,
           reason,
           state,
+          ...(state === "deferred"
+            ? { eligibleAt: new Date(Date.parse(week) + 7 * 86400000).toISOString() }
+            : {}),
         });
       if (!s) {
         await review("Invalid movie suggestion");
@@ -101,7 +108,7 @@ export async function ingestReleaseFeeds(
         continue;
       }
       if (remaining <= 0) {
-        await review("Weekly discovery allowance reached");
+        await review("Weekly discovery allowance reached", "deferred");
         continue;
       }
       const catalogId = s.tmdbId ?? 2 ** 52 + parseInt(key.slice(0, 12), 16);

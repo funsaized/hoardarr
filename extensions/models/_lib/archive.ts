@@ -57,6 +57,9 @@ export const ArchiveItem = z.object({
   directory: z.string().optional(),
   files: z.array(z.string()).optional(),
   bytes: z.number().optional(),
+  archivedAt: z.iso.datetime().optional(),
+  timingMs: z.object({ mountChecks: z.number(), hashing: z.number(), directorySync: z.number() })
+    .optional(),
 });
 type Item = z.infer<typeof ArchiveItem>;
 export function archiveTotals(items: Item[]) {
@@ -81,7 +84,8 @@ export async function archiveData(ctx: ArchiveContext, apply: boolean) {
     ? []
     : await ctx.readModelData(ctx.globalArgs.destination ?? "local-destination", "receipt");
 
-  return { root, movies, episodes, manifests, saved, receipts };
+  const completions = apply ? await ctx.readModelData("pipeline", "archive") : [];
+  return { root, movies, episodes, manifests, saved, receipts, completions };
 }
 type Data = Awaited<ReturnType<typeof archiveData>>;
 function select(data: Data, args: Args) {
@@ -120,6 +124,11 @@ function label({ row, kind, key }: Selected) {
   return `${row.showName ?? key} S${number(row.seasonNumber)}E${number(row.episodeNumber)}`;
 }
 class ChangedDelivery extends Error {}
+function reviewable(error: unknown): error is Error {
+  return error instanceof ChangedDelivery || error instanceof Deno.errors.NotFound ||
+    error instanceof Error &&
+      /Symlink path|Path escapes|Not a regular media file/.test(error.message);
+}
 async function prepare(data: Data, item: Selected) {
   const { root, saved, manifests } = data;
   const { row, kind, key, id } = item;
@@ -244,11 +253,21 @@ export async function previewArchive(ctx: ArchiveContext, args: Args, hash = fil
       items.push(skip);
       continue;
     }
-    const { record, prior } = await prepare(data, item);
-    await verifiedPaths(data, item, record, !!prior, true, ctx, hash);
-    const delivery = freeze(item, record);
-    targets.push(delivery);
-    items.push(details(delivery, "would-archive"));
+    try {
+      const { record, prior } = await prepare(data, item);
+      await verifiedPaths(data, item, record, !!prior, true, ctx, hash);
+      const delivery = freeze(item, record);
+      targets.push(delivery);
+      items.push(details(delivery, "would-archive"));
+    } catch (error) {
+      if (!reviewable(error)) throw error;
+      items.push({
+        key: item.key,
+        title: label(item),
+        outcome: "needs-review",
+        reason: error.message,
+      });
+    }
   }
   return { items, targets };
 }
@@ -272,13 +291,11 @@ async function removeItem(
   ) {
     throw new ChangedDelivery("The accepted delivery has changed");
   }
-  if (skip) {
-    const intent = data.saved.find((r) => r.name === `archive-intent-${key}`);
-    if (expected && requestId && intent?.attributes.requestId === requestId && row.archivedAt) {
-      return details(expected, "archived");
-    }
-    return skip;
-  }
+  // A catalog transition may have committed just before the completion write failed.
+  const intent = data.saved.find((r) => r.name === "archive-intent-" + key);
+  if (
+    skip && !(row.archivedAt && intent && (!requestId || intent.attributes.requestId === requestId))
+  ) return skip;
   const { record, prior } = await prepare(data, item);
   const delivery = freeze(item, record);
   if (
@@ -289,7 +306,39 @@ async function removeItem(
         current.bytes !== e.bytes;
     }))
   ) throw new ChangedDelivery("The accepted file list has changed");
-  const paths = await verifiedPaths(data, item, record, !!prior, false, ctx, hash);
+  if (row.archivedAt) {
+    const archivedAt = z.iso.datetime().parse(row.archivedAt);
+    const completion = { ...record, archivedAt };
+    const saved = data.completions.find((r) => r.name === "archive-" + key);
+    const durable = ArchiveRecord.safeParse(saved?.attributes);
+    if (
+      !durable.success ||
+      JSON.stringify(durable.data) !== JSON.stringify(ArchiveRecord.parse(completion))
+    ) {
+      onStart();
+      const repaired = await ctx.writeResource("archive", "archive-" + key, completion);
+      handles?.push(repaired);
+    }
+    return { ...details(delivery, expected ? "archived" : "already-archived"), archivedAt };
+  }
+  const timingMs = { mountChecks: 0, hashing: 0, directorySync: 0 };
+  async function timed<T>(metric: keyof typeof timingMs, work: () => Promise<T>) {
+    const start = performance.now();
+    try {
+      return await work();
+    } finally {
+      timingMs[metric] += performance.now() - start;
+    }
+  }
+  const paths = await verifiedPaths(
+    data,
+    item,
+    record,
+    !!prior,
+    false,
+    ctx,
+    (path, signal) => timed("hashing", () => hash(path, signal)),
+  );
   const { directory } = record;
   if (!prior) {
     if (requestId) record.requestId = requestId;
@@ -299,13 +348,36 @@ async function removeItem(
   onStart();
   for (const { path, identity } of paths) {
     ctx.signal.throwIfAborted();
-    await assertLease(ctx.repoDir, owner);
+    await assertLease(ctx.repoDir, owner, (ms) => {
+      timingMs.mountChecks += ms;
+    });
     await checkedPath(root, path);
     if (!sameIdentity(identity, await fileIdentity(path))) {
       throw new Error(`Library file changed during archive: ${path}`);
     }
     await Deno.remove(path);
-    await syncDirectory(dirname(path));
+    await timed("directorySync", () => syncDirectory(dirname(path)));
+  }
+  // An interrupted unlink may have completed before its parent directory was synced.
+  if (prior && paths.length < record.entries.length) {
+    const present = new Set(paths.map((p) => p.path));
+    const pending = new Set(
+      record.entries.map((e) => join(directory, e.relativePath)).filter((path) =>
+        !present.has(path)
+      ).map((path) => dirname(path)),
+    );
+    for (let parent of pending) {
+      while (true) {
+        await checkedPath(root, parent);
+        try {
+          await timed("directorySync", () => syncDirectory(parent));
+          break;
+        } catch (error) {
+          if (!(error instanceof Deno.errors.NotFound) || parent === root) throw error;
+          parent = dirname(parent);
+        }
+      }
+    }
   }
   // Remove only empty parents; unrelated episodes and untracked files survive.
   const parents = new Set(record.entries.map((e) => dirname(join(directory, e.relativePath))));
@@ -314,7 +386,7 @@ async function removeItem(
       await checkedPath(root, parent);
       try {
         await Deno.remove(parent);
-        await syncDirectory(dirname(parent));
+        await timed("directorySync", () => syncDirectory(dirname(parent)));
       } catch (error) {
         if (error instanceof Deno.errors.NotFound) {
           parent = dirname(parent);
@@ -345,7 +417,7 @@ async function removeItem(
     archivedAt,
   });
   handles?.push(completion);
-  return details(delivery, "archived");
+  return { ...details(delivery, "archived"), archivedAt, timingMs };
 }
 export async function removeFrozen(
   data: Data,
@@ -379,9 +451,7 @@ export async function removeFrozen(
     );
   } catch (error) {
     if (
-      !started && (error instanceof ChangedDelivery || error instanceof Deno.errors.NotFound ||
-        (error instanceof Error &&
-          /Symlink path|Path escapes|Not a regular media file/.test(error.message)))
+      !started && reviewable(error)
     ) return review(error.message);
     throw error;
   }

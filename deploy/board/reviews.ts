@@ -50,6 +50,7 @@ export type Projection = {
   ids?: number[];
   details?: { id: number; reason: string; action: string }[];
   retryAt?: string;
+  eligibleAt?: string;
   choices?: { id: number; name: string; premiered?: string }[];
   discovery?: boolean;
   trackedList?: string;
@@ -205,9 +206,11 @@ export function reviewRows(records: Projection[]) {
     }
     return {
       id: r.reviewKey,
-      review: true,
+      review: r.reason !== "Weekly discovery allowance reached",
+      deferred: r.reason === "Weekly discovery allowance reached",
+      eligibleAt: r.eligibleAt,
       title: r.title,
-      state: "blocked",
+      state: r.reason === "Weekly discovery allowance reached" ? "deferred" : "blocked",
       candidates,
       reviewKind: r.reason === "unavailable" ? "provider" : "identity",
       reviewRevision: r.retryAt,

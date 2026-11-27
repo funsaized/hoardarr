@@ -52,11 +52,24 @@ export async function processArchives(
       const outcomes = [];
       for (const target of request.targets) {
         await assertLease(ctx.repoDir, args.owner);
-        outcomes.push(
-          await removeFrozen(data, target, ctx, args.owner, request.id, () => {
-            removalStarted = true;
-          }),
-        );
+        const previous = request.items.find((i) => i.key === target.key);
+        if (
+          previous && ["archived", "needs-review", "already-archived"].includes(previous.outcome)
+        ) {
+          outcomes.push(previous);
+          continue;
+        }
+        const result = await removeFrozen(data, target, ctx, args.owner, request.id, () => {
+          removalStarted = true;
+        });
+        await invoke(ctx, "archives", "finish", {
+          id: request.id,
+          owner: args.owner,
+          outcomes: [result],
+          checkpoint: true,
+        });
+        outcomes.push(result);
+        removalStarted = false;
       }
       await invoke(ctx, "archives", "finish", { id: request.id, owner: args.owner, outcomes });
       removalStarted = false;

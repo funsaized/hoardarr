@@ -1,6 +1,35 @@
+import catalog from "./operations.json" with { type: "json" };
+export const operationCatalog = catalog;
+export function operationForm(command) {
+  const op = catalog.operations.find((op) => op.command === command);
+  if (!op) throw Error("Unknown operator command " + command);
+  const inputs = op.parameters?.map((p) => "--" + p.name + " " + p.value).join(" ") ?? op.inputs;
+  return [
+    op.command + " " + inputs,
+    op.summary + " " + op.effects + " " + op.replay + " Returns " +
+    Object.keys(op.result).join(", ") + ".",
+  ];
+}
+/** Decode the operator form before passing it to the behavior's typed validator. */
+export function operationInputs(command, argv) {
+  const op = catalog.operations.find((op) => op.command === command);
+  if (!op?.parameters) throw Error("Unknown operator form " + command);
+  const inputs = {};
+  for (const parameter of op.parameters) {
+    const flag = "--" + parameter.name;
+    const index = argv.indexOf(flag);
+    const value = argv[index + 1];
+    if (index < 0 || !value || value.startsWith("--") || argv.lastIndexOf(flag) !== index) {
+      throw Error("Expected one value for " + flag);
+    }
+    inputs[parameter.name] = parameter.type === "integer" ? Number(value) : value;
+  }
+  return inputs;
+}
 // Command forms accepted by the Hoardarr CLI. Uppercase arguments stand for operator-supplied values.
 export const commandGroups = [
   ["Inspect and diagnose", [
+    ["operations [--json]", "Show versioned operator inputs, results and replay requirements."],
     ["help", "List the main commands and installation options."],
     ["status", "See catalog counts, service readiness and who owns the current operation."],
     [
@@ -28,31 +57,19 @@ export const commandGroups = [
   ]],
   ["Request a title", [
     ["request help", "Show request scopes, options and examples."],
-    [
-      "request resolve --kind movie|tv --query TITLE",
-      "Look up possible identities for a request. Check the title, year and provider before choosing.",
-    ],
-    [
-      "request submit --resolution UUID --tmdb-id ID --scope SCOPE --key KEY --text TEXT",
-      "Save the chosen title and scope and try acquisition. Use --local-id for a local match or --defer to queue it.",
-    ],
+    operationForm("request resolve"),
+    operationForm("request submit"),
     ["request run --id REQUEST_ID", "Process an existing request immediately."],
-    ["request status --id REQUEST_ID", "Show progress on the requested title or episodes."],
+    operationForm("request status"),
     ["request list", "List saved requests and their progress."],
-    [
-      "request replace --id REQUEST_ID --hash CURRENT_TORRENT_HASH",
-      "Try a different movie release.",
-    ],
+    operationForm("request replace"),
   ]],
   ["Resolve attention", [
     [
       "confirm-series --review REVIEW --id ID --revision TIME",
       "Use the chosen TVmaze series for future episode discovery.",
     ],
-    [
-      "resolve link --target REVIEW --revision VALUE --candidate ID --match ID",
-      "Attach a provider episode identity to the matching local episode after checking its series and number.",
-    ],
+    operationForm("resolve link"),
     [
       "resolve exclude --target REVIEW --revision VALUE --candidate ID",
       "Skip this provider record while its evidence stays the same. Existing library files are kept.",
@@ -76,16 +93,13 @@ export const commandGroups = [
   ]],
   ["Archive local copies", [
     ["archive help", "Show selectors for movies, series and batches."],
-    [
-      "archive --movies IDS --dry-run",
-      "Preview which completed local files the selection covers. Use --shows for series.",
-    ],
+    operationForm("archive"),
     [
       "archive --movies IDS [--defer]",
       "Remove the selected completed local copies and retain the catalog records. Export any copies you need first. Use --defer to queue the work.",
     ],
     ["archive list", "List archive requests."],
-    ["archive status --id UUID", "Inspect the selected files and progress of an archive request."],
+    operationForm("archive status"),
     ["archive cancel --id UUID", "Cancel an archive request that is still queued."],
     ["archive run --id UUID", "Process an existing archive request."],
   ]],

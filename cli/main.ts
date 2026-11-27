@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-all
+import { operationCatalog, operationForm, operationInputs } from "../deploy/board/reference.js";
 import { Resolution } from "../extensions/models/_lib/attention.ts";
 import { previewIdentities } from "../src/identity.ts";
 import { movieSummary } from "../src/movies.ts";
@@ -57,7 +58,10 @@ run        Reconcile discovery, downloads, verified delivery and cleanup.
 archive    Preview, submit, inspect or cancel removal of exported local copies (archive help for options).
 organize   Organize existing local library copies; --dry-run previews filenames.
 status     Show catalog states and outstanding reconciliation ownership.
-request    resolve|submit|run|status|list scoped media requests (request help for options).
+request    Manage scoped media requests (request help for options).
+operations Show the versioned operator contract. Use --json for structured results.
+
+${operationCatalog.operations.map((op) => operationForm(op.command)[0]).join("\n")}
 recover    Restore the environment and release an interrupted run's ownership.
 recover-apply Roll back an interrupted native configuration transaction (--journal PATH).
 recover-maintenance Verify and release a restored snapshot's own maintenance owner (--snapshot, --owner).
@@ -218,15 +222,19 @@ async function mainUnlocked(argv: string[]): Promise<void> {
     return;
   }
   if (action === "resolve") {
-    if (!config.guest) throw Error("Resolution requires an enrolled installation");
-    await assertCommissioned(config, repo);
-    const data = Resolution.parse({
-      action: argv[1],
-      target: option("--target"),
-      revision: option("--revision"),
-      ...(option("--candidate") ? { candidate: Number(option("--candidate")) } : {}),
-      ...(option("--match") ? { match: Number(option("--match")) } : {}),
-    });
+    if (config.guest) await assertCommissioned(config, repo);
+    else if (!["link", "exclude"].includes(argv[1])) {
+      throw Error("Transfer and search controls require an enrolled installation");
+    }
+    const data = Resolution.parse(
+      argv[1] === "link" ? { action: "link", ...operationInputs("resolve link", argv) } : {
+        action: argv[1],
+        target: option("--target"),
+        revision: option("--revision"),
+        ...(option("--candidate") ? { candidate: Number(option("--candidate")) } : {}),
+        ...(option("--match") ? { match: Number(option("--match")) } : {}),
+      },
+    );
     const result = await jsonCommand<Record<string, unknown>>([
       "model",
       "method",
@@ -543,6 +551,16 @@ export async function main(argv: string[]): Promise<void> {
   const action = argv[0] ?? "help";
   if (["help", "--help", "-h"].includes(action)) {
     console.log(HELP);
+    return;
+  }
+  if (action === "operations") {
+    console.log(
+      argv.includes("--json")
+        ? JSON.stringify(operationCatalog, null, 2)
+        : operationCatalog.operations.map((op) => operationForm(op.command).join("\n")).join(
+          "\n\n",
+        ),
+    );
     return;
   }
   const index = argv.indexOf("--dir"), repo = resolve(index < 0 ? Deno.cwd() : argv[index + 1]);

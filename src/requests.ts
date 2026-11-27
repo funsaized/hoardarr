@@ -1,3 +1,4 @@
+import { operationForm, operationInputs } from "../deploy/board/reference.js";
 /** Operator request commands. Conversations use the same typed Swamp boundary as the CLI. */
 import type { Config } from "./config.ts";
 import { command, jsonCommand, swamp } from "./swamp.ts";
@@ -26,8 +27,7 @@ submit  --resolution UUID (--tmdb-id ID | --local-id UUID) --scope movie|episode
         --defer leaves acquisition to the existing schedule or request run.
 run     --id REQUEST_ID
         Attempt an immediate, scoped media run for an accepted request.
-replace --id REQUEST_ID --hash CURRENT_TORRENT_HASH
-        Exclude the specified release from a movie request and try an alternate.
+${operationForm("request replace").join("\n        ")}
 status  --id REQUEST_ID
 list    Show all requests with saved catalog progress and observation timestamps.
 
@@ -206,8 +206,9 @@ export async function requestCommand(
     return { accepted: true, requestId: id, execution, ...await requestStatus(repo, config, id) };
   }
   if (operation === "replace") {
-    const id = RequestId.parse(option("--id"));
-    const { hash } = MovieReplacement.parse({ hash: option("--hash") });
+    const inputs = operationInputs("request replace", argv) as { id: string; hash: string };
+    const id = RequestId.parse(inputs.id);
+    const { hash } = MovieReplacement.parse(inputs);
     await command(
       ["behavior", "run", "pipeline", "replaceMovieRelease", "--stdin", "--json"],
       repo,

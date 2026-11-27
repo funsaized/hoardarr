@@ -1,4 +1,8 @@
-import { planEpisodeList, Verdict } from "../extensions/models/_lib/identity_resolution.ts";
+import {
+  episodePlannerIndex,
+  planEpisodeList,
+  Verdict,
+} from "../extensions/models/_lib/identity_resolution.ts";
 import {
   type ShowConfig,
   TrackedEpisodeList,
@@ -21,7 +25,7 @@ export async function previewIdentities(repo: string, shows: ShowConfig[]) {
   ], repo);
   if (saved.limited) throw Error("Swamp returned a partial catalog");
   const rows = (spec: string) => saved.results.filter((r) => r.spec === spec);
-  const catalog = rows("episode").map((r) => r.attributes);
+  const catalog = episodePlannerIndex(rows("episode").map((r) => r.attributes));
   const decisions = rows("operatorDecision").map((r) => r.attributes);
   const answers = new Map(
     rows("identityAnswer").map((r) => {

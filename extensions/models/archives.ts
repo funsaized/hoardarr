@@ -25,7 +25,7 @@ type Context = Runtime & {
 };
 const Id = z.object({ id: z.uuid() });
 const Claim = Id.extend({ owner: z.uuid() });
-const Finish = Claim.extend({ outcomes: z.array(ArchiveItem) });
+const Finish = Claim.extend({ outcomes: z.array(ArchiveItem), checkpoint: z.boolean().optional() });
 async function get(ctx: Context, id: string) {
   const record = await ctx.readResource("archive-request-" + id);
   if (!record) throw new Error("Unknown archive request: " + id);
@@ -58,7 +58,12 @@ async function writable<T>(ctx: Context, action: () => Promise<T>) {
 }
 export const model = {
   type: "@funsaized/hoardarr/archives",
-  version: "2026.11.25.1",
+  version: "2026.11.27.2",
+  upgrades: [{
+    toVersion: "2026.11.27.2",
+    description: "Preserve installed settings and existing archive requests",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }],
   globalArguments: Globals,
   resources: {
     request: {
@@ -122,7 +127,11 @@ export const model = {
             selection,
             items,
             targets,
-            status: targets.length ? "queued" : "completed",
+            status: targets.length
+              ? "queued"
+              : items.some((i) => i.outcome === "needs-review")
+              ? "needs-review"
+              : "completed",
           }));
       },
     },
@@ -154,18 +163,32 @@ export const model = {
     finish: {
       description: "Record the result of each accepted delivery.",
       arguments: Finish,
-      execute: async ({ id, owner, outcomes }: z.infer<typeof Finish>, ctx: Context) => {
+      execute: async (
+        { id, owner, outcomes, checkpoint }: z.infer<typeof Finish>,
+        ctx: Context,
+      ) => {
         await assertLease(ctx.repoDir, owner);
         const request = await get(ctx, id);
         if (
-          request.status !== "running" || request.targets.length !== outcomes.length ||
-          !request.targets.every((t, i) => t.key === outcomes[i].key)
+          request.status !== "running" || (checkpoint
+            ? outcomes.length !== 1 ||
+              !request.targets.some((t) => t.key === outcomes[0].key)
+            : request.targets.length !== outcomes.length ||
+              !request.targets.every((t, i) => t.key === outcomes[i].key)) ||
+          outcomes.some((i) =>
+            !["archived", "already-archived", "needs-review"].includes(i.outcome)
+          )
         ) throw new Error("Archive results differ from the accepted targets");
         const byKey = new Map(outcomes.map((item) => [item.key, item]));
+        const items = request.items.map((i) => byKey.get(i.key) ?? i);
         return await save(ctx, {
           ...request,
-          items: request.items.map((i) => byKey.get(i.key) ?? i),
-          status: outcomes.some((i) => i.outcome === "needs-review") ? "needs-review" : "completed",
+          items,
+          status: checkpoint
+            ? "running"
+            : items.some((i) => i.outcome === "needs-review")
+            ? "needs-review"
+            : "completed",
         });
       },
     },

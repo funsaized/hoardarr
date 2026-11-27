@@ -157,3 +157,20 @@ Deno.test("stored curator replies survive replay and an unavailable agent leaves
   strictEqual(store.get("try-" + question.revision)?.attributes.attempts, 0);
   ok(store.get("curator-backoff"));
 });
+
+Deno.test("100 incoming episodes read unrelated provider aliases once per ingest", () => {
+  let reads = 0;
+  const unrelated = Array.from({ length: 10000 }, (_, i) => ({
+    ...row,
+    tmdbEpisodeId: 10000 + i,
+    showTmdbId: 999,
+    get tvmazeEpisodeId() {
+      reads++;
+      return 20000 + i;
+    },
+  }));
+  const incoming = Array.from({ length: 100 }, (_, i) => ({ ...ep, id: 1000 + i, number: i + 1 }));
+  const baseline = plan([row], incoming);
+  equal(plan([...unrelated, row], incoming), baseline);
+  strictEqual(reads, 10000);
+});

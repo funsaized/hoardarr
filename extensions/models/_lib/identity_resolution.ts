@@ -84,12 +84,36 @@ function catalogFact(r: Row): z.infer<typeof Fact> {
       : null,
   };
 }
-export function sameSeriesRows(list: List, rows: Row[]) {
-  return rows.filter((r) =>
-    r.tvmazeSeriesId === list.show.id || (!r.tvmazeSeriesId &&
-      !!list.tracked.tmdbId &&
-      (r.showTmdbId === list.tracked.tmdbId || seriesCatalogId(r) === list.tracked.tmdbId))
-  );
+/** Updated as each tracked list admits episodes or confirms aliases during an ingest. */
+export function episodePlannerIndex(catalog: Row[]) {
+  const aliases = new Set<unknown>();
+  const series = new Map<string, Set<Row>>();
+  const byId = new Map<number, Row>();
+  function add(row: Row) {
+    const alias = row.tvmazeEpisodeId;
+    if (alias != null) aliases.add(alias);
+    byId.set(episodeCatalogId(row), row);
+    const keys = row.tvmazeSeriesId
+      ? ["v" + row.tvmazeSeriesId]
+      : [...new Set([row.showTmdbId, seriesCatalogId(row)])].filter(Boolean).map((id) => "t" + id);
+    for (const key of keys) {
+      if (!series.has(key)) series.set(key, new Set());
+      series.get(key)!.add(row);
+    }
+  }
+  for (const row of catalog) add(row);
+  return {
+    aliases,
+    byId,
+    add,
+    rows(list: List) {
+      // A linked row may still be in its former TMDB bucket. Its TVmaze owner now wins.
+      return [
+        ...series.get("v" + list.show.id) ?? [],
+        ...[...series.get("t" + list.tracked.tmdbId) ?? []].filter((r) => !r.tvmazeSeriesId),
+      ];
+    },
+  };
 }
 export function episodeCase(
   provider: "tmdb" | "tvmaze",
@@ -264,12 +288,14 @@ export function selectedLink(a: Assessment, answer?: Verdict): IdentityLink | nu
 
 export function planEpisodeList(
   list: List,
-  catalog: Row[],
+  catalog: Row[] | ReturnType<typeof episodePlannerIndex>,
   decisions: Map<number, string>,
   answers: Map<string, Verdict>,
   now = Date.now(),
 ) {
-  const rows = sameSeriesRows(list, catalog);
+  const index = Array.isArray(catalog) ? episodePlannerIndex(catalog) : catalog;
+  const rows = index.rows(list);
+  const localAliases = new Set(rows.map((row) => row.tvmazeEpisodeId));
   const counts = new Map<string, number>();
   const fresh: Episode[] = [],
     review: number[] = [],
@@ -287,8 +313,8 @@ export function planEpisodeList(
       details.push({ id: ep.id, action: "skip", reason: "Outside regular-episode policy" });
       continue;
     }
-    if (rows.some((r) => r.tvmazeEpisodeId === ep.id)) continue;
-    if (catalog.some((r) => r.tvmazeEpisodeId === ep.id)) {
+    if (localAliases.has(ep.id)) continue;
+    if (index.aliases.has(ep.id)) {
       review.push(ep.id);
       details.push({
         id: ep.id,

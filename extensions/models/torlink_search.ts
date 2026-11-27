@@ -68,7 +68,10 @@ export async function boundedSearch(
     results: [] as Result[],
   }));
   const tasks = queries.flatMap((q, i) =>
-    groups[q.category].filter((source) => !disabledTorlinkSearchSources.includes(source)).map(
+    groups[q.category].filter((source) =>
+      !disabledTorlinkSearchSources.includes(source) &&
+      (!q.key.startsWith("probe-") || q.key === "probe-" + source)
+    ).map(
       (source) => ({ i, source }),
     )
   );
@@ -100,6 +103,8 @@ export async function boundedSearch(
             outcome.retryAt ?? 0,
           );
         } else {
+          // A concurrent failure can establish a new cooldown while this call is running.
+          if ((backoff[source] ?? 0) <= Date.now()) delete backoff[source];
           row.ok = true;
           row.results.push(...results);
         }

@@ -131,9 +131,14 @@ function display(
   }
   for (const i of items.filter((i) => i.outcome !== "skipped")) {
     lines.push(
-      `${i.title} — ${i.outcome === "would-archive" ? status : i.outcome}${
-        i.reason ? " · " + i.reason : ""
-      }`,
+      `${i.title} — ${
+        i.outcome === "archived"
+          ? "Removed from this library · " + i.files?.length + " files · " + i.bytes + " bytes · " +
+            (i.archivedAt ?? "Time unavailable")
+          : i.outcome === "would-archive"
+          ? status
+          : i.outcome
+      }${i.reason ? " · " + i.reason : ""}`,
     );
   }
   const skips = items.filter((i) => i.outcome === "skipped").length;
@@ -177,6 +182,7 @@ export async function archiveCommand(argv: string[], repo: string) {
       const { fileCount, bytes } = archiveTotals(items);
       return [
         `Preview · ${fileCount} files · ${bytes.toLocaleString("en-US")} bytes`,
+        ...items.filter((i) => i.outcome === "needs-review").map((i) => i.title + " · " + i.reason),
         ...items.filter((i) => i.files).flatMap((i) => [
           i.title,
           ...i.files!.map((f) => `  ${i.directory}/${f}`),

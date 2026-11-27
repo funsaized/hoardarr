@@ -3,7 +3,7 @@ import { itemFeed, overview, runFeed } from "./feed.ts";
 import { reviewRows } from "./reviews.ts";
 // The browser only sees these projections. Provider responses can include private locators.
 export const catalogPredicate =
-  '(modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["operatorDecision","transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"] && (!("resolved" in attributes) || !attributes.resolved)) || (modelName == "pipeline" && specName == "feedReview" && attributes.state == "pending") || (modelName == "tracked-tv" && (specName in ["episodeList","seriesDecision"] || (specName == "refreshStatus" && attributes.state != "ready")))';
+  '(modelName == "requests" && specName == "request" && attributes.intent.selection.scope == "movie" && attributes.targets != null && size(attributes.targets) == 1) || (modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["archive","operatorDecision","transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"] && (!("resolved" in attributes) || !attributes.resolved)) || (modelName == "pipeline" && specName == "feedReview" && attributes.state in ["pending","deferred"]) || (modelName == "tracked-tv" && (specName in ["episodeList","seriesDecision"] || (specName == "refreshStatus" && attributes.state != "ready")))';
 const catalogFields = [
   "catalogId",
   "localId",
@@ -30,14 +30,16 @@ const catalogFields = [
   "localCleanedAt",
 ];
 export const catalogProjection =
+  'specName == "request" ? {"requestId": attributes.id, "movieId": "catalogId" in attributes.targets[0] ? attributes.targets[0].catalogId : attributes.targets[0].tmdbId} : ' +
   'specName == "operatorDecision" ? {"operatorDecision": attributes} : ' +
   'specName == "seriesDecision" ? {"decisionKey": name, "revision": attributes.revision} : ' +
   'specName == "episodeList" ? {"trackedList": name, "trackedTmdbId": "tmdbId" in attributes.tracked ? attributes.tracked.tmdbId : null, "sourceShow": {"id": attributes.show.id, "name": attributes.show.name, "premiered": attributes.show.premiered}, "episodes": attributes.episodes.map(e, {"id": e.id, "name": e.name, "season": e.season, "number": e.number, "type": e.type, "airstamp": "airstamp" in e ? e.airstamp : null, "airdate": "airdate" in e ? e.airdate : null})} : ' +
   'specName == "releaseSwitch" ? {"switchKey": attributes.key, "phase": attributes.phase, "oldHash": attributes.oldHash, "newHash": attributes.candidate.infoHash, "rank": attributes.candidate.rank, "updatedAt": attributes.updatedAt} : ' +
-  'specName == "feedReview" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason} : ' +
+  'specName == "archive" ? {"archiveKey": attributes.key, "removedAt": attributes.archivedAt, "files": attributes.entries.map(e, {"name":e.relativePath, "bytes":e.bytes})} : ' +
+  'specName == "feedReview" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "eligibleAt": "eligibleAt" in attributes ? attributes.eligibleAt : null} : ' +
   'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "retryAt": attributes.retryAt, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
   'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "details": "details" in attributes ? attributes.details : [], "provider": "provider" in attributes ? attributes.provider : "tmdb", "entityType": "entityType" in attributes ? attributes.entityType : null, "localIds": "localIds" in attributes ? attributes.localIds : null, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
-  'specName == "searchState" ? {"searchAttempts": attributes.attempts} : ' +
+  'specName == "searchState" ? {"searchAttempts": attributes.attempts, "issues": "issues" in attributes ? attributes.issues : {}, "sourceSuccess": "sourceSuccess" in attributes ? attributes.sourceSuccess : {}} : ' +
   'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
   'specName == "transferObservation" ? {' +
   '"observationKey": name, "hash": attributes.sample.hash, "decision": attributes.decision, "events": "events" in attributes ? attributes.events : [], ' +
@@ -204,9 +206,29 @@ async function catalog() {
       r: { switchKey: string },
     ) => [r.switchKey, r]),
   );
-  const attempts =
-    results.find((row: { searchAttempts?: unknown }) => row.searchAttempts)?.searchAttempts ?? {};
+  const movieRequests = new Map<number, string>(
+    results.filter((r: { requestId?: string }) => r.requestId).map((
+      r: { movieId: number; requestId: string },
+    ) => [r.movieId, r.requestId] as const),
+  );
+  const searches = results.find((row: { searchAttempts?: unknown }) => row.searchAttempts);
+  const attempts = searches?.searchAttempts ?? {};
+  const removals = new Map<string, { archiveKey: string; removedAt: string; files: unknown[] }>(
+    results.filter((r: { archiveKey?: string }) => r.archiveKey).map((
+      r: { archiveKey: string; removedAt: string; files: unknown[] },
+    ) => [r.archiveKey, r] as const),
+  );
   return {
+    incidents: Object.entries(searches?.issues ?? {}).map(([source, issue]) => {
+      const current = issue as { affected: string[]; observedAt: string; nextProbeAt?: string };
+      return {
+        source,
+        affected: current.affected,
+        observedAt: current.observedAt,
+        nextProbeAt: current.nextProbeAt,
+        lastSuccess: searches?.sourceSuccess?.[source],
+      };
+    }),
     decisions: results.filter((r: { operatorDecision?: unknown }) => r.operatorDecision).map((
       r: { operatorDecision: unknown },
     ) => r.operatorDecision),
@@ -215,7 +237,7 @@ async function catalog() {
       ...reviewRows(results),
       ...results.filter((r: Record<string, unknown>) =>
         !r.operatorDecision && !r.decisionKey && !r.trackedList && !r.switchKey && !r.reviewKey &&
-        !r.searchAttempts &&
+        !r.requestId && !r.archiveKey && !r.searchAttempts &&
         !r.shows && !r.observationKey && !r.catalogKey
       ).map((
         r: Record<string, unknown>,
@@ -237,7 +259,21 @@ async function catalog() {
           r.rankedCount,
         ),
         hash: r.infoHash,
+        replacementRequest: !r.showName && !r.transferredAt &&
+            ["selected", "downloading", "seeding", "seed-stopped", "failed"].includes(
+              String(r.status),
+            )
+          ? movieRequests.get(Number(r.catalogId ?? r.tmdbId))
+          : undefined,
         archived: !!r.archivedAt,
+        removedAt: r.archivedAt,
+        removal: (() => {
+          if (!r.archivedAt) return undefined;
+          const removal = removals.get(
+            (r.showName ? "e-" : "m-") + (r.catalogId ?? r.tmdbEpisodeId ?? r.tmdbId),
+          );
+          return removal?.removedAt === r.archivedAt ? removal : undefined;
+        })(),
         showId: r.seriesLocalId ?? identities.get("s-" + (r.seriesCatalogId ?? r.showTmdbId)) ??
           r.showTmdbId,
         ...(r.tvmazeSeriesId
@@ -310,7 +346,11 @@ export function cache<T>(load: () => Promise<T>, interval: (value: T) => number)
 export function catalogResponse(
   reading: Awaited<
     ReturnType<
-      ReturnType<typeof cache<{ rows: unknown[]; shows: unknown[]; decisions?: unknown[] }>>
+      ReturnType<
+        typeof cache<
+          { rows: unknown[]; shows: unknown[]; decisions?: unknown[]; incidents?: unknown[] }
+        >
+      >
     >
   >,
   knownRevision: string | null,
@@ -321,6 +361,7 @@ export function catalogResponse(
     ...status,
     rows: "rows" in saved ? saved.rows : [],
     shows: "shows" in saved ? saved.shows : [],
+    ...("incidents" in saved ? { incidents: saved.incidents } : {}),
     decisions: "decisions" in saved ? saved.decisions : [],
   };
 }
@@ -349,6 +390,7 @@ if (import.meta.main) {
         "board.js",
         "text/javascript",
       ],
+      ["/operations.json", "operations.json", "application/json"],
       ["/reference.js", "reference.js", "text/javascript"],
       ["/mesh.js", "mesh.js", "text/javascript"],
       ["/board.css", "board.css", "text/css"],
@@ -424,7 +466,9 @@ if (import.meta.main) {
         }
         if (run.mode === "preview") preview = reply.preview;
         run.runId = reply.runId;
-        run.status = "Succeeded";
+        run.status = run.mode === "replace" && typeof reply.replacementStatus === "string"
+          ? "Succeeded · " + reply.replacementStatus
+          : "Succeeded";
       } finally {
         try {
           socket.close();
@@ -436,7 +480,7 @@ if (import.meta.main) {
         : "Failed · inspect operator journal";
     } finally {
       run.finished = Date.now();
-      if (run.status === "Succeeded") readCatalog.invalidate();
+      if (run.status.startsWith("Succeeded")) readCatalog.invalidate();
       if (journal) await save();
     }
   }
@@ -451,7 +495,7 @@ if (import.meta.main) {
     const route = url.pathname;
     if (route.startsWith("/api/operate/") && req.method === "POST") {
       const mode = route.slice("/api/operate/".length);
-      if (!["preview", "discover", "run", "confirm", "resolve"].includes(mode)) {
+      if (!["preview", "discover", "run", "confirm", "resolve", "replace"].includes(mode)) {
         return new Response(null, { status: 404, headers });
       }
       if (!localCommandRequest(req.headers, Deno.args[1])) {
@@ -460,6 +504,15 @@ if (import.meta.main) {
       if (operation.status === "Running") return new Response(null, { status: 409, headers });
       let request = mode;
       let subject: string | undefined;
+      if (mode === "replace") {
+        const data = await req.json().catch(() => null);
+        if (
+          !data || typeof data.id !== "string" || !/^r-[a-f0-9]{64}$/.test(data.id) ||
+          typeof data.hash !== "string" || !/^[a-f0-9]{40}$/i.test(data.hash)
+        ) return new Response(null, { status: 400, headers });
+        subject = data.id;
+        request = JSON.stringify({ action: "replace", id: data.id, hash: data.hash });
+      }
       if (mode === "resolve") {
         let data;
         try {

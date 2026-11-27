@@ -34,6 +34,10 @@ if mode.startswith(b"{") and mode.endswith(b"\n"):
                 if type(data[key]) is not int or not 0 < data[key] <= 2**53-1:
                     raise ValueError("Invalid episode selection")
                 args.extend(["--"+key,str(data[key])])
+    elif (data.get("action") == "replace" and isinstance(data.get("id"), str)
+          and re.fullmatch(r"r-[a-f0-9]{64}", data["id"]) and isinstance(data.get("hash"), str)
+          and re.fullmatch(r"[a-fA-F0-9]{40}", data["hash"])):
+        args = ["request", "replace", "--id", data["id"], "--hash", data["hash"]]
     elif (re.fullmatch(r"tracked-[a-f0-9]{32}-status", data.get("review",""))
             and type(data["id"]) is int and data["id"] > 0
             and re.fullmatch(r"[0-9T:.Z-]{24}", data["revision"])):
@@ -45,7 +49,7 @@ if args:
          "/opt/hoardarr/cli/main.ts", *args],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
-    sys.stderr.write(result.stdout + result.stderr)
+    sys.stderr.write(result.stderr if args[:2] == ["request", "replace"] else result.stdout + result.stderr)
     reply = {"status": "failed"}
     if result.returncode:
         for fragment, reason in [("Installation is owned","busy"), ("inhibited","inhibited"),
@@ -57,6 +61,9 @@ if args:
     if result.returncode == 0:
         result_data = json.loads(result.stdout)
         reply = {"status": "succeeded", "runId": result_data.get("runId")}
+        if args[:2] == ["request", "replace"]:
+            reply["replacementStatus"] = result_data["replacementStatus"]
+            reply["runId"] = result_data["execution"].get("runId")
         if mode == b"preview\n":
             reply["preview"] = preview(result_data["runId"])
     print(json.dumps(reply))

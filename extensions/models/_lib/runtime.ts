@@ -137,12 +137,20 @@ export async function readLease(
     throw error;
   }
 }
-export async function assertLease(repo: string, owner: string): Promise<void> {
+export async function assertLease(
+  repo: string,
+  owner: string,
+  mountTiming?: (ms: number) => void,
+): Promise<void> {
   const value = await readLease(`${await ownershipDirectory(repo)}/lease.json`);
   if (!owner || value?.owner !== owner || (value.kind && value.kind !== "media")) {
     throw new Error("Reconciliation ownership is missing or changed");
   }
-  if (value.storage) await assertStorage(value.storage);
+  if (value.storage) {
+    const start = performance.now();
+    await assertStorage(value.storage);
+    mountTiming?.(performance.now() - start);
+  }
 }
 
 /** Called under the installation guard, before any new owner is admitted. */

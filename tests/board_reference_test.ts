@@ -1,5 +1,8 @@
 import {
   commandGroups,
+  operationCatalog,
+  operationForm,
+  operationInputs,
   stepDescriptions,
   workflowDescriptions,
 } from "../deploy/board/reference.js";
@@ -50,7 +53,23 @@ Deno.test("every command in operator help has a board reference entry", async ()
   const forms = commandGroups.flatMap(([, entries]) =>
     (entries as string[][]).map(([form]) => form.split(" ")[0])
   );
-  for (const line of new TextDecoder().decode(result.stdout).split("\n")) {
+  const helpText = new TextDecoder().decode(result.stdout);
+  const entries = commandGroups.flatMap(([, group]) => (group as string[][]).map(([form]) => form));
+  for (const operation of operationCatalog.operations) {
+    const [form] = operationForm(operation.command);
+    if (!helpText.includes(form) || !entries.includes(form)) {
+      throw Error("Missing operator form " + form);
+    }
+  }
+  for (const operation of ["request replace", "resolve link"]) {
+    try {
+      operationInputs(operation, []);
+    } catch {
+      continue;
+    }
+    throw Error("Accepted an empty command");
+  }
+  for (const line of helpText.split("\n")) {
     const action = /^([a-z][-a-z]+)\s/.exec(line)?.[1];
     if (action && !forms.includes(action)) throw Error("Missing command " + action);
   }

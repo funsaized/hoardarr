@@ -325,39 +325,44 @@ Deno.test("archive hashes changed copies even when a saved receipt exists", () =
     assert(await Deno.readTextFile(a.path) === "Changed");
   }));
 
+async function archiveQueue(root: string, f: Awaited<ReturnType<typeof fixture>>) {
+  const { model: queue } = await import("../extensions/models/archives.ts");
+  const requests = new Map<string, Row>();
+  const ctx = {
+    ...f.ctx,
+    globalArgs: queue.globalArguments.parse({ libraryRoot: root + "/library" }),
+    readResource: (name: string) => Promise.resolve(requests.get(name) ?? null),
+    writeResource: (spec: string, name: string, value: Row) => {
+      if (spec === "request") requests.set(name, structuredClone(value));
+      return Promise.resolve({ name });
+    },
+  };
+  const read = f.ctx.readModelData, run = f.ctx.runModel;
+  f.ctx.readModelData = (name, spec) =>
+    name === "archives"
+      ? Promise.resolve([...requests].map(([name, attributes]) => ({ name, attributes })))
+      : read(name, spec);
+  f.ctx.runModel = async (options) => {
+    if (options.definition !== "archives") return await run(options);
+    const args = options.arguments!, m = queue.methods;
+    const result = options.method === "claim"
+      ? await m.claim.execute(m.claim.arguments.parse(args), ctx)
+      : await m.finish.execute(m.finish.arguments.parse(args), ctx);
+    return {
+      ok: true,
+      resources: result.dataHandles.map(({ name }) => ({
+        name,
+        attributes: requests.get(name)!,
+      })),
+    };
+  };
+  return { queue, requests, ctx };
+}
+
 Deno.test("queued archives freeze deliveries, report drift, survive a busy owner and cancel before claim", () =>
   temporary(async (root) => {
     const f = await fixture(root);
-    const { model: queue } = await import("../extensions/models/archives.ts");
-    const requests = new Map<string, Row>();
-    const ctx = {
-      ...f.ctx,
-      globalArgs: queue.globalArguments.parse({ libraryRoot: root + "/library" }),
-      readResource: (name: string) => Promise.resolve(requests.get(name) ?? null),
-      writeResource: (spec: string, name: string, value: Row) => {
-        if (spec === "request") requests.set(name, structuredClone(value));
-        return Promise.resolve({ name });
-      },
-    };
-    const read = f.ctx.readModelData, run = f.ctx.runModel;
-    f.ctx.readModelData = (name, spec) =>
-      name === "archives"
-        ? Promise.resolve([...requests].map(([name, attributes]) => ({ name, attributes })))
-        : read(name, spec);
-    f.ctx.runModel = async (options) => {
-      if (options.definition !== "archives") return await run(options);
-      const args = options.arguments!, m = queue.methods;
-      const result = options.method === "claim"
-        ? await m.claim.execute(m.claim.arguments.parse(args), ctx)
-        : await m.finish.execute(m.finish.arguments.parse(args), ctx);
-      return {
-        ok: true,
-        resources: result.dataHandles.map(({ name }) => ({
-          name,
-          attributes: requests.get(name)!,
-        })),
-      };
-    };
+    const { queue, requests, ctx } = await archiveQueue(root, f);
     const a = await f.add(1, 20), b = await f.add(2, 20), changedDelivery = await f.add(3, 20);
     const id = crypto.randomUUID(), owner = crypto.randomUUID();
     await coordinator.methods.acquire.execute({ owner }, f.ctx);
@@ -393,3 +398,91 @@ Deno.test("queued archives freeze deliveries, report drift, survive a busy owner
     await rejects(() => Deno.stat(a.path));
     await coordinator.methods.release.execute({ owner }, f.ctx);
   }));
+
+Deno.test("intake keeps eligible episodes alongside a missing file", () =>
+  temporary(async (root) => {
+    const f = await fixture(root), { queue, requests, ctx } = await archiveQueue(root, f);
+    await f.add(1, 20);
+    const absent = await f.add(2, 20);
+    await Deno.remove(absent.path);
+    const id = crypto.randomUUID();
+    await queue.methods.submit.execute(archiveArguments(["archive", "--shows", "20"], id), ctx);
+    const request = requests.get("archive-request-" + id)!;
+    assert(request.status === "queued" && (request.targets as Row[]).length === 1);
+    const review = (request.items as Row[])[1];
+    assert(review.outcome === "needs-review" && String(review.reason).includes("2.mkv"));
+    await model.methods.runArchive.execute({ owner: crypto.randomUUID(), id }, f.ctx);
+    assert(requests.get("archive-request-" + id)?.status === "needs-review");
+  }));
+
+for (const step of ["remove", "transition", "archive"]) {
+  for (const side of ["before", "after"]) {
+    Deno.test("20 deliveries recover " + side + " " + step, () =>
+      temporary(async (root) => {
+        const f = await fixture(root), { queue, requests, ctx } = await archiveQueue(root, f);
+        const deliveries: Awaited<ReturnType<typeof f.add>>[] = [];
+        for (let id = 1; id <= 20; id++) deliveries.push(await f.add(id, 20));
+        const id = crypto.randomUUID(), owner = crypto.randomUUID();
+        await queue.methods.submit.execute(archiveArguments(["archive", "--shows", "20"], id), ctx);
+        const changed = deliveries[3];
+        await Deno.writeTextFile(changed.path, "Changed");
+        const run = f.ctx.runModel, write = f.ctx.writeResource, remove = Deno.remove;
+        function interrupt(where: string) {
+          if (where === side) throw Error("simulated interruption");
+        }
+        Deno.remove = async (path, opts) => {
+          const hit = step === "remove" && path === deliveries[10].path;
+          if (hit) interrupt("before");
+          await remove(path, opts);
+          if (hit) interrupt("after");
+        };
+        f.ctx.runModel = async (options) => {
+          const hit = step === "transition" && options.method === "transition" &&
+            (options.arguments?.transitions as Row[])[0].tmdbEpisodeId === 11;
+          if (hit) interrupt("before");
+          const result = await run(options);
+          if (hit) interrupt("after");
+          return result;
+        };
+        f.ctx.writeResource = async (...args) => {
+          const hit = step === "archive" && args[1] === "archive-e-11";
+          if (hit) interrupt("before");
+          const result = await write(...args);
+          if (hit) interrupt("after");
+          return result;
+        };
+        try {
+          await rejects(() => model.methods.runArchive.execute({ owner, id }, f.ctx));
+        } finally {
+          Deno.remove = remove;
+          f.ctx.runModel = run;
+          f.ctx.writeResource = write;
+        }
+        const partial = requests.get("archive-request-" + id)!;
+        assert(
+          partial.status === "running" &&
+            (partial.items as Row[]).filter((i) => i.outcome === "archived").length === 9,
+        );
+        await coordinator.methods.release.execute({ owner }, f.ctx);
+        await model.methods.runArchive.execute({ owner: crypto.randomUUID(), id }, f.ctx);
+        const final = requests.get("archive-request-" + id)!;
+        assert(final.status === "needs-review");
+        assert((final.items as Row[]).filter((i) => i.outcome === "archived").length === 19);
+        const records = await f.ctx.readModelData("pipeline", "archive");
+        assert(
+          records.length === 19 &&
+            records.every((r) => r.attributes.requestId === id && r.attributes.archivedAt),
+        );
+        assert(await Deno.readTextFile(changed.path) === "Changed" && !changed.row.archivedAt);
+        for (
+          const delivery of deliveries.filter((d) => d !== changed)
+        ) {
+          assert(records.some((r) =>
+            r.name === "archive-e-" + delivery.row.tmdbEpisodeId &&
+            r.attributes.archivedAt === delivery.row.archivedAt
+          ));
+          await rejects(() => Deno.stat(delivery.path));
+        }
+      }));
+  }
+}

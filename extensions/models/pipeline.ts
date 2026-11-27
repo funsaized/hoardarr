@@ -45,6 +45,7 @@ import {
   checkedAnswer,
   CuratorCase,
   episodeCase,
+  episodePlannerIndex,
   identityTitle,
   movieQuestion,
   planEpisodeList,
@@ -382,6 +383,7 @@ async function ingestTracked(owner: string, ctx: Context) {
   const saved = await ctx.readModelData("pipeline", "catalogIdentity");
   const index = identityIndex(saved.map((r) => CatalogIdentity.parse(r.attributes)));
   const existing = await rows(ctx, "episode");
+  const planner = episodePlannerIndex(existing);
   const decisions = new Map(
     (await ctx.readModelData("pipeline", "operatorDecision")).map(
       (r) => [r.name, r.attributes],
@@ -474,7 +476,7 @@ async function ingestTracked(owner: string, ctx: Context) {
       const d = decisions.get(decisionName("review-" + record.name, ep.id));
       return d?.action === "exclude" ? [[ep.id, String(d.revision)] as const] : [];
     }));
-    const assessment = planEpisodeList(list, existing, excluded, answers);
+    const assessment = planEpisodeList(list, planner, excluded, answers);
     const review = assessment.review;
     const queueName = "identity-" + record.name;
     if (JSON.stringify(queues.get(queueName) ?? []) !== JSON.stringify(assessment.questions)) {
@@ -482,7 +484,7 @@ async function ingestTracked(owner: string, ctx: Context) {
     }
     if (assessment.links.length) {
       for (const link of assessment.links) {
-        const row = existing.find((r) => episodeCatalogId(r) === link.match)!;
+        const row = planner.byId.get(link.match)!;
         if (row.localId) index.reserve("episode", "e-" + link.match, String(row.localId));
         index.confirm("episode", "e-" + link.match, {
           provider: "tvmaze",
@@ -491,9 +493,10 @@ async function ingestTracked(owner: string, ctx: Context) {
       }
       await invoke(ctx, ctx.globalArgs.episodes, "linkIdentities", { links: assessment.links });
       for (const link of assessment.links) {
-        const row = existing.find((r) => episodeCatalogId(r) === link.match)!;
+        const row = planner.byId.get(link.match)!;
         row.tvmazeEpisodeId = link.candidate;
         row.tvmazeSeriesId = show.id;
+        planner.add(row);
       }
     }
     const discoveries = [];
@@ -530,6 +533,7 @@ async function ingestTracked(owner: string, ctx: Context) {
       const batch = discoveries.slice(offset, offset + 500);
       await invoke(ctx, ctx.globalArgs.episodes, "ingest", { discoveries: batch });
       existing.push(...batch);
+      batch.forEach(planner.add);
     }
     const outstanding = review.filter((id) => {
       const decision = decisions.get(decisionName("review-" + record.name, id));
@@ -583,13 +587,28 @@ async function ingestDiscoveries(
       args.mediaKind === "movie" ? "identityReview" : "episodeReview",
     )).filter((r) => !r.attributes.resolved).map((r) => r.name),
   );
+  const parents = new Map<unknown, Row[]>();
+  const occupiedSlots = new Set<string>();
+  const slot = (parent: unknown, row: Row) =>
+    JSON.stringify([parent, row.seasonNumber, row.episodeNumber]);
+  const approvedRows = new Map<unknown, Row[]>();
+  for (const row of catalogRows) {
+    const alias = typeof row.localId === "string" ? approved[row.localId] : undefined;
+    if (alias !== undefined) {
+      if (!approvedRows.has(alias)) approvedRows.set(alias, []);
+      approvedRows.get(alias)!.push(row);
+    }
+    if (args.mediaKind !== "episode" || !row.tvmazeEpisodeId) continue;
+    if (!parents.has(row.showTmdbId)) parents.set(row.showTmdbId, []);
+    parents.get(row.showTmdbId)!.push(row);
+    occupiedSlots.add(slot(row.showTmdbId, row));
+    occupiedSlots.add(slot(String(row.showName).toLowerCase(), row));
+  }
   for (const discovery of discoveries) {
     const movie = args.mediaKind === "movie";
     const providerId = discovery[idField(args.mediaKind)];
     const reviewKey = movie ? "review-movie-" + providerId : "review-tmdb-episode-" + providerId;
-    const mapped = catalogRows.filter((r) =>
-      typeof r.localId === "string" && approved[r.localId] === providerId
-    );
+    const mapped = approvedRows.get(providerId) ?? [];
     if (mapped.length === 1 && reviewed.has(reviewKey)) {
       const row = mapped[0];
       if (
@@ -656,9 +675,7 @@ async function ingestDiscoveries(
       continue;
     }
     if (!movie && typeof discovery.showTmdbId === "number" && typeof providerId === "number") {
-      const sameParent = catalogRows.filter((r) =>
-        r.tvmazeEpisodeId && r.showTmdbId === discovery.showTmdbId
-      );
+      const sameParent = parents.get(discovery.showTmdbId) ?? [];
       const incoming = {
         id: providerId,
         title: String(discovery.episodeTitle ?? ""),
@@ -709,13 +726,8 @@ async function ingestDiscoveries(
       }
     }
     if (
-      args.mediaKind === "episode" && catalogRows.some((r) =>
-        r.tvmazeEpisodeId &&
-        (r.showTmdbId === discovery.showTmdbId ||
-          String(r.showName).toLowerCase() === String(discovery.showName).toLowerCase()) &&
-        r.seasonNumber === discovery.seasonNumber &&
-        r.episodeNumber === discovery.episodeNumber
-      )
+      args.mediaKind === "episode" && (occupiedSlots.has(slot(discovery.showTmdbId, discovery)) ||
+        occupiedSlots.has(slot(String(discovery.showName).toLowerCase(), discovery)))
     ) {
       await ctx.writeResource(
         "episodeReview",
@@ -799,7 +811,7 @@ async function ingestDiscoveries(
 }
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.27.1",
+  version: "2026.11.27.2",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -864,6 +876,10 @@ export const model = {
   }, {
     toVersion: "2026.11.27.1",
     description: "Preserve settings for operator-requested movie release replacement",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.27.2",
+    description: "Preserve installed settings and existing archive requests",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
@@ -995,10 +1011,18 @@ export const model = {
     },
     searchState: {
       schema: z.object({
+        sourceSuccess: z.record(z.string(), z.string()).optional(),
+        incidentCounts: z.record(z.string(), z.number()).optional(),
         missed: z.record(z.string(), z.number().int()).optional(),
         issues: z.record(
           z.string(),
-          z.object({ message: z.string(), affected: z.array(z.string()), observedAt: z.string() }),
+          z.object({
+            message: z.string(),
+            affected: z.array(z.string()),
+            observedAt: z.string(),
+            openedAt: z.string().optional(),
+            nextProbeAt: z.string().optional(),
+          }),
         ).optional(),
         attempts: z.record(
           z.string(),
@@ -1117,9 +1141,8 @@ export const model = {
             );
           }
         }
-        const state =
-          ((await ctx.readModelData("pipeline", "searchState"))[0]?.attributes.attempts ??
-            {}) as SearchState;
+        const searchState = (await ctx.readModelData("pipeline", "searchState"))[0]?.attributes;
+        const state = (searchState?.attempts ?? {}) as SearchState;
         const workByKey = new Map(all.map((item) => [item.key, item]));
         const ordered = acquisition
           ? prioritizeEpisodes(
@@ -1289,6 +1312,29 @@ export const model = {
             }
           }
         }
+        const queries = searchable.map((r) => ({
+          key: r.key,
+          query: r.query,
+          category: r.category,
+        }));
+        if (acquisition && !args.requestId && ctx.globalArgs.expectedInterface) {
+          const issues =
+            searchState?.issues as Record<string, { nextProbeAt?: string; affected: string[] }> ??
+              {};
+          for (const [source, issue] of Object.entries(issues)) {
+            if (
+              ctx.globalArgs.disabledSearchSources.includes(source) || queries.length >= 100 ||
+              issue.nextProbeAt && issue.nextProbeAt > now
+            ) continue;
+            const item = issue.affected.map((key) => workByKey.get(key)).find(Boolean);
+            if (
+              item &&
+              !queries.some((q) => !q.key.startsWith("probe-") && q.category === item.category)
+            ) {
+              queries.push({ key: "probe-" + source, query: item.query, category: item.category });
+            }
+          }
+        }
         return write(ctx, "work", {
           requests: requestRows.map((r) =>
             requestProgress(r, movieRows, episodeRows, state, new Date(), {
@@ -1308,7 +1354,7 @@ export const model = {
           skippedMovies: args.requestId
             ? []
             : dueMovies.filter((r) => !searchable.some((s) => s.key === r.key)).map((r) => r.key),
-          queries: searchable.map((r) => ({ key: r.key, query: r.query, category: r.category })),
+          queries,
           additions: selected.map((r) => ({
             key: r.key,
             input: r.input!,
@@ -1525,7 +1571,10 @@ export const model = {
           key: string;
           ok: boolean;
           results: Row[];
-          sources?: Record<string, { ok: boolean; error?: string }>;
+          sources?: Record<
+            string,
+            { ok: boolean; error?: string; code?: string; retryAt?: number }
+          >;
         }[];
         const recovering = new Set(
           ctx.globalArgs.expectedInterface
@@ -1559,10 +1608,18 @@ export const model = {
         const missed = (saved?.missed ?? {}) as Record<string, number>;
         const issues = (saved?.issues ?? {}) as Record<
           string,
-          { message: string; affected: string[]; observedAt: string }
+          {
+            message: string;
+            affected: string[];
+            observedAt: string;
+            openedAt?: string;
+            nextProbeAt?: string;
+          }
         >;
         const work = (await ctx.readModelData("pipeline", "work"))[0]?.attributes;
-        const planned = (work?.queries ?? []) as { key: string }[];
+        const planned = ((work?.queries ?? []) as { key: string }[]).filter((q) =>
+          !q.key.startsWith("probe-")
+        );
         const currentEpisodes = await rows(ctx, "episode");
         const now = new Date();
         const currentMovies = await rows(ctx, "movie");
@@ -1592,9 +1649,9 @@ export const model = {
             ? "alternates-ranked"
             : selected
             ? "selected"
-            : auth
+            : !anySuccess && auth
             ? "authentication-error"
-            : degraded
+            : !anySuccess && degraded
             ? "provider-error"
             : query?.results.length
             ? "no-match"
@@ -1610,7 +1667,8 @@ export const model = {
             ...(lastSuccessfulAt ? { lastSuccessfulAt } : {}),
             partial: Boolean(anySuccess && degraded),
             nextSearchAt: new Date(
-              now.getTime() + hours * 3600000,
+              now.getTime() + hours * 3600000 +
+                Math.floor(Math.random() * Math.min(hours * 360000, 900000)),
             ).toISOString(),
             outcome,
           };
@@ -1620,18 +1678,49 @@ export const model = {
         }
         for (const { key } of planned) delete missed[key];
         const observed = new Set(queries.flatMap((q) => Object.keys(q.sources ?? {})));
+        const sourceSuccess = (saved?.sourceSuccess ?? {}) as Record<string, string>;
+        const incidentCounts = (saved?.incidentCounts ?? {}) as Record<string, number>;
+        const backoff = getRecord(args.records, "search-backoff")?.until as
+          | Record<string, number>
+          | undefined;
         for (const source of observed) {
           const failed = queries.filter((q) => q.sources?.[source]?.ok === false);
-          if (failed.length) {
-            issues[source] = {
-              message: failed[0].sources?.[source]?.error ?? "Search failed",
-              affected: failed.map((q) => q.key),
-              observedAt: now.toISOString(),
-            };
-          } else delete issues[source];
+          const successful = queries.some((q) => q.sources?.[source]?.ok);
+          if (successful) sourceSuccess[source] = now.toISOString();
+          if (!failed.length || successful && backoff && !backoff[source]) {
+            delete issues[source];
+            continue;
+          }
+          const prior = issues[source];
+          if (!prior) incidentCounts[source] = (incidentCounts[source] ?? 0) + 1;
+          const observedFailure = failed.find((q) => q.sources?.[source]?.code !== "backoff");
+          const eligible = Math.max(
+            backoff?.[source] ?? 0,
+            ...failed.map((q) => q.sources?.[source]?.retryAt ?? 0),
+          );
+          issues[source] = {
+            message: observedFailure?.sources?.[source]?.error ?? prior?.message ?? "Search failed",
+            affected: [
+              ...new Set([
+                ...(prior?.affected ?? []),
+                ...failed.filter((q) => !q.key.startsWith("probe-")).map((q) => q.key),
+              ]),
+            ],
+            openedAt: prior?.openedAt ?? prior?.observedAt ?? now.toISOString(),
+            observedAt: observedFailure
+              ? now.toISOString()
+              : prior?.observedAt ?? now.toISOString(),
+            nextProbeAt: new Date(eligible || now.getTime() + 60000).toISOString(),
+          };
         }
         for (const source of ctx.globalArgs.disabledSearchSources) delete issues[source];
-        await ctx.writeResource("searchState", "searchState-current", { attempts, missed, issues });
+        await ctx.writeResource("searchState", "searchState-current", {
+          attempts,
+          missed,
+          issues,
+          sourceSuccess,
+          incidentCounts,
+        });
         if (ctx.globalArgs.requestModel) {
           await ctx.writeResource(
             "requestFairness",

@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "command": "request resolve",
+      "inputs": "--kind movie|tv --query TITLE",
+      "summary": "Find candidates for a request.",
+      "result": {
+        "resolutionId": "UUID",
+        "candidates": "title identities[]"
+      },
+      "effects": "Saves the candidate list.",
+      "replay": "Choose an identity from this resolution before submitting."
+    },
+    {
+      "command": "request submit",
+      "inputs": "--resolution UUID --tmdb-id ID --scope SCOPE --key KEY --text TEXT",
+      "summary": "Request a resolved title.",
+      "result": {
+        "accepted": "boolean",
+        "requestId": "request ID",
+        "execution": "workflow status"
+      },
+      "effects": "Accepts the chosen scope and attempts acquisition. Use --defer to queue it.",
+      "replay": "Reuse the same key only for the same intent. A local candidate uses --local-id in place of --tmdb-id."
+    },
+    {
+      "command": "request status",
+      "inputs": "--id REQUEST_ID",
+      "summary": "Explain a request using saved observations.",
+      "result": {
+        "requests": "request progress[]",
+        "downloader": "snapshot metadata"
+      },
+      "effects": "Reads request and catalog state.",
+      "replay": "Read again for the latest observation."
+    },
+    {
+      "command": "request replace",
+      "summary": "Try a different movie release.",
+      "result": {
+        "excludedHash": "SHA-1",
+        "alternateHash": "SHA-1 or null",
+        "downloaderConfirmed": "boolean",
+        "replacementStatus": "outcome",
+        "execution": "workflow status",
+        "requests": "request progress[]",
+        "downloader": "snapshot metadata"
+      },
+      "effects": "Excludes this hash, retains staged files and attempts an alternate under the configured policy.",
+      "replay": "Read the current hash from request status. Replay with the same hash.",
+      "parameters": [
+        {
+          "name": "id",
+          "value": "REQUEST_ID",
+          "type": "string"
+        },
+        {
+          "name": "hash",
+          "value": "CURRENT_TORRENT_HASH",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "command": "resolve link",
+      "summary": "Link a provider episode to a catalog episode.",
+      "result": {
+        "status": "succeeded",
+        "runId": "Swamp run ID"
+      },
+      "effects": "Records the verified episode alias and resolves the reviewed candidate.",
+      "replay": "Use the displayed evidence revision and the exact candidate and catalog IDs.",
+      "parameters": [
+        {
+          "name": "target",
+          "value": "REVIEW",
+          "type": "string"
+        },
+        {
+          "name": "revision",
+          "value": "VALUE",
+          "type": "string"
+        },
+        {
+          "name": "candidate",
+          "value": "ID",
+          "type": "integer"
+        },
+        {
+          "name": "match",
+          "value": "ID",
+          "type": "integer"
+        }
+      ]
+    },
+    {
+      "command": "archive",
+      "inputs": "--movies IDS --dry-run",
+      "summary": "Preview removal from this library.",
+      "result": {
+        "dryRun": "true",
+        "items": "file plans and review reasons[]",
+        "fileCount": "integer",
+        "bytes": "integer",
+        "bytesRemoved": "0"
+      },
+      "effects": "Saves a metadata-only preview. Use --shows for series.",
+      "replay": "Submitting a removal freezes its own file list. Export the media first."
+    },
+    {
+      "command": "archive status",
+      "inputs": "--id UUID",
+      "summary": "Inspect the result of local library removal.",
+      "result": {
+        "requestId": "UUID",
+        "status": "request state",
+        "items": "per-delivery outcomes[]",
+        "bytesRemoved": "integer"
+      },
+      "effects": "Reads the durable request and removal records.",
+      "replay": "Reuse the submission ID to inspect progress."
+    }
+  ]
+}

@@ -242,6 +242,49 @@ Deno.test("TV search budgets persist no-match and provider failure independently
     assert(state[queries[0].key.slice(2)].outcome === "provider-error");
     assert(state[queries[1].key.slice(2)].outcome === "no-releases");
     deepStrictEqual(saved.get("searchState-current")!.attributes.issues, { eztv: issue });
+    async function selectBatch(healthy: boolean) {
+      await model.methods.select.execute({
+        owner,
+        records: [{
+          name: "search-current",
+          attributes: {
+            queries: queries.map((q) => ({
+              ...q,
+              ok: true,
+              results: [],
+              sources: {
+                eztv: {
+                  ok: healthy,
+                  error: healthy ? null : "HTTP 429",
+                  retryAt: Date.now() + 300000,
+                },
+                "tpb-tv": { ok: true },
+              },
+            })),
+          },
+        }],
+      }, ctx);
+      return saved.get("searchState-current")!.attributes;
+    }
+    await selectBatch(true);
+    const degraded = await selectBatch(false);
+    const incidents = degraded.issues as Record<
+      string,
+      { affected: string[]; nextProbeAt: string }
+    >;
+    deepStrictEqual(Object.keys(incidents), ["eztv"]);
+    assert(
+      incidents.eztv.affected.length === 20 && Date.parse(incidents.eztv.nextProbeAt) > Date.now(),
+    );
+    const partial = Object.values(
+      degraded.attempts as Record<
+        string,
+        { partial: boolean; outcome: string; nextSearchAt: string }
+      >,
+    );
+    assert(partial.every((a) => a.partial && a.outcome === "no-releases"));
+    assert(new Set(partial.map((a) => a.nextSearchAt)).size > 1);
+    deepStrictEqual((await selectBatch(true)).issues, {});
     await model.methods.plan.execute({ owner }, ctx);
     assert(
       (saved.get("work-current")!.attributes.queries as unknown[]).length === 10,

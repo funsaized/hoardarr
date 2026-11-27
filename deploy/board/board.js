@@ -2,6 +2,7 @@ import "./mesh.js";
 import { commandGroups, stepDescriptions, workflowDescriptions } from "./reference.js";
 const $ = (id) => document.getElementById(id);
 const views = {
+  home: "Home",
   transfers: "Transfers",
   library: "Library",
   attention: "Attention",
@@ -149,6 +150,7 @@ let snapshot,
   historyRestore = false;
 let rows = [],
   byId = new Map(),
+  catalogByKey = new Map(),
   series = new Map(),
   incoming = [],
   review = [],
@@ -160,10 +162,11 @@ const params = () => new URLSearchParams(location.search);
 function state() {
   const p = params();
   return {
-    view: Object.hasOwn(views, p.get("view")) ? p.get("view") : "transfers",
+    view: Object.hasOwn(views, p.get("view")) ? p.get("view") : "home",
     stage: Object.hasOwn(stages, p.get("stage")) ? p.get("stage") : "downloading",
     id: p.get("item"),
     q: p.get("q") || "",
+    page: Math.max(1, Number.parseInt(p.get("page"), 10) || 1),
     kind: p.get("kind") || "all",
     filter: p.get("filter") || "all",
     parent: p.get("parent"),
@@ -255,6 +258,7 @@ function refreshRows() {
     ...live,
     ...cats.filter((r) => !active.has(String(r.id))).map((r) => ({ ...r, id: String(r.id) })),
   ];
+  catalogByKey = new Map(rows.filter((r) => r.key).map((r) => [r.key, r]));
   byId = new Map(rows.map((r) => [r.id, r]));
   series = new Map(
     (snapshot.catalog.shows || []).map(
@@ -274,8 +278,6 @@ function refreshRows() {
   review = rows.filter((r) =>
     !r.archived &&
     (r.review || ["paused", "missing", "failed", "blocked"].includes(r.state) ||
-      r.state === "wanted" &&
-        ["provider-error", "authentication-error"].includes(r.search?.outcome) ||
       r.live && ["stall", "metadata-timeout"].includes(r.health?.decision))
   );
   delivered = cats.filter((r) => deliveredState(r) && r.delivered).sort((a, b) =>
@@ -295,16 +297,12 @@ function refreshRows() {
   }
 }
 function issue(r) {
-  if (
-    !r.review && r.search &&
-    ["authentication-error", "provider-error"].includes(r.search.outcome) &&
-    ["wanted", "failed"].includes(r.state)
-  ) return "Search problems";
-  if (r.review) return r.reviewKind === "provider" ? "Provider problems" : "Identity decisions";
+  if (r.review) return r.reviewKind === "provider" ? "Provider problems" : "Needs your decision";
   return "Transfer problems";
 }
 function condition(r) {
-  if (r.archived) return "Archived";
+  if (r.deferred) return "Deferred";
+  if (r.archived) return "Removed from this library";
   if (r.review) return r.reviewKind === "provider" ? "Provider unavailable" : "Review needed";
   if (
     r.state === "downloading" && r.health?.decision &&
@@ -314,6 +312,7 @@ function condition(r) {
   return label(r.state);
 }
 function nextStep(r) {
+  if (r.deferred) return r.eligibleAt ? "Eligible " + when(r.eligibleAt) : "Eligible next week";
   if (r.archived) return "The catalog retains this title’s delivery record.";
   if (r.review) return r.reason || "Compare the provider records below.";
   if (deliveredState(r)) {
@@ -471,17 +470,17 @@ function library(s) {
     const match = group.name.toLowerCase().includes(q);
     if (!match || s.kind === "episodes") {
       for (const r of eps.filter((r) => (context(r) + " " + pretty(r)).toLowerCase().includes(q))) {
-        cards.push(row(r, { tile: true, sub: context(r) + " · " + condition(r) }));
+        cards.push([r, { tile: true, sub: context(r) + " · " + condition(r) }]);
       }
     } else if (eps.length || s.filter === "all") {
       cards.push(
-        row(group, {
+        [group, {
           tile: true,
           sub: eps.length + " episodes · " + group.episodes.filter(isWanted).length + " remaining",
           title: group.name,
           symbol: "▤",
           kind: "send",
-        }),
+        }],
       );
     }
   }
@@ -491,8 +490,17 @@ function library(s) {
         !r.review && !isEpisode(r) && matchesStatus(r, s.filter) &&
         r.title?.toLowerCase().includes(q)
       ).sort((a, b) => a.title.localeCompare(b.title))
-    ) cards.push(row(r, { tile: true, sub: "Movie · " + condition(r), symbol: "▸", kind: "wait" }));
+    ) {
+      cards.push([r, {
+        tile: true,
+        sub: [r.year, condition(r)].filter(Boolean).join(" · "),
+        symbol: "▸",
+        kind: "wait",
+      }]);
+    }
   }
+  const pages = Math.max(1, Math.ceil(cards.length / 75));
+  const page = Math.min(s.page, pages);
   draw(
     "tools",
     titlebar("Library", cards.length + " results"),
@@ -530,35 +538,59 @@ function library(s) {
   );
   draw(
     "results",
-    cards.length ? tag("div", "library-grid", cards) : field(
-      "Library",
-      empty(
-        snapshot.catalog.observed ? "No titles match these filters." : "Waiting for the catalog.",
+    pages > 1 &&
+      el(
+        "nav",
+        { "aria-label": "Library pages" },
+        btn("page", "Previous", { class: "small", disabled: page === 1, "data-id": page - 1 }),
+        tag("span", "", " Page " + page + " of " + pages + " "),
+        btn("page", "Next", { class: "small", disabled: page === pages, "data-id": page + 1 }),
       ),
-      btn("clear", "Clear filters", { class: "small" }),
-    ),
+    cards.length
+      ? tag(
+        "div",
+        "library-grid",
+        cards.slice((page - 1) * 75, page * 75).map(([r, options]) => row(r, options)),
+      )
+      : field(
+        "Library",
+        empty(
+          snapshot.catalog.observed ? "No titles match these filters." : "Waiting for the catalog.",
+        ),
+        btn("clear", "Clear filters", { class: "small" }),
+      ),
   );
 }
 const attentionGuides = {
-  "Identity decisions":
-    "Compare provider records with your catalog, then link the match or skip it.",
-  "Transfer problems":
-    "Open a transfer to check progress, resume it, or ask the agent to investigate.",
-  "Provider problems":
-    "Inspect the last provider response and check whether discovery can reach it.",
-  "Search problems": "Check the search result, fix any sign-in issue, then retry.",
+  "Needs your decision": "Compare the episode or title records and choose how to proceed.",
+  "Transfer problems": "Open the transfer to inspect its current state.",
+  "Provider problems": "Hoardarr checks these sources automatically.",
 };
-function searchGroups() {
-  const groups = new Map();
-  for (const r of review.filter((r) => issue(r) === "Search problems")) {
-    const key = r.search.outcome;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
-  }
-  return groups;
-}
 function attentionCount() {
-  return review.filter((r) => issue(r) !== "Search problems").length + searchGroups().size;
+  return review.length + (snapshot?.catalog.incidents?.length ?? 0);
+}
+function home() {
+  draw("tools", titlebar("Your library", ""));
+  const decisions = review.filter((r) => issue(r) === "Needs your decision");
+  const arriving = incoming.filter((r) => ["queued", "downloading"].includes(r.state));
+  function shelf(name, entries, none) {
+    return field(
+      name,
+      entries.length
+        ? entries.slice(0, 8).map((r) =>
+          row(r, {
+            sub: [context(r) || r.year, condition(r), nextStep(r)].filter(Boolean).join(" · "),
+          })
+        )
+        : empty(none),
+    );
+  }
+  draw(
+    "results",
+    shelf("Needs your decision", decisions, "No decisions waiting."),
+    shelf("Arriving", arriving, "No titles arriving."),
+    shelf("Recently landed", delivered.filter((r) => !r.archived), "No verified deliveries yet."),
+  );
 }
 function attention() {
   draw("tools", titlebar("Attention", attentionCount() + " issues"));
@@ -567,7 +599,8 @@ function attention() {
     Object.keys(attentionGuides).map(
       (group) => {
         const list = review.filter((r) => issue(r) === group);
-        return list.length && tag(
+        const incidents = group === "Provider problems" ? snapshot.catalog.incidents ?? [] : [];
+        return (list.length || incidents.length) && tag(
           "section",
           "panel",
           tag(
@@ -576,28 +609,34 @@ function attention() {
             tag("h2", "", group),
             tag("p", "", attentionGuides[group]),
           ),
-          group === "Search problems"
-            ? [...searchGroups()].map(([outcome, items]) =>
+          incidents.map((incident) =>
+            tag(
+              "details",
+              "search-group",
               tag(
-                "details",
-                "search-group",
-                tag("summary", "", label(outcome) + " · " + items.length + " affected titles"),
-                items.map((r) => row(r, { sub: label(outcome), symbol: "!", kind: "alert" })),
-              )
+                "summary",
+                "",
+                incident.source + " · " + incident.affected.length + " affected titles",
+              ),
+              facts([
+                [
+                  "Last successful check",
+                  when(incident.lastSuccess) || "No successful check recorded",
+                ],
+                ["Last observed", when(incident.observedAt)],
+                ["Next eligible probe", when(incident.nextProbeAt) || "Next eligible search"],
+              ]),
+              incident.affected.map((key) => {
+                const item = catalogByKey.get(key);
+                return item && row(item, { sub: context(item) || condition(item) });
+              }),
             )
-            : list.map((r) =>
-              row(r, {
-                sub: group === "Search problems"
-                  ? label(r.search?.outcome)
-                  : r.reason || condition(r),
-                symbol: "!",
-                kind: "alert",
-              })
-            ),
+          ),
+          list.map((r) => row(r, { sub: r.reason || condition(r), symbol: "!", kind: "alert" })),
         );
       },
     ),
-    !review.length &&
+    !attentionCount() &&
       field(
         "Review queue",
         empty(
@@ -871,6 +910,18 @@ function itemTimeline(r) {
       });
     }
   }
+  if (r.state === "wanted" || r.state === "failed") {
+    add(r.search?.nextSearchAt, "Search", "Eligible for another search");
+  }
+  if (r.deferred) add(r.eligibleAt, "Discovery", "Eligible for the weekly allowance");
+  if (r.archived) {
+    add(
+      r.removedAt,
+      "Library",
+      "Removed from this library",
+      r.removal?.files.map((f) => f.name + " (" + bytes(f.bytes) + ")").join(", "),
+    );
+  }
   add(r.search?.searchedAt, "Search", label(r.search?.outcome));
   for (const e of r.health?.events ?? []) {
     add(e.at, "Downloader", label(e.decision), readingMeaning[e.decision]);
@@ -959,6 +1010,7 @@ function executionPanel(s) {
   ];
 }
 const resolutionLabels = {
+  replace: "Replace release",
   exclude: "Exclude provider episode",
   link: "Link to catalog episode",
   retry: "Retry search",
@@ -968,6 +1020,9 @@ const resolutionLabels = {
 };
 function actionHelp(action, r, c) {
   switch (action) {
+    case "replace":
+      return "Exclude the current release for " + pretty(r) +
+        " and search for another. Staged files stay in place.";
     case "link":
       return "Record “" + c.name + "” from " + c.provider + " as the same episode as “" +
         c.match.title + "” (" + c.number + ") in " + pretty(r) +
@@ -1004,8 +1059,7 @@ function resolutionButton(action, text, r, c) {
 }
 function agentBrief(r) {
   const group = issue(r);
-  const problem = r.reason ||
-    (group === "Search problems" ? label(r.search?.outcome) : condition(r));
+  const problem = r.reason || condition(r);
   return "Please investigate " +
     JSON.stringify([r.show, code(r), pretty(r)].filter(Boolean).join(" · ")) +
     " in Hoardarr. " + group + " — " + problem + ". Reference " + (r.key ?? r.id) +
@@ -1013,12 +1067,8 @@ function agentBrief(r) {
 }
 function guidance(r) {
   const group = issue(r);
-  const advice = group === "Identity decisions"
+  const advice = group === "Needs your decision"
     ? "Compare the episode title, number and air date. Link only when both records describe the same episode."
-    : group === "Search problems"
-    ? (r.search?.outcome === "authentication-error"
-      ? "Restore the provider’s sign-in, then choose Retry search."
-      : "Check provider availability, then choose Retry search.")
     : group === "Provider problems"
     ? "Check provider availability. Discovery can reuse the last successful list."
     : r.state === "paused"
@@ -1046,14 +1096,22 @@ function guidance(r) {
 let pendingReview;
 function askForDecision(r, c, action) {
   const dialog = $("review-dialog");
-  const payload = action === "series" ? { review: r.id, id: c.id, revision: r.reviewRevision } : {
-    action,
-    target: c ? r.id : r.key,
-    revision: c?.revision ?? (action === "retry" ? r.search?.searchedAt : r.hash ?? r.id),
-    ...(c ? { candidate: c.id } : {}),
-    ...(action === "link" ? { match: c.match.id } : {}),
+  const payload = action === "replace"
+    ? { id: r.replacementRequest, hash: r.hash }
+    : action === "series"
+    ? { review: r.id, id: c.id, revision: r.reviewRevision }
+    : {
+      action,
+      target: c ? r.id : r.key,
+      revision: c?.revision ?? (action === "retry" ? r.search?.searchedAt : r.hash ?? r.id),
+      ...(c ? { candidate: c.id } : {}),
+      ...(action === "link" ? { match: c.match.id } : {}),
+    };
+  pendingReview = {
+    mode: action === "replace" ? "replace" : action === "series" ? "confirm" : "resolve",
+    payload,
+    item: r.id,
   };
-  pendingReview = { mode: action === "series" ? "confirm" : "resolve", payload, item: r.id };
   $("decision-title").textContent = action === "series"
     ? "Confirm series match?"
     : resolutionLabels[action] + "?";
@@ -1128,7 +1186,7 @@ function standby() {
             incoming.filter((r) => r.state === "seeding").length + " seeding",
       ),
     ),
-    state().view !== "activity" && globalFeed(),
+
     waiting.length > 0 &&
     field(
       "Up next",
@@ -1238,6 +1296,8 @@ function itemContents(r) {
       tag("p", "", "Update the provider credential before retrying."),
       resolutionButton("retry", "Retry search", r),
     ],
+    r.replacementRequest && r.hash && !r.archived && canOperate() &&
+    resolutionButton("replace", "Replace release", r),
     r.candidates?.length > 0 &&
     tag(
       "div",
@@ -1376,7 +1436,6 @@ function inspector(s) {
               : "Loading this item…",
           ),
       ),
-      !mobile.matches && s.view !== "activity" && globalFeed(),
     );}
   if (s.id !== lastPanel) {
     panel.firstElementChild?.classList.add("inspect-enter");
@@ -1550,7 +1609,7 @@ function render() {
   }
   const stamp = JSON.stringify([s, snapshot.catalog.revision, snapshot.catalog.observed]);
   if (s.view !== "library" || stamp !== listStamp) {
-    ({ transfers, attention, library, activity }[s.view])(s);
+    ({ home, transfers, attention, library, activity }[s.view])(s);
   }
   listStamp = stamp;
   inspector(s);
@@ -1592,6 +1651,7 @@ async function update() {
         board.catalog.rows = snapshot.catalog.rows;
         board.catalog.shows = snapshot.catalog.shows;
         board.catalog.decisions = snapshot.catalog.decisions;
+        board.catalog.incidents = snapshot.catalog.incidents;
       }
       snapshot = board;
       offline = false;
@@ -1716,8 +1776,11 @@ document.addEventListener("click", async (event) => {
     case "deliveries":
       navigate({ view: "activity" }, { reset: true });
       break;
+    case "page":
+      navigate({ page: id });
+      break;
     case "filter":
-      navigate({ filter: id, item: null, parent: null });
+      navigate({ filter: id, page: null });
       break;
     case "clear":
       navigate({ view: "library" }, { reset: true });
@@ -1754,7 +1817,7 @@ document.addEventListener("click", async (event) => {
 });
 document.addEventListener("input", (e) => {
   if (e.target.id === "ref-search") navigate({ q: e.target.value }, { replace: true });
-  if (e.target.id === "filter") navigate({ q: e.target.value, item: null }, { replace: true });
+  if (e.target.id === "filter") navigate({ q: e.target.value, page: null }, { replace: true });
 });
 document.addEventListener("change", (e) => {
   if (e.target.id === "timeline-order") {
@@ -1764,7 +1827,7 @@ document.addEventListener("change", (e) => {
     } catch { /* private storage */ }
     render();
   }
-  if (e.target.id === "kind") navigate({ kind: e.target.value, item: null });
+  if (e.target.id === "kind") navigate({ kind: e.target.value, page: null });
   if (e.target.id === "mode") {
     mode = e.target.value;
     render();
