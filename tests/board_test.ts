@@ -235,3 +235,25 @@ Deno.test("stream only Swamp service messages and associate a run only when the 
     ]
   ) if (journalEntry(JSON.stringify({ ...raw, ...change }))) throw Error("Unexpected disclosure");
 });
+
+Deno.test("tracked provider failures share one incident until a later successful check", async () => {
+  const { reviewRows, trackedIncidents } = await import("../deploy/board/reviews.ts");
+  const records = Array.from(
+    { length: 20 },
+    (_, i) => ({
+      reviewKey: "status-" + i,
+      title: "Series " + i,
+      reason: "unavailable",
+      observedAt: "2026-11-27T15:00:00Z",
+      retryAt: "2026-11-27T16:00:00Z",
+    }),
+  );
+  const issues = trackedIncidents(records);
+  if (reviewRows(records).length || issues.length !== 1 || issues[0].affected.length !== 20) {
+    throw Error("Expected one TVmaze incident");
+  }
+  if (
+    trackedIncidents([...records, { trackedList: "series", observedAt: "2026-11-27T17:00:00Z" }])
+      .length
+  ) throw Error("Stale TVmaze incident");
+});

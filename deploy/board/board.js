@@ -628,7 +628,9 @@ function attention() {
               ]),
               incident.affected.map((key) => {
                 const item = catalogByKey.get(key);
-                return item && row(item, { sub: context(item) || condition(item) });
+                return item
+                  ? row(item, { sub: context(item) || condition(item) })
+                  : tag("p", "", key);
               }),
             )
           ),

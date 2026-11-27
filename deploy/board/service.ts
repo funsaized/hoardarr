@@ -1,6 +1,6 @@
 import { journalStream } from "./journal.ts";
 import { itemFeed, overview, runFeed } from "./feed.ts";
-import { reviewRows } from "./reviews.ts";
+import { reviewRows, trackedIncidents } from "./reviews.ts";
 // The browser only sees these projections. Provider responses can include private locators.
 export const catalogPredicate =
   '(modelName == "requests" && specName == "request" && attributes.intent.selection.scope == "movie" && attributes.targets != null && size(attributes.targets) == 1) || (modelName == "movie-catalog" && specName == "movie") || (modelName == "episode-catalog" && specName in ["episode", "showList"]) || (modelName == "pipeline" && specName in ["archive","operatorDecision","transferObservation", "catalogIdentity", "searchState", "releaseSwitch", "episodeReview", "identityReview"] && (!("resolved" in attributes) || !attributes.resolved)) || (modelName == "pipeline" && specName == "feedReview" && attributes.state in ["pending","deferred"]) || (modelName == "tracked-tv" && (specName in ["episodeList","seriesDecision"] || (specName == "refreshStatus" && attributes.state != "ready")))';
@@ -33,11 +33,11 @@ export const catalogProjection =
   'specName == "request" ? {"requestId": attributes.id, "movieId": "catalogId" in attributes.targets[0] ? attributes.targets[0].catalogId : attributes.targets[0].tmdbId} : ' +
   'specName == "operatorDecision" ? {"operatorDecision": attributes} : ' +
   'specName == "seriesDecision" ? {"decisionKey": name, "revision": attributes.revision} : ' +
-  'specName == "episodeList" ? {"trackedList": name, "trackedTmdbId": "tmdbId" in attributes.tracked ? attributes.tracked.tmdbId : null, "sourceShow": {"id": attributes.show.id, "name": attributes.show.name, "premiered": attributes.show.premiered}, "episodes": attributes.episodes.map(e, {"id": e.id, "name": e.name, "season": e.season, "number": e.number, "type": e.type, "airstamp": "airstamp" in e ? e.airstamp : null, "airdate": "airdate" in e ? e.airdate : null})} : ' +
+  'specName == "episodeList" ? {"trackedList": name, "observedAt": attributes.observedAt, "trackedTmdbId": "tmdbId" in attributes.tracked ? attributes.tracked.tmdbId : null, "sourceShow": {"id": attributes.show.id, "name": attributes.show.name, "premiered": attributes.show.premiered}, "episodes": attributes.episodes.map(e, {"id": e.id, "name": e.name, "season": e.season, "number": e.number, "type": e.type, "airstamp": "airstamp" in e ? e.airstamp : null, "airdate": "airdate" in e ? e.airdate : null})} : ' +
   'specName == "releaseSwitch" ? {"switchKey": attributes.key, "phase": attributes.phase, "oldHash": attributes.oldHash, "newHash": attributes.candidate.infoHash, "rank": attributes.candidate.rank, "updatedAt": attributes.updatedAt} : ' +
   'specName == "archive" ? {"archiveKey": attributes.key, "removedAt": attributes.archivedAt, "files": attributes.entries.map(e, {"name":e.relativePath, "bytes":e.bytes})} : ' +
   'specName == "feedReview" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "eligibleAt": "eligibleAt" in attributes ? attributes.eligibleAt : null} : ' +
-  'specName == "refreshStatus" ? {"reviewKey": name, "title": attributes.title, "reason": attributes.state, "retryAt": attributes.retryAt, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
+  'specName == "refreshStatus" ? {"reviewKey": name, "observedAt":createdAt, "title": attributes.title, "reason": attributes.state, "retryAt": attributes.retryAt, "choices": "choices" in attributes ? attributes.choices.map(c, {"id": c.id, "name": c.name, "premiered": c.premiered}) : []} : ' +
   'specName in ["episodeReview", "identityReview"] ? {"reviewKey": name, "title": attributes.title, "reason": attributes.reason, "details": "details" in attributes ? attributes.details : [], "provider": "provider" in attributes ? attributes.provider : "tmdb", "entityType": "entityType" in attributes ? attributes.entityType : null, "localIds": "localIds" in attributes ? attributes.localIds : null, "ids": "ids" in attributes ? attributes.ids : [attributes.tmdbId]} : ' +
   'specName == "searchState" ? {"searchAttempts": attributes.attempts, "issues": "issues" in attributes ? attributes.issues : {}, "sourceSuccess": "sourceSuccess" in attributes ? attributes.sourceSuccess : {}} : ' +
   'specName == "catalogIdentity" ? {"catalogKey": attributes.catalogKey, "localId": attributes.id} : ' +
@@ -219,16 +219,19 @@ async function catalog() {
     ) => [r.archiveKey, r] as const),
   );
   return {
-    incidents: Object.entries(searches?.issues ?? {}).map(([source, issue]) => {
-      const current = issue as { affected: string[]; observedAt: string; nextProbeAt?: string };
-      return {
-        source,
-        affected: current.affected,
-        observedAt: current.observedAt,
-        nextProbeAt: current.nextProbeAt,
-        lastSuccess: searches?.sourceSuccess?.[source],
-      };
-    }),
+    incidents: [
+      ...trackedIncidents(results),
+      ...Object.entries(searches?.issues ?? {}).map(([source, issue]) => {
+        const current = issue as { affected: string[]; observedAt: string; nextProbeAt?: string };
+        return {
+          source,
+          affected: current.affected,
+          observedAt: current.observedAt,
+          nextProbeAt: current.nextProbeAt,
+          lastSuccess: searches?.sourceSuccess?.[source],
+        };
+      }),
+    ],
     decisions: results.filter((r: { operatorDecision?: unknown }) => r.operatorDecision).map((
       r: { operatorDecision: unknown },
     ) => r.operatorDecision),

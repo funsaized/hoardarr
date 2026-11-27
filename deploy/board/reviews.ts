@@ -49,6 +49,7 @@ export type Projection = {
   reason?: string;
   ids?: number[];
   details?: { id: number; reason: string; action: string }[];
+  observedAt?: string;
   retryAt?: string;
   eligibleAt?: string;
   choices?: { id: number; name: string; premiered?: string }[];
@@ -62,6 +63,21 @@ function number(s?: number, n?: number) {
   return s != null && n != null
     ? "S" + String(s).padStart(2, "0") + "E" + String(n).padStart(2, "0")
     : undefined;
+}
+export function trackedIncidents(records: Projection[]) {
+  const unavailable = records.filter((r) => r.reviewKey && r.reason === "unavailable");
+  if (!unavailable.length) return [];
+  const lastSuccess = records.filter((r) => r.trackedList && r.observedAt).map((r) => r.observedAt!)
+    .sort().at(-1);
+  const observedAt = unavailable.map((r) => r.observedAt ?? "").sort().at(-1);
+  if (observedAt && lastSuccess && lastSuccess > observedAt) return [];
+  return [{
+    source: "TVmaze",
+    affected: [...new Set(unavailable.map((r) => r.title ?? "Tracked series"))],
+    lastSuccess,
+    observedAt,
+    nextProbeAt: unavailable.map((r) => r.retryAt).filter(Boolean).sort()[0],
+  }];
 }
 export function reviewRows(records: Projection[]) {
   const excluded = new Map(
@@ -165,7 +181,8 @@ export function reviewRows(records: Projection[]) {
     ),
   );
   return records.filter((r) =>
-    r.reviewKey && !(r.retryAt && decisions.get(r.reviewKey) === r.retryAt)
+    r.reviewKey && r.reason !== "unavailable" &&
+    !(r.retryAt && decisions.get(r.reviewKey) === r.retryAt)
   ).map((r) => {
     const candidates: Candidate[] = [];
     const provider = r.provider === "tvmaze" ? "TVmaze" : "TMDB";
