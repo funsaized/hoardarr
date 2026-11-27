@@ -231,6 +231,8 @@ export async function requestCommand(
       downloaderConfirmed,
       replacementStatus: downloaderConfirmed
         ? "downloader-confirmed"
+        : alternate && item?.releaseState === "failed"
+        ? "alternate-failed"
         : alternate
         ? "alternate-selected"
         : item?.releaseState === "wanted" &&
