@@ -46,6 +46,14 @@ The movie summary shows saved provider problems, rejection reasons and next sear
 Archived deliveries count toward request history. To request a fresh local copy of an archived
 movie, add `--download-again` to `request submit` with movie scope.
 
+To replace a release on a movie request, read its current `items[].infoHash` with
+`request status --id REQUEST_ID --json`, then run
+`sudo hoardarr-operator request replace --id REQUEST_ID --hash CURRENT_TORRENT_HASH --json`.
+Hoardarr excludes that hash for the movie, detaches it from the downloader while keeping its staged
+files, and searches under the configured release policy. The result reports the alternate hash when
+Hoardarr selects one. `downloaderConfirmed` indicates that the downloader accepted or observed it.
+If Hoardarr queues the run, check the same request ID for progress.
+
 `plan` writes workflow history and reports. Use `status` and saved Swamp queries for read-only
 inspection. `plan --refresh` can contact discovery services and update the catalog. `run` does real
 acquisition and cleanup. A run can discover and submit downloads while it imports ready movies and

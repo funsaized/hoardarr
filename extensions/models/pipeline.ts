@@ -54,6 +54,7 @@ import {
 import { TrackedEpisodeList, trackedKey, TrackedSeries } from "./_lib/tracked_tv.ts";
 import { needsCandidateRefresh, ReleaseSwitch, SwitchPolicy } from "./_lib/switch_release.ts";
 import { switchReleases } from "./_lib/switch_pipeline.ts";
+import { MOVIE_REPLACEMENT_PENDING, MovieReplacement } from "./_lib/movie_catalog_definition.ts";
 const Globals = z.object({
   switchPolicy: SwitchPolicy.prefault({}),
   stagingRoot: z.string().optional(),
@@ -86,6 +87,7 @@ const Globals = z.object({
 type Context = Runtime & { globalArgs: z.infer<typeof Globals> };
 type Row = Record<string, unknown>;
 const Owned = z.object({ owner: z.uuid() });
+const RequestReplacement = MovieReplacement.extend({ requestId: RequestId });
 const PlanArgs = Owned.extend({
   requestId: RequestId.or(z.literal("")).optional(),
   phase: z.enum(["all", "observe", "delivery", "acquisition", "submit", "summary"]).default("all"),
@@ -123,6 +125,7 @@ const WorkSchema = z.object({
   additions: z.array(z.object({ key: z.string(), input: z.string(), seedTime: z.string() })),
   activeIds: z.array(z.string()),
   rejectedIds: z.array(z.string()).default([]),
+  replacementIds: z.array(z.string()).default([]),
   stoppedIds: z.array(z.string()),
   deliveries: z.array(WorkItem),
   movieAliases: z.array(z.object({ localId: z.uuid(), catalogId: z.number(), imdbId: z.string() }))
@@ -796,7 +799,7 @@ async function ingestDiscoveries(
 }
 export const model = {
   type: "@funsaized/hoardarr/pipeline",
-  version: "2026.11.26.3",
+  version: "2026.11.27.1",
   upgrades: [{
     toVersion: "2026.11.11.1",
     description: "Preserve existing arguments; new native settings are optional or defaulted",
@@ -857,6 +860,10 @@ export const model = {
   }, {
     toVersion: "2026.11.26.3",
     description: "Retry waiting movies when their verified original release year changes",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: "2026.11.27.1",
+    description: "Preserve settings for operator-requested movie release replacement",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: Globals,
@@ -1136,11 +1143,15 @@ export const model = {
             row,
           ) => [`m-${movieCatalogId(row)}`, String(row.yearCorrectedAt)]),
         );
+        const replacements = new Map(
+          movieRows.map((r) => [`m-${movieCatalogId(r)}`, String(r.replacementRequestedAt ?? "")]),
+        );
         const dueMovies = all.filter((r) =>
           r.mediaKind === "movie" && (ctx.globalArgs.movieEnabled || explicit.has(r.key)) &&
           eligible.has(r.key) && r.status !== "selected" &&
           (!state[r.key] || state[r.key].outcome === "selected" ||
             (correctedYears.get(r.key) ?? "") > state[r.key].searchedAt ||
+            (replacements.get(r.key) ?? "") > state[r.key].searchedAt ||
             state[r.key].nextSearchAt <= now) &&
           (!args.requestId || requested.has(r.key))
         ).sort((a, b) =>
@@ -1315,6 +1326,12 @@ export const model = {
             ),
           ].slice(0, 100),
           activeIds: [...new Set(active.map((r) => r.infoHash!))].slice(0, 100),
+          replacementIds: movieRows.filter((r) =>
+            r.error === MOVIE_REPLACEMENT_PENDING && typeof r.infoHash === "string" &&
+            ![...movieRows, ...episodeRows].some((other) =>
+              other !== r && String(other.infoHash).toLowerCase() === r.infoHash
+            )
+          ).map((r) => String(r.infoHash)).slice(0, 100),
           stoppedIds: [...new Set(stopped.map((r) => r.infoHash!))].slice(0, 100),
           deliveries: deliveryBatch(delivery),
           movieAliases: movieRows.filter((r) => r.localId && r.imdbId && !r.tmdbId).slice(0, 20)
@@ -1359,6 +1376,41 @@ export const model = {
       arguments: Resolution,
       execute: (input: z.infer<typeof Resolution>, ctx: Context) =>
         resolveAttention(input, ctx, (key) => recordTransferHealth(ctx, undefined, key)),
+    },
+    replaceMovieRelease: {
+      description: "Exclude the current release for a one-off movie request.",
+      arguments: RequestReplacement,
+      execute: async ({ requestId, hash }: z.infer<typeof RequestReplacement>, ctx: Context) => {
+        const owner = crypto.randomUUID();
+        await invoke(ctx, "coordinator", "acquire", { owner, operation: "Replace movie release" });
+        try {
+          const request = (await requests(ctx)).find((r) => r.id === requestId);
+          const target = request?.targets?.[0];
+          if (request?.intent.selection.scope !== "movie" || target?.mediaKind !== "movie") {
+            throw new Error("Replacement requires a resolved movie request");
+          }
+          const id = movieCatalogId(target);
+          const movies = await rows(ctx, "movie");
+          const movie = movies.find((row) => movieCatalogId(row) === id);
+          if (
+            [...movies, ...await rows(ctx, "episode")].some((row) =>
+              row !== movie && String(row.infoHash).toLowerCase() === hash
+            )
+          ) throw new Error("Another catalog item owns this hash");
+          if (ctx.globalArgs.stagingRoot) {
+            const switches = await ctx.readModelData("pipeline", "releaseSwitch");
+            if (
+              switches.map((r) => ReleaseSwitch.parse(r.attributes)).some((r) =>
+                r.key === `m-${id}` && !["committed", "cancelled"].includes(r.phase)
+              )
+            ) throw new Error("A release switch is already in progress for this movie");
+          }
+          await invoke(ctx, ctx.globalArgs.movies, "replaceRelease", { id, hash });
+          return write(ctx, "summary", { ok: true });
+        } finally {
+          await invoke(ctx, "coordinator", "release", { owner });
+        }
+      },
     },
     ingestTracked: {
       description:

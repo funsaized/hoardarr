@@ -2,6 +2,52 @@
 import { model, testing } from "./movie_catalog.ts";
 import { model as publicModel } from "./public_movie_catalog.ts";
 
+Deno.test("movie replacement waits for fresh detachment and excludes only the rejected hash", async () => {
+  const oldHash = "a".repeat(40);
+  const otherHash = "b".repeat(40);
+  const originalDelivery = { infoHash: oldHash, archivedAt: "2026-11-26T00:00:00Z" };
+  const { context, store } = makeContext({
+    "catalog-movie-1": {
+      ...baseMovie({ status: "seeding", infoHash: oldHash, attempts: 1 }),
+      previousDeliveries: [originalDelivery],
+    },
+  });
+  const read = () => store.resources.get("catalog-movie-1") as Movie;
+  const replace = model.methods.replaceRelease.execute;
+  const releases = [{ infoHash: oldHash.toUpperCase(), seeders: 100 }, {
+    infoHash: otherHash,
+    seeders: 20,
+  }].map((r) => ({
+    ...r,
+    name: `${read().title} ${read().year} 1080p WEB-DL`,
+    sizeBytes: 2 * 1024 ** 3,
+  }));
+
+  await assertRejects(() => replace({ id: 1, hash: otherHash }, context), "release changed");
+  await replace({ id: 1, hash: oldHash }, context);
+  await testing.executeReconcile({
+    snapshots: [{ infoHash: oldHash, kind: "seed", status: "seeding" }],
+  }, context);
+  await testing.executeSelect({ items: [{ tmdbId: 1, releases }] }, context);
+  assertEquals(read().infoHash, oldHash, "selection stays fenced until detachment");
+  assertEquals(read().status, "failed", "old release cannot enter delivery");
+
+  await testing.executeReconcile({ snapshots: [] }, context);
+  await testing.executeSelect({ items: [{ tmdbId: 1, releases: releases.slice(0, 1) }] }, context);
+  assertEquals(read().status, "wanted", "no available alternate");
+  assertEquals(read().noMatchReason, "all-releases-excluded", "explains exclusion");
+  await testing.executeSelect({ items: [{ tmdbId: 1, releases }] }, context);
+  assertEquals(
+    read().infoHash,
+    otherHash,
+    "alternate wins when the higher-ranked hash is excluded",
+  );
+  await replace({ id: 1, hash: oldHash }, context);
+  assertEquals(read().infoHash, otherHash, "retry preserves the alternate");
+  assertEquals(read().previousDeliveries, [originalDelivery], "archive history is preserved");
+  assertEquals(read().attempts, 1, "recorded download attempts are preserved");
+});
+
 type CatalogContext = Parameters<typeof testing.executeIngest>[1];
 type Movie = ReturnType<typeof testing.schemas.movie.parse>;
 type MovieStatus = ReturnType<typeof testing.schemas.status.parse>;
@@ -1388,7 +1434,7 @@ Deno.test("malformed catalog records block planning instead of becoming empty wo
 
 Deno.test("model declaration matches the documented shape", () => {
   assertEquals(model.type, "hoardarr/movie-catalog", "model type");
-  assertEquals(model.version, "2026.11.26.3", "model version");
+  assertEquals(model.version, "2026.11.27.1", "model version");
   assertEquals(publicModel.version, model.version, "public and local versions agree");
   assertEquals(publicModel.upgrades.at(-1)?.toVersion, publicModel.version, "public upgrade chain");
   assert("movie" in model.resources, "movie spec");

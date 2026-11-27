@@ -139,6 +139,33 @@ export function workflowDefinitions(config: Config, ids: Record<string, string>)
     noDetach,
   ));
 
+  const noReplacement =
+    '!steps.snapshot.outputs.ok || size(steps["control-plan"].outputs.replacementIds) == 0';
+  observation.push(
+    skip(
+      call(
+        "detach-replaced",
+        "download-provider",
+        "control",
+        { ids: expr('steps["control-plan"].outputs.replacementIds'), action: "remove" },
+        "transfer-ready",
+        true,
+      ),
+      noReplacement,
+    ),
+    skip(
+      call("snapshot-replaced", "download-provider", "sync", {}, "detach-replaced"),
+      noReplacement,
+    ),
+    skip(
+      method("reconcile-replaced", "pipeline", "reconcile", {
+        ...owned,
+        records: records("snapshot-replaced"),
+      }, "snapshot-replaced"),
+      noReplacement,
+    ),
+  );
+
   const discovery: Node[] = [plan("known", "summary")];
   discovery.push(
     method(

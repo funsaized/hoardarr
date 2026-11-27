@@ -12,7 +12,7 @@ import {
   rankEligible,
 } from "./policy.ts";
 
-const MODEL_VERSION = "2026.11.26.3";
+const MODEL_VERSION = "2026.11.27.1";
 const SPEC_MOVIE = "movie";
 const SPEC_PLAN = "plan";
 const PLAN_INSTANCE = "plan-current";
@@ -124,6 +124,11 @@ const ReconcileArgsSchema = z.object({
 
 const PlanArgsSchema = z.object({});
 
+export const MovieReplacement = z.object({
+  hash: z.string().toLowerCase().regex(/^[a-f0-9]{40}$/),
+});
+export const MOVIE_REPLACEMENT_PENDING = "release-replacement-pending";
+
 const MovieSchema = z.object({
   releaseEvidence: ReleaseEvidence.optional(),
   ...MovieIdentityFields,
@@ -132,6 +137,12 @@ const MovieSchema = z.object({
   originalReleaseDate: z.iso.date().optional(),
   digitalReleaseDate: DigitalReleaseDate,
   yearCorrectedAt: z.iso.datetime().optional(),
+  replacementRequestedAt: z.iso.datetime().optional(),
+  rejectedReleases: z.array(z.object({
+    infoHash: MovieReplacement.shape.hash,
+    name: z.string().nullable(),
+    rejectedAt: z.iso.datetime(),
+  })).optional(),
   infoHash: z.string().nullable(),
   acquisitionLocator: z.string().max(32000).nullable().optional(),
   rankedReleases: z.array(ReleaseSchema.extend({
@@ -309,7 +320,10 @@ function summarizeNoMatch(
 
 function isSelectable(movie: Movie, policy: Policy = moviePolicy): boolean {
   if (movie.status === "wanted") return true;
-  if (movie.status === "failed" && movie.attempts < policy.maxAttempts) {
+  if (
+    movie.status === "failed" && movie.error !== MOVIE_REPLACEMENT_PENDING &&
+    movie.attempts < policy.maxAttempts
+  ) {
     return true;
   }
   return false;
@@ -519,6 +533,22 @@ function advanceFromSnapshot(
 ): Movie | null {
   if (TERMINAL_STATUSES.has(movie.status)) return null;
   if (!movie.infoHash) return null;
+  if (movie.error === MOVIE_REPLACEMENT_PENDING) {
+    if (snapshot) return null;
+    return {
+      ...movie,
+      status: "wanted",
+      infoHash: null,
+      acquisitionLocator: null,
+      rankedReleases: [],
+      releaseName: null,
+      bytes: null,
+      sha256: null,
+      completedAt: null,
+      error: null,
+      noMatchReason: null,
+    };
+  }
   const current = snapshot?.name !== undefined && snapshot.name !== movie.releaseName
     ? { ...movie, releaseName: snapshot.name }
     : movie;
@@ -594,7 +624,7 @@ function computePlan(movies: ReadonlyArray<Movie>, policy: Policy = moviePolicy)
   for (const movie of movies) {
     if (movie.status === "wanted" || movie.status === "selected") {
       wanted.push(movieCatalogId(movie));
-    } else if (movie.status === "failed" && movie.attempts < policy.maxAttempts) {
+    } else if (movie.status === "failed" && isSelectable(movie, policy)) {
       retryable.push(movieCatalogId(movie));
     } else if (movie.status === "downloading") {
       downloading.push(movieCatalogId(movie));
@@ -701,7 +731,9 @@ async function executeSelect(
       ineligible++;
       continue;
     }
-    const result = pickBest(existing, item.releases, context.globalArgs?.policy ?? moviePolicy);
+    const excluded = new Set(existing.rejectedReleases?.map((r) => r.infoHash));
+    const releases = item.releases.filter((r) => !excluded.has(r.infoHash.toLowerCase()));
+    const result = pickBest(existing, releases, context.globalArgs?.policy ?? moviePolicy);
     const selectedAt = new Date().toISOString();
     const rankedReleases = result.ranked.map((release, index) => ({
       ...release,
@@ -733,11 +765,9 @@ async function executeSelect(
       next = {
         ...existing,
         rankedReleases,
-        noMatchReason: summarizeNoMatch(
-          existing,
-          item.releases,
-          context.globalArgs?.policy ?? moviePolicy,
-        ),
+        noMatchReason: releases.length === 0 && item.releases.length > 0
+          ? "all-releases-excluded"
+          : summarizeNoMatch(existing, releases, context.globalArgs?.policy ?? moviePolicy),
       };
     }
     handles.push(await writeMovie(context, next));
@@ -883,6 +913,10 @@ export const definition = {
     toVersion: "2026.11.26.3",
     description: "Keep separate regional digital and original movie release dates",
     upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
+  }, {
+    toVersion: MODEL_VERSION,
+    description: "Preserve existing movies and support durable release exclusions",
+    upgradeAttributes: (old: Record<string, unknown>) => ({ ...old }),
   }],
   globalArguments: z.object({
     policy: PolicySchema.default(moviePolicy),
@@ -970,7 +1004,7 @@ export const definition = {
           !movie || movie.status !== "transferred" || !movie.archivedAt ||
           !movie.transferredAt || movie.transferredAt >= args.acceptedAt
         ) return { dataHandles: [] };
-        const { previousDeliveries = [], ...prior } = movie;
+        const { previousDeliveries = [], rejectedReleases, ...prior } = movie;
         if (!Array.isArray(previousDeliveries)) throw new Error("Invalid movie delivery history");
         const fresh = createMovieFromDiscovery({
           tmdbId: movie.tmdbId,
@@ -989,7 +1023,45 @@ export const definition = {
           dataHandles: [
             await writeMovie(context, {
               ...fresh,
+              ...(rejectedReleases ? { rejectedReleases } : {}),
               previousDeliveries: [...previousDeliveries, prior],
+            }),
+          ],
+        };
+      },
+    },
+    replaceRelease: {
+      description: "Fence a movie attempt and durably exclude its exact torrent hash.",
+      arguments: MovieReplacement.extend({ id: z.number().int().positive() }),
+      execute: async ({ id, hash }: { id: number; hash: string }, context: Context) => {
+        const movie = await loadMovie(context, id);
+        if (!movie) throw new Error("Unknown movie");
+        if (movie.rejectedReleases?.some((release) => release.infoHash === hash)) {
+          return { dataHandles: [] };
+        }
+        if (
+          movie.infoHash?.toLowerCase() !== hash ||
+          !["selected", "downloading", "seeding", "seed-stopped", "failed"].includes(
+            movie.status,
+          ) ||
+          movie.localPath || movie.remotePath || movie.transferredAt || movie.archivedAt
+        ) {
+          throw new Error(
+            "Movie release changed or is already in delivery; refresh request status",
+          );
+        }
+        const rejectedAt = new Date().toISOString();
+        return {
+          dataHandles: [
+            await writeMovie(context, {
+              ...movie,
+              status: "failed",
+              error: MOVIE_REPLACEMENT_PENDING,
+              replacementRequestedAt: rejectedAt,
+              rejectedReleases: [
+                ...movie.rejectedReleases ?? [],
+                { infoHash: hash, name: movie.releaseName, rejectedAt },
+              ],
             }),
           ],
         };

@@ -4,6 +4,5 @@ import { definition } from "./_lib/movie_catalog_definition.ts";
 export const model = {
   ...definition,
   type: "@funsaized/hoardarr/movie-catalog",
-  version: "2026.11.26.3",
   upgrades: definition.upgrades,
 };

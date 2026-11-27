@@ -39,6 +39,10 @@ export const commandGroups = [
     ["request run --id REQUEST_ID", "Process an existing request immediately."],
     ["request status --id REQUEST_ID", "Show progress on the requested title or episodes."],
     ["request list", "List saved requests and their progress."],
+    [
+      "request replace --id REQUEST_ID --hash CURRENT_TORRENT_HASH",
+      "Try a different movie release.",
+    ],
   ]],
   ["Resolve attention", [
     [
@@ -211,6 +215,7 @@ export const stepDescriptions = {
   "download-provider.sync": "Read the downloader’s current transfers.",
   "pipeline.reconcile": "Update catalog states from the downloader snapshot.",
   "discard-rejected": "Remove rejected transfers and their staging files.",
+  "detach-replaced": "Detach movie releases the operator replaced and keep their staging files.",
   detach: "Detach stopped transfers from the downloader before library delivery.",
   "pipeline.ready": "Mark successfully detached transfers ready for delivery.",
   "requests.plan": "Choose outstanding request targets to look up.",

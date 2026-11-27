@@ -199,6 +199,8 @@ export function requestProgress(
         Number(row.attempts) >= maxAttempts[target.mediaKind];
     return {
       key,
+      infoHash: typeof row?.infoHash === "string" ? row.infoHash : null,
+      releaseState: typeof row?.status === "string" ? row.status : null,
       archivedAt: delivery?.archivedAt ?? null,
       state: delivered
         ? "delivered"

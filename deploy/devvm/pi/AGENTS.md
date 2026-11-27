@@ -79,6 +79,14 @@ Translate natural language into the typed `sudo hoardarr-operator request` comma
    progress; distinguish queued, selected, downloading, seeding, partial, blocked and fulfilled
    states.
 
+For an explicit request to replace the current movie release, read the movie request's current
+`items[].infoHash` with `request status --id REQUEST_ID --json`. Run
+`request replace --id REQUEST_ID --hash CURRENT_TORRENT_HASH --json` in a persistent command
+session. If interrupted, inspect the request, workflow report and owner before retrying with the
+same hash. Report the new hash and whether the downloader confirmed it. If a successful search
+returns no eligible alternate, report that result. Use `resolve exclude` only for TV identity
+reviews.
+
 Interpret "entire series" as all regular episodes aired by the request's UTC acceptance date.
 `latest` freezes the latest aired episode at that cutoff; `remaining` completes the same finite
 series set while reusing completed and in-flight catalog items. Explicit future episodes wait for an

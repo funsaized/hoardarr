@@ -47,6 +47,9 @@ export async function resolveAttention(
 ) {
   const command = Resolution.parse(input);
   const { action, target, revision, candidate, match } = command;
+  if ((action === "exclude" || action === "link") && !target.startsWith("review-tracked-")) {
+    throw Error("Exclude and link require a tracked TV episode review");
+  }
   const owner = crypto.randomUUID();
   await invoke(ctx, "coordinator", "acquire", { owner, operation: "Resolve dashboard attention" });
   let external = false;

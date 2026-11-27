@@ -10,9 +10,12 @@ import {
   ResolveArgs,
 } from "../extensions/models/_lib/requests.ts";
 import { model as requests } from "../extensions/models/requests.ts";
+import { MovieReplacement } from "../extensions/models/_lib/movie_catalog_definition.ts";
+import { movieCatalogId } from "../extensions/models/_lib/catalog_identity.ts";
 import { join } from "node:path";
 
-export const REQUEST_HELP = `Usage: hoardarr request <resolve|submit|run|status|list> [--json]
+export const REQUEST_HELP =
+  `Usage: hoardarr request <resolve|submit|run|replace|status|list> [--json]
 
 resolve --kind movie|tv --query TITLE [--year YYYY] [--tmdb-id ID] [--local [--imdb-id tt…]]
         Saves metadata candidates without acquiring media. Use the returned resolutionId.
@@ -23,6 +26,8 @@ submit  --resolution UUID (--tmdb-id ID | --local-id UUID) --scope movie|episode
         --defer leaves acquisition to the existing schedule or request run.
 run     --id REQUEST_ID
         Attempt an immediate, scoped media run for an accepted request.
+replace --id REQUEST_ID --hash CURRENT_TORRENT_HASH
+        Exclude the specified release from a movie request and try an alternate.
 status  --id REQUEST_ID
 list    Show all requests with saved catalog progress and observation timestamps.
 
@@ -41,38 +46,58 @@ export async function requestStatus(repo: string, config: Config, id?: string) {
   if (id) RequestId.parse(id);
   const saved = await content<Record<string, unknown>>(
     repo,
-    'modelName == "requests" && specName == "request"',
+    id
+      ? `modelName == "requests" && name == "request-${id}"`
+      : 'modelName == "requests" && specName == "request"',
   );
   const matched = saved.map((r) => RequestSchema.parse(r)).filter((r) => !id || r.id === id);
   if (id && !matched.length) throw new Error("Unknown request id");
   if (!matched.length) {
     return { requests: [], downloader: { source: "saved-snapshot", capturedAt: null } };
   }
-  const movies = await content<Record<string, unknown>>(
-    repo,
-    'modelName == "movie-catalog" && specName == "movie"',
-  );
-  const episodes = await content<Record<string, unknown>>(
-    repo,
-    'modelName == "episode-catalog" && specName == "episode"',
-  );
-  const search = await content<
-    { attempts: Record<string, { nextSearchAt?: string; outcome?: string }> }
-  >(repo, 'modelName == "pipeline" && name == "searchState-current"');
-  const snapshots = await content<{ capturedAt?: string }>(
-    repo,
-    'name == "snapshot-current" && specName == "snapshot"',
-  );
+  const media = id ? matched[0].intent.media : undefined;
+  const evidence = [
+    '(modelName == "pipeline" && name == "searchState-current")',
+    '(name == "snapshot-current" && specName == "snapshot")',
+  ];
+  if (media?.mediaKind !== "tv") {
+    evidence.push(
+      media
+        ? `(modelName == "movie-catalog" && (name == "catalog-movie-${
+          movieCatalogId(media)
+        }" || ("tmdbId" in attributes && attributes.tmdbId == ${movieCatalogId(media)})))`
+        : '(modelName == "movie-catalog" && specName == "movie")',
+    );
+  }
+  if (media?.mediaKind !== "movie") {
+    evidence.push('(modelName == "episode-catalog" && specName == "episode")');
+  }
+  const { results } = await jsonCommand<{
+    results: { spec: string; data: Record<string, unknown> }[];
+  }>([
+    "data",
+    "query",
+    evidence.join(" || "),
+    "--select",
+    '{"spec": specName, "data": attributes}',
+  ], repo);
+  const bySpec = (spec: string) => results.filter((r) => r.spec === spec).map((r) => r.data);
+  const movies = bySpec("movie"), episodes = bySpec("episode");
+  const searches = bySpec("searchState")[0]?.attempts as
+    | Record<string, { nextSearchAt?: string; outcome?: string }>
+    | undefined;
   return {
     requests: matched.map((r) =>
-      requestProgress(r, movies, episodes, search[0]?.attempts, new Date(), {
+      requestProgress(r, movies, episodes, searches, new Date(), {
         movie: config.policies.movie.maxAttempts,
         episode: config.policies.episode.maxAttempts,
       })
     ),
     downloader: {
       source: "saved-snapshot",
-      capturedAt: snapshots.map((r) => r.capturedAt).filter(Boolean).sort().at(-1) ?? null,
+      capturedAt:
+        bySpec("snapshot").map((r) => r.capturedAt).filter((at) => typeof at === "string").sort()
+          .at(-1) ?? null,
     },
   };
 }
@@ -179,6 +204,42 @@ export async function requestCommand(
       }
       : await kick(repo, id);
     return { accepted: true, requestId: id, execution, ...await requestStatus(repo, config, id) };
+  }
+  if (operation === "replace") {
+    const id = RequestId.parse(option("--id"));
+    const { hash } = MovieReplacement.parse({ hash: option("--hash") });
+    await command(
+      ["behavior", "run", "pipeline", "replaceMovieRelease", "--stdin", "--json"],
+      repo,
+      JSON.stringify({ requestId: id, hash }),
+    );
+    const execution = await kick(repo, id);
+    const status = await requestStatus(repo, config, id);
+    const item = status.requests[0]?.items[0];
+    const alternate = item?.infoHash && item.infoHash !== hash ? item.infoHash : null;
+    const downloaderConfirmed = !!alternate && [
+      "downloading",
+      "seeding",
+      "seed-stopped",
+      "transfer-ready",
+      "cleanup-pending",
+      "transferred",
+    ].includes(item?.releaseState ?? "");
+    return {
+      excludedHash: hash,
+      alternateHash: alternate,
+      downloaderConfirmed,
+      replacementStatus: downloaderConfirmed
+        ? "downloader-confirmed"
+        : alternate
+        ? "alternate-selected"
+        : item?.releaseState === "wanted" &&
+            ["no-match", "no-releases"].includes(item.searchOutcome ?? "")
+        ? "no-eligible-alternate"
+        : "pending",
+      execution,
+      ...status,
+    };
   }
   if (["status", "list", "run"].includes(operation)) {
     const id = operation === "list" ? undefined : RequestId.parse(option("--id"));
