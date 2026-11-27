@@ -1,4 +1,5 @@
 import { z } from "npm:zod@4.5.1";
+const positiveId = z.number().int().positive();
 const Kind = z.enum(["movie", "series", "episode"]);
 const Alias = z.object({
   provider: z.enum(["tmdb", "tvmaze", "imdb", "tvdb"]),
@@ -71,7 +72,7 @@ export function identityIndex(saved: Identity[]) {
 
 /** Existing numeric keys remain the ownership keys for staging and delivery receipts. */
 export function movieCatalogId(movie: { catalogId?: unknown; tmdbId?: unknown }) {
-  return z.number().int().positive().parse(movie.catalogId ?? movie.tmdbId);
+  return positiveId.parse(movie.catalogId ?? movie.tmdbId);
 }
 
 export const MovieIdentityFields = {
@@ -86,10 +87,10 @@ export function hasMovieIdentity(value: { tmdbId?: number; catalogId?: number; l
 }
 
 export function episodeCatalogId(row: { catalogId?: unknown; tmdbEpisodeId?: unknown }) {
-  return z.number().int().positive().parse(row.catalogId ?? row.tmdbEpisodeId);
+  return positiveId.parse(row.catalogId ?? row.tmdbEpisodeId);
 }
 export function seriesCatalogId(row: { seriesCatalogId?: unknown; showTmdbId?: unknown }) {
-  return z.number().int().positive().parse(row.seriesCatalogId ?? row.showTmdbId);
+  return positiveId.parse(row.seriesCatalogId ?? row.showTmdbId);
 }
 export const EpisodeIdentityFields = {
   tmdbEpisodeId: z.number().int().positive().optional(),
