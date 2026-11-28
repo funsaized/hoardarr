@@ -141,6 +141,50 @@ async function kick(repo: string, id: string) {
   return { started: true, status: run.status, runId: run.runId ?? run.id };
 }
 
+const requestOptions: Record<string, { values: string[]; switches?: string[] }> = {
+  resolve: {
+    values: ["--kind", "--query", "--year", "--tmdb-id", "--imdb-id"],
+    switches: ["--local"],
+  },
+  submit: {
+    values: [
+      "--resolution",
+      "--tmdb-id",
+      "--local-id",
+      "--scope",
+      "--season",
+      "--episode",
+      "--key",
+      "--text",
+      "--category",
+    ],
+    switches: ["--defer", "--download-again"],
+  },
+  replace: { values: ["--id", "--hash"] },
+  run: { values: ["--id"] },
+  status: { values: ["--id"] },
+  list: { values: [] },
+};
+
+export function validateRequestOptions(argv: string[]) {
+  const operation = argv[1] ?? "help";
+  if (["help", "--help", "-h"].includes(operation)) return;
+  if (!Object.hasOwn(requestOptions, operation)) throw Error(REQUEST_HELP);
+  const { values, switches = [] } = requestOptions[operation];
+  const seen = new Set<string>();
+  for (let i = 2; i < argv.length; i++) {
+    const flag = argv[i];
+    if (seen.has(flag)) throw Error("Repeated option " + flag);
+    seen.add(flag);
+    if (flag === "--json" || switches.includes(flag)) continue;
+    if (!["--dir", "--config", ...values].includes(flag)) {
+      throw Error("Unexpected argument " + flag);
+    }
+    const value = argv[++i];
+    if (!value || value.startsWith("--")) throw Error("Missing value for " + flag);
+  }
+}
+
 export async function requestCommand(
   argv: string[],
   repo: string,

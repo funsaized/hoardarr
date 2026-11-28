@@ -6,7 +6,7 @@ import { movieSummary } from "../src/movies.ts";
 /** Hoardarr operator CLI. All scheduled execution remains a Swamp workflow. */
 import { ARCHIVE_HELP, archiveCommand } from "../src/archive.ts";
 import { tvProgress } from "../extensions/models/_lib/tv_progress.ts";
-import { requestCommand, requestStatus } from "../src/requests.ts";
+import { requestCommand, requestStatus, validateRequestOptions } from "../src/requests.ts";
 import type { SearchState } from "../extensions/models/_lib/tv_backlog.ts";
 import { dirname, join, resolve } from "node:path";
 import { ConfigSchema, defaultConfig, encodeConfig, readConfig } from "../src/config.ts";
@@ -548,6 +548,7 @@ async function mainUnlocked(argv: string[]): Promise<void> {
   throw new Error(`Unknown command: ${action}`);
 }
 export async function main(argv: string[]): Promise<void> {
+  if (argv[0] === "request") validateRequestOptions(argv);
   const action = argv[0] ?? "help";
   if (["help", "--help", "-h"].includes(action)) {
     console.log(HELP);

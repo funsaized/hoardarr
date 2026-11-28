@@ -1,4 +1,5 @@
-import { deepStrictEqual } from "node:assert";
+import { validateRequestOptions } from "../src/requests.ts";
+import { deepStrictEqual, throws } from "node:assert";
 import { model as requests } from "../extensions/models/requests.ts";
 import { model as fixture } from "../extensions/models/fixture_provider.ts";
 import { model as movies } from "../extensions/models/movie_catalog.ts";
@@ -576,3 +577,70 @@ Deno.test("explicit title and year create a frozen local movie request without T
         h.store("request-metadata").size === 0,
     );
   }));
+
+Deno.test("request checks the original switches for each mutating command", () => {
+  for (
+    const args of [
+      ["resolve", "--query", "--json"],
+      ["resolve", "--local", "--local"],
+      ["run", "--id", "id", "--defer"],
+      ["replace", "--hash", "a", "--hash", "b"],
+      ["submit", "--dir", "a", "--dir", "b"],
+      ["submit", "--config"],
+      ["submit", "--json", "--json"],
+      ["submit", "--dry-run"],
+      ["submit", "--deffer"],
+    ]
+  ) throws(() => validateRequestOptions(["request", ...args]));
+  for (
+    const args of [
+      [
+        "resolve",
+        "--kind",
+        "movie",
+        "--query",
+        "Example",
+        "--year",
+        "2024",
+        "--local",
+        "--imdb-id",
+        "tt1234567",
+      ],
+      [
+        "submit",
+        "--config",
+        "c",
+        "--resolution",
+        "r",
+        "--local-id",
+        "l",
+        "--scope",
+        "movie",
+        "--download-again",
+        "--json",
+        "--key",
+        "k",
+        "--text",
+        "Example",
+        "--dir",
+        "d",
+        "--defer",
+      ],
+      [
+        "submit",
+        "--tmdb-id",
+        "1",
+        "--scope",
+        "episode",
+        "--season",
+        "1",
+        "--episode",
+        "2",
+        "--category",
+        "tv",
+      ],
+      ["replace", "--id", "r", "--hash", "h"],
+      ["run", "--id", "r"],
+    ]
+  ) validateRequestOptions(["request", ...args]);
+});

@@ -22,6 +22,19 @@ await Deno.writeTextFile(`${repo}/hoardarr.yaml`, encodeConfig(config));
     subprocess.run([deno, 'run', '--allow-all', str(configure), str(source), str(repo)], check=True)
     cli('apply', '--no-pull')
     movie = cli('request', 'resolve', '--kind', 'movie', '--query', 'Hoardarr Requested')
+    def intake_counts():
+        history = sw('workflow', 'history', 'search')['results']
+        adds = sw('data', 'query', 'name == "operation-add" && version >= 0', '--select', 'content')['results']
+        return (len(records('requests', 'request')), len(history), len(adds))
+
+    assert intake_counts() == (0, 0, 0)
+    for invalid in [('--dry-run',), ('--deffer',), ('--defer', '--defer'), ('--season',),
+                    ('--key', 'repeated'), ('unexpected',)]:
+        submit(movie, 'one-movie', 'movie', *invalid, expected=False)
+    assert intake_counts() == (0, 0, 0)
+    deferred = submit(movie, 'one-movie', 'movie', '--defer')
+    assert deferred['accepted'] and not deferred['execution']['started']
+    assert intake_counts() == (1, 0, 0)
     first = submit(movie, 'one-movie', 'movie')
     assert first['accepted'] and first['execution']['status'] == 'succeeded', first
     again = submit(movie, 'one-movie', 'movie')
@@ -68,7 +81,7 @@ await Deno.writeTextFile(`${repo}/hoardarr.yaml`, encodeConfig(config));
     assert len(records('requests', 'request')) == 7
     assert not (repo / '.hoardarr/lease.json').exists()
     print(json.dumps({'passed': True, 'requests': 7, 'movies': 1, 'episodes': 5,
-                      'checks': ['all scopes', 'exact episode isolation', 'automatic movies disabled', 'duplicate submission', 'shared progress', 'bounded series acquisition', 'verified delivery', 'busy owner', 'maintenance refusal', 'schedule preserved']}))
+                      'checks': ['invalid flags have zero effects', 'deferred submission', 'all scopes', 'exact episode isolation', 'automatic movies disabled', 'duplicate submission', 'shared progress', 'bounded series acquisition', 'verified delivery', 'busy owner', 'maintenance refusal', 'schedule preserved']}))
 except BaseException:
     print(f'Request smoke artifacts: {repo}', flush=True)
     raise
