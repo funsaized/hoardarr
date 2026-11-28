@@ -99,3 +99,23 @@ Deno.test("a named destination conflict is recorded per item and another episode
         "conflicting neighbor",
     );
   }));
+
+Deno.test("named publication preserves unrelated partials and conflicting final files", () =>
+  temporary(async (root) => {
+    const t = { ...await payload(root), libraryRelativeDir: "Movies/Example" };
+    const roots = { stagingRoot: root + "/staging", libraryRoot: root + "/library" };
+    const receipt = await deliverLocal(t, roots);
+    const partial = receipt.destination + "/.hoardarr-1-0.partial";
+    await Deno.writeTextFile(partial, "other inode");
+    await deliverLocal(t, roots);
+    const path = receipt.destination + "/movie.mkv";
+    assert(
+      (await Deno.stat(path)).nlink === 1 && await Deno.readTextFile(partial) === "other inode",
+    );
+    await Deno.writeTextFile(path, "conflict");
+    await rejects(() => deliverLocal(t, roots));
+    assert(
+      await Deno.readTextFile(path) === "conflict" &&
+        await Deno.readTextFile(partial) === "other inode",
+    );
+  }));

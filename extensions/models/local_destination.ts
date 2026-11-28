@@ -113,24 +113,36 @@ async function publishNamed(
         break;
       }
     }
-    try {
-      await Deno.lstat(to);
-      files.push(...await verifyFiles(destination, [entry], signal));
+    const temporary = join(dirname(to), `.hoardarr-${transfer.key}-${index}.partial`);
+    const existing = await Deno.lstat(to).catch((error) => {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      return null;
+    });
+    if (existing) {
+      const [verified] = await verifyFiles(destination, [entry], signal);
+      const partial = await Deno.lstat(temporary).catch((error) => {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+        return null;
+      });
+      if (
+        partial?.isFile && partial.ino != null &&
+        String(partial.dev) === verified.identity!.device &&
+        String(partial.ino) === verified.identity!.inode
+      ) {
+        await Deno.remove(temporary);
+      }
+      await syncDirectory(dirname(to));
+      files.push({ relativePath: entry.relativePath, identity: await fileIdentity(to) });
       continue;
+    }
+    // Discard the interrupted copy by name; another hard link must never be overwritten.
+    try {
+      await fileIdentity(temporary);
+      await Deno.remove(temporary);
     } catch (error) {
       if (!(error instanceof Deno.errors.NotFound)) throw error;
     }
-    const temporary = await checkedPath(
-      roots.libraryRoot,
-      join(dirname(to), `.hoardarr-${transfer.key}-${index}.partial`),
-    );
     try {
-      // A prior interrupted copy is replaceable; a symlink or special file is not.
-      try {
-        await fileIdentity(temporary);
-      } catch (error) {
-        if (!(error instanceof Deno.errors.NotFound)) throw error;
-      }
       await Deno.copyFile(from, temporary);
       const file = await Deno.open(temporary, { write: true });
       try {
@@ -153,16 +165,13 @@ async function publishNamed(
         await verifyFiles(destination, [entry], signal);
       }
       await syncDirectory(dirname(to));
-      files.push({ relativePath: entry.relativePath, identity: await fileIdentity(to) });
     } finally {
       await Deno.remove(temporary).catch((error) => {
         if (!(error instanceof Deno.errors.NotFound)) throw error;
       });
     }
-  }
-  // Removing a temporary hardlink changes ctime, so capture the published identity afterward.
-  for (const file of files) {
-    file.identity = await fileIdentity(join(destination, file.relativePath));
+    await syncDirectory(dirname(to));
+    files.push({ relativePath: entry.relativePath, identity: await fileIdentity(to) });
   }
   if (roots.storage) await assertStorage(roots.storage);
   return ReceiptSchema.parse({

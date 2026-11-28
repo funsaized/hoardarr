@@ -486,3 +486,70 @@ for (const step of ["remove", "transition", "archive"]) {
       }));
   }
 }
+
+for (const boundary of ["before-link", "after-link", "before-unlink", "after-unlink"]) {
+  Deno.test(
+    "replay publication and archive after writer exits " + boundary,
+    () =>
+      temporary(async (root) => {
+        const f = await fixture(root), item = await f.add(1);
+        const directory = item.row.remotePath as string;
+        const staged = root + "/staging/1";
+        await Deno.mkdir(staged, { recursive: true });
+        await Deno.rename(item.path, staged + "/1.mkv");
+        const transfer = {
+          ...f.store.get("media-files")![0].attributes,
+          mediaKind: "movie",
+          key: "1",
+          totalBytes: 7,
+          stagingDir: staged,
+          libraryRelativeDir: "Movies/Movie 1",
+        };
+        const roots = { stagingRoot: root + "/staging", libraryRoot: root + "/library" };
+        const partial = directory + "/.hoardarr-1-0.partial";
+        const neighbor = directory + "/.hoardarr-2-0.partial";
+        await Deno.writeTextFile(neighbor, "unrelated");
+        const script = `
+        const [boundary, url, input, paths] = Deno.args;
+        const { deliverLocal } = await import(url);
+        const method = boundary.endsWith("-link") ? "link" : "remove";
+        const original = Deno[method];
+        Deno[method] = async (...args) => {
+          if (boundary.startsWith("before")) Deno.exit(73);
+          await original(...args);
+          Deno.exit(73);
+        };
+        await deliverLocal(JSON.parse(input), JSON.parse(paths));
+      `;
+        const child = await new Deno.Command(Deno.execPath(), {
+          args: [
+            "eval",
+            script,
+            boundary,
+            new URL("../extensions/models/local_destination.ts", import.meta.url).href,
+            JSON.stringify(transfer),
+            JSON.stringify(roots),
+          ],
+        }).output();
+        assert(child.code === 73, new TextDecoder().decode(child.stderr));
+        const { deliverLocal, fileIdentity } = await import(
+          "../extensions/models/local_destination.ts"
+        );
+        const { TransferSchema } = await import("../extensions/models/_lib/contracts.ts");
+        const receipt = await deliverLocal(TransferSchema.parse(transfer), roots);
+        deepStrictEqual(receipt.files?.[0].identity, await fileIdentity(item.path));
+        assert(receipt.manifestSha256 === item.row.sha256);
+        assert((await Deno.stat(item.path)).nlink === 1);
+        await rejects(() => Deno.lstat(partial));
+        f.store.set("local-destination", [{ name: "receipt-1", attributes: receipt }]);
+        const inode = await Deno.open(item.path);
+        try {
+          await f.run({ movieIds: [1] });
+          assert(item.row.archivedAt && (await inode.stat()).nlink === 0);
+        } finally {
+          inode.close();
+        }
+        assert(await Deno.readTextFile(neighbor) === "unrelated");
+      }),
+  );
+}
