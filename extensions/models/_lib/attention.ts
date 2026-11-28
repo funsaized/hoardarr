@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4.5.1";
-import { episodeRevision } from "./episode_revision.ts";
+import { catalogEpisodeRevision, comparisonRevision, episodeRevision } from "./episode_revision.ts";
 export { episodeRevision };
 import { type ShowConfig, TrackedEpisodeList, trackedKey } from "./tracked_tv.ts";
 import {
@@ -79,8 +79,9 @@ export async function resolveAttention(
       if (
         !ep || !review || review.resolved || review.provider !== "tvmaze" ||
         review.entityType === "series" || !Array.isArray(review.ids) ||
-        !review.ids.includes(candidate) || episodeRevision(list.show.id, ep) !== revision
-      ) throw Error("Episode evidence changed");
+        !review.ids.includes(candidate) ||
+        (action === "exclude" && episodeRevision(list.show.id, ep) !== revision)
+      ) throw Error("Episode evidence changed. Refresh the review.");
       if (action === "link") {
         const episodes = (await ctx.readModelData(ctx.globalArgs.episodes, "episode")).map((r) =>
           r.attributes
@@ -97,7 +98,11 @@ export async function resolveAttention(
           sameSeries(r) && r.seasonNumber === ep.season && r.episodeNumber === ep.number
         );
         if (!ep.season || !ep.number || hits.length !== 1 || episodeCatalogId(hits[0]) !== match) {
-          throw Error("Catalog numbering changed");
+          throw Error("Catalog numbering changed. Refresh the review.");
+        }
+        const catalogRevision = catalogEpisodeRevision(hits[0]);
+        if (revision !== comparisonRevision(list.show, list.tracked.tmdbId, ep, catalogRevision)) {
+          throw Error("Episode evidence changed. Refresh the review.");
         }
         const identities = identityIndex(
           (await ctx.readModelData("pipeline", "catalogIdentity")).map((r) =>
@@ -114,6 +119,7 @@ export async function resolveAttention(
           value: String(candidate),
         });
         await invoke(ctx, ctx.globalArgs.episodes, "linkReviewedTvmaze", {
+          catalogRevision,
           id: match,
           series: list.show.id,
           candidate,

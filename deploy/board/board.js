@@ -1026,9 +1026,9 @@ function actionHelp(action, r, c) {
       return "Exclude the current release for " + pretty(r) +
         " and search for another. Staged files stay in place.";
     case "link":
-      return "Record “" + c.name + "” from " + c.provider + " as the same episode as “" +
-        c.match.title + "” (" + c.number + ") in " + pretty(r) +
-        ". This resolves the numbering conflict.";
+      return "Link " + c.provider + " " + c.id + " “" + c.name + "” (" + c.number + ", " +
+        (c.date || "air date unknown") + ") to catalog " + c.match.id + " “" + c.match.title +
+        "” (" + c.match.number + ", " + (c.match.date || "air date unknown") + ")?";
     case "exclude":
       return "Skip “" + c.name +
         "” in this provider review. Your library files stay in place. Hoardarr will reconsider it if the provider changes its details.";
@@ -1105,7 +1105,9 @@ function askForDecision(r, c, action) {
     : {
       action,
       target: c ? r.id : r.key,
-      revision: c?.revision ?? (action === "retry" ? r.search?.searchedAt : r.hash ?? r.id),
+      revision: action === "link"
+        ? c.match.revision
+        : c?.revision ?? (action === "retry" ? r.search?.searchedAt : r.hash ?? r.id),
       ...(c ? { candidate: c.id } : {}),
       ...(action === "link" ? { match: c.match.id } : {}),
     };
@@ -1237,7 +1239,16 @@ function candidate(c, r) {
     el("small", {}, [c.provider, c.kind, c.number, c.date].filter(Boolean).join(" · ")),
     c.note && tag("p", "", c.note),
     c.match &&
-      tag("p", "match-name", "Catalog match · ", el("strong", {}, c.match.title), " · ", c.number),
+      tag(
+        "p",
+        "match-name",
+        "Catalog match · ",
+        el("strong", {}, c.match.title),
+        " · ",
+        c.match.number,
+        " · ",
+        c.match.date || "Air date unknown",
+      ),
     c.url && el("a", { href: c.url }, "Provider record ↗"),
     c.revision && c.kind === "episode" && /^review-tracked-/.test(r.id) && canOperate() &&
       tag(

@@ -1,4 +1,8 @@
-import { episodeRevision } from "../../extensions/models/_lib/episode_revision.ts";
+import {
+  catalogEpisodeRevision,
+  comparisonRevision,
+  episodeRevision,
+} from "../../extensions/models/_lib/episode_revision.ts";
 type Provider = "TVmaze" | "TMDB" | "Catalog";
 type Kind = "series" | "episode" | "movie";
 export type Candidate = {
@@ -11,7 +15,8 @@ export type Candidate = {
   url?: string;
   note?: string;
   revision?: string;
-  match?: { id: number; title: string };
+  match?: { id: number; title: string; number?: string; date?: string; revision: string };
+  linked?: boolean;
 };
 type Episode = {
   id: number;
@@ -21,6 +26,7 @@ type Episode = {
   airdate?: string;
   type?: string;
   airstamp?: string;
+  alternate?: { list: number; season: number; number: number }[];
 };
 export type Projection = {
   operatorDecision?: { action: string; target: string; candidate?: number; revision: string };
@@ -98,7 +104,9 @@ export function reviewRows(records: Projection[]) {
     for (
       const k of [
         r.tvmazeSeriesId && "v" + r.tvmazeSeriesId,
-        !r.tvmazeSeriesId && r.showTmdbId && "t" + r.showTmdbId,
+        ...new Set(
+          [r.showTmdbId, r.seriesCatalogId].map((id) => !r.tvmazeSeriesId && id && "t" + id),
+        ),
       ].filter(Boolean)
     ) {
       const slot = k + "/" + r.seasonNumber + "/" + r.episodeNumber;
@@ -149,8 +157,15 @@ export function reviewRows(records: Projection[]) {
         if (hit) issues.push("An existing catalog episode occupies this number");
         add({
           revision: episodeRevision(s.id, e),
+          linked: hits.some((row) => row.tvmazeEpisodeId === e.id),
           match: hit && catalogId
-            ? { id: catalogId, title: hit.episodeTitle || hit.showName || "Catalog episode" }
+            ? {
+              id: catalogId,
+              title: hit.episodeTitle || hit.showName || "Catalog episode",
+              number: number(hit.seasonNumber, hit.episodeNumber),
+              date: hit.airDate,
+              revision: comparisonRevision(s, r.trackedTmdbId, e, catalogEpisodeRevision(hit)),
+            }
             : undefined,
           provider: "TVmaze",
           kind: "episode",
@@ -196,8 +211,9 @@ export function reviewRows(records: Projection[]) {
       const candidate = index.get(key(provider, kind, id));
       const decision = excluded.get(r.reviewKey + "/" + id);
       if (
+        candidate?.linked ||
         candidate?.revision && decision?.revision === candidate.revision &&
-        ["link", "exclude"].includes(decision.action)
+          decision.action === "exclude"
       ) continue;
       const explanation = r.details?.find((d) => d.id === id);
       candidates.push(

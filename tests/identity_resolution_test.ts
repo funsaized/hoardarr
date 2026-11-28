@@ -174,3 +174,30 @@ Deno.test("100 incoming episodes read unrelated provider aliases once per ingest
   equal(plan([...unrelated, row], incoming), baseline);
   strictEqual(reads, 10000);
 });
+
+Deno.test("curator links require evidence unique to the chosen episode in either order", () => {
+  const rows = [3, 4].map((number, i) => ({
+    ...row,
+    tmdbEpisodeId: 55 + i,
+    episodeNumber: number,
+    releaseName: `Example.S01E0${number}.The.Captains.Return.1080p.WEB`,
+  }));
+  for (const order of [rows, rows.toReversed()]) {
+    const q = plan(order).questions[0];
+    ok(q.candidates.every((c) => c.release));
+    for (const c of order) {
+      const verdict: Verdict = {
+        ...answer,
+        revision: q.revision,
+        match: c.tmdbEpisodeId,
+        evidence: ["title", "date", "release"],
+      };
+      strictEqual(checkedAnswer({ ...q, candidates: q.candidates.toReversed() }, verdict), null);
+      const pending = plan(order, [ep], new Map([[q.revision, verdict]]));
+      equal(pending.links, []);
+      equal(pending.review, [ep.id]);
+      ok(pending.details[0].reason.includes("must identify one candidate"));
+    }
+  }
+  equal(plan(rows.slice(0, 1)).links.map((l) => [l.match, l.number]), [[55, 3]]);
+});

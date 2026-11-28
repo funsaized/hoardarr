@@ -1,3 +1,4 @@
+import { catalogEpisodeRevision } from "./episode_revision.ts";
 import { IdentityLink } from "./identity_resolution.ts";
 import { SwitchCandidate } from "./switch_release.ts";
 /** Hoardarr local episode catalog: ingest, select, transition, reconcile, plan. @module */
@@ -1083,6 +1084,7 @@ export const definition = {
     linkReviewedTvmaze: {
       description: "Link an operator-reviewed TVmaze episode to an existing catalog slot",
       arguments: z.object({
+        catalogRevision: z.string().regex(/^[0-9a-f]{64}$/),
         id: z.number().int().positive(),
         series: z.number().int().positive(),
         candidate: z.number().int().positive(),
@@ -1090,15 +1092,23 @@ export const definition = {
         episode: z.number().int().positive(),
       }),
       execute: async (
-        args: { id: number; series: number; candidate: number; season: number; episode: number },
+        args: {
+          catalogRevision: string;
+          id: number;
+          series: number;
+          candidate: number;
+          season: number;
+          episode: number;
+        },
         context: Context,
       ) => {
         const row = await loadEpisode(context, args.id);
         if (
-          !row || row.seasonNumber !== args.season || row.episodeNumber !== args.episode ||
+          !row || catalogEpisodeRevision(row) !== args.catalogRevision ||
+          row.seasonNumber !== args.season || row.episodeNumber !== args.episode ||
           row.tvmazeSeriesId && row.tvmazeSeriesId !== args.series ||
           row.tvmazeEpisodeId && row.tvmazeEpisodeId !== args.candidate
-        ) throw Error("Episode identity changed");
+        ) throw Error("Episode identity changed. Refresh the review.");
         if (
           (await loadAllEpisodes(context)).some((r) =>
             episodeCatalogId(r) !== args.id && r.tvmazeEpisodeId === args.candidate

@@ -148,14 +148,16 @@ export function episodeCase(
     : duplicate
     ? "More than one provider episode claims this number"
     : candidates.length > 1
-    ? "Multiple catalog episodes fit"
+    ? "Multiple catalog episodes fit. A distinct air date, confirmed episode order or named release must identify one candidate."
     : automatic
     ? (numberAgrees
       ? "Confirmed series, episode number, distinctive title and air date agree"
       : "Catalog title, original air date and named release corroborate the renumbered episode")
     : !titleAgrees
     ? "Episode titles differ or are generic"
-    : "Original air dates disagree or are missing";
+    : !dateAgrees
+    ? "Original air dates disagree or are missing"
+    : "The episode number differs. A named release is needed to confirm the catalog episode.";
   const key = provider + "-episode-" + incoming.id;
   const revision = fingerprint([
     provider,
@@ -203,6 +205,30 @@ export function trackedCase(list: List, ep: Episode, rows: Row[], duplicate = fa
     duplicate,
   );
 }
+function supportsLink(
+  i: IdentityCase["incoming"],
+  match: IdentityCase["incoming"],
+  claims: Verdict["evidence"],
+) {
+  if (!distinctive(i.title) || identityTitle(i.title) !== identityTitle(match.title)) return false;
+  const slot = match.season === i.season && match.number === i.number;
+  const equalDate = !!i.date && i.date === match.date;
+  const alternate = !!i.alternate?.some((s) =>
+    s.season === match.season && s.number === match.number
+  );
+  const days = Math.abs(Date.parse(i.date ?? "") - Date.parse(match.date ?? "")) / 86400000;
+  const date = equalDate || slot && days <= 2;
+  if (slot ? !date && !match.release && !alternate : !(match.release && (equalDate || alternate))) {
+    return false;
+  }
+  const evidence = new Set(["series", "title"]);
+  if (slot) evidence.add("number");
+  if (date) evidence.add("date");
+  if (alternate) evidence.add("alternate-order");
+  if (match.release) evidence.add("release");
+  return claims.includes("title") && claims.some((c) => c !== "series" && c !== "title") &&
+    claims.every((c) => evidence.has(c));
+}
 export function checkedVerdict(question: IdentityCase, raw: unknown) {
   const parsed = Verdict.safeParse(raw);
   if (!parsed.success || parsed.data.revision !== question.revision) return null;
@@ -219,31 +245,10 @@ export function checkedVerdict(question: IdentityCase, raw: unknown) {
     ) return null;
   }
   if (v.action === "link") {
-    const i = question.incoming;
-    const slot = match.season === i.season && match.number === i.number;
-    const equalTitle = distinctive(i.title) &&
-      identityTitle(i.title) === identityTitle(match.title);
-    const equalDate = !!i.date && i.date === match.date;
-    const alternate = !!i.alternate?.some((s) =>
-      s.season === match.season && s.number === match.number
+    const corroborated = question.candidates.filter((c) =>
+      supportsLink(question.incoming, c, v.evidence)
     );
-    const days = Math.abs(Date.parse(i.date ?? "") - Date.parse(match.date ?? "")) / 86400000;
-    // A regional premiere offset corroborates a date only in the same numbered slot.
-    // Evidence claims must be observable in this exact pair.
-    if (
-      v.evidence.includes("date") && !(equalDate || slot && days <= 2) ||
-      v.evidence.includes("number") && !slot ||
-      v.evidence.includes("release") && !match.release ||
-      v.evidence.includes("alternate-order") && !alternate
-    ) return null;
-    if (!equalTitle || !v.evidence.includes("title")) return null;
-    if (slot && !(days <= 2) && !match.release && !alternate) return null;
-    if (!slot && !(match.release && (equalDate || alternate))) return null;
-    if (
-      !v.evidence.some((e) =>
-        e === "number" || e === "alternate-order" || e === "date" || e === "release"
-      )
-    ) return null;
+    if (corroborated.length !== 1 || corroborated[0].id !== match.id) return null;
   }
   return v;
 }
@@ -379,8 +384,8 @@ export function planEpisodeList(
     if (a.canAsk && a.question.candidates.length <= 8) questions.push(a.question);
     details.push({
       id: ep.id,
-      action: answer?.action ?? "review",
-      reason: answer?.reason ?? a.question.reason,
+      action: verified?.action ?? "review",
+      reason: verified?.reason ?? a.question.reason,
     });
   }
   return { fresh, review, links, questions, details };
