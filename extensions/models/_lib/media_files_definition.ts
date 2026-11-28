@@ -20,6 +20,7 @@ import {
   type Transfer,
   TransferSchema,
 } from "./contracts.ts";
+import { episodeCoverage } from "./episode_identity.ts";
 import { fileNames } from "./library_naming.ts";
 import { dirname, join } from "node:path";
 
@@ -109,6 +110,8 @@ const ManifestSchema = z.object({
 });
 
 const PrepareArgs = z.object({
+  episodeSlot: z.object({ seasonNumber: z.number().int(), episodeNumber: z.number().int() })
+    .optional(),
   deliveryNumber: z.number().int().positive().optional(),
   owner: z.uuid(),
   tmdbId: z.number().int().positive(),
@@ -957,6 +960,18 @@ async function executePrepare(args: z.infer<typeof PrepareArgs>, context: Contex
   if (!safeBaseName(args.stem)) {
     throw new LibraryItemError("unsafe-name", "Unsafe library filename");
   }
+  const slot = args.mediaKind === "episode" && !args.previousLibraryPath
+    ? args.episodeSlot
+    : undefined;
+  if (
+    args.mediaKind === "episode" && !args.previousLibraryPath &&
+    (!slot || episodeCoverage(args.sourceName, slot).kind !== "exact")
+  ) {
+    throw new LibraryItemError(
+      "episode-coverage",
+      "Release does not identify the requested episode",
+    );
+  }
   const key = payloadKey(args.tmdbId, args.mediaKind);
   const root = await canonicalizeRoot(context.globalArgs.stagingRoot);
   const stagingDir = computeStagingDir(root, key);
@@ -977,6 +992,7 @@ async function executePrepare(args: z.infer<typeof PrepareArgs>, context: Contex
     }
     plan = null;
   }
+  const needsPlan = !plan;
   if (!plan) {
     let paths: string[];
     let previousLibrary: Transfer["previousLibrary"];
@@ -1035,8 +1051,22 @@ async function executePrepare(args: z.infer<typeof PrepareArgs>, context: Contex
       moves: fileNames(paths, args.stem),
       previousLibrary,
     });
-    if (!args.preview) await context.writeResource("preparation", planName, plan);
   }
+  // Recheck original names even when replaying a plan written by an older release.
+  if (
+    slot && plan.moves.some(({ from }) =>
+      from.split("/").some((part) => {
+        const { kind } = episodeCoverage(part, slot);
+        return kind === "multiple" || kind === "different";
+      })
+    )
+  ) {
+    throw new LibraryItemError(
+      "episode-coverage",
+      "Staged filename conflicts with the requested episode",
+    );
+  }
+  if (!args.preview && needsPlan) await context.writeResource("preparation", planName, plan);
   if (args.preview) {
     return {
       dataHandles: [await context.writeResource("preparation", `preview-${key}`, plan)],

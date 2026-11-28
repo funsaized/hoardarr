@@ -1,3 +1,4 @@
+import { episodeCoverage } from "./_lib/episode_identity.ts";
 import {
   decisionName,
   episodeRevision,
@@ -1257,7 +1258,10 @@ export const model = {
         }
         const selectedEpisodes = new Set(
           prioritizeEpisodes(
-            episodeRows.filter((r) => r.status === "selected") as unknown as EpisodeWork[],
+            episodeRows.filter((r) =>
+              r.status === "selected" && typeof r.releaseName === "string" &&
+              episodeCoverage(r.releaseName, r).kind === "exact"
+            ) as unknown as EpisodeWork[],
             {},
             episodeRows.length,
             new Date(),
@@ -2025,6 +2029,14 @@ export const model = {
           mediaKind: args.item.mediaKind,
           ...(Array.isArray(row.previousDeliveries) && row.previousDeliveries.length
             ? { deliveryNumber: row.previousDeliveries.length + 1 }
+            : {}),
+          ...(args.item.mediaKind === "episode"
+            ? {
+              episodeSlot: {
+                seasonNumber: row.seasonNumber,
+                episodeNumber: row.episodeNumber,
+              },
+            }
             : {}),
           sourceName: row.releaseName ?? String(args.item.id),
           libraryRelativeDir: names.directory,

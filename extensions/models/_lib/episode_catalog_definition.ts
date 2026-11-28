@@ -3,7 +3,7 @@ import { SwitchCandidate } from "./switch_release.ts";
 /** Hoardarr local episode catalog: ingest, select, transition, reconcile, plan. @module */
 import { z } from "npm:zod@4.5.1";
 import { episodeCatalogId, EpisodeIdentityFields, hasEpisodeIdentity } from "./catalog_identity.ts";
-import { episodeIdentityMatches } from "./episode_identity.ts";
+import { episodeCoverage, episodeIdentityMatches } from "./episode_identity.ts";
 import { catalogRelocationMethod } from "./migration_actions.ts";
 import {
   AddResultsSchema,
@@ -270,9 +270,8 @@ function episodeTokenMatches(
   ep: { seasonNumber: number; episodeNumber: number; category: Category },
   releaseName: string,
 ): boolean {
-  const token = episodeToken(ep);
-  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\b${escaped}\\b`, "i").test(releaseName);
+  const coverage = episodeCoverage(releaseName, ep);
+  return coverage.kind === "exact" && coverage.category === ep.category;
 }
 
 function is1080pWebDl(lower: string, policy: Policy = episodePolicy): boolean {
@@ -389,7 +388,10 @@ function summarizeNoMatch(
 }
 
 function isSelectable(episode: Episode, policy: Policy = episodePolicy): boolean {
-  if (episode.error === "identity-mismatch" && episode.infoHash) return false;
+  if (
+    (episode.error === "identity-mismatch" || episode.error === "ambiguous-episode-coverage") &&
+    episode.infoHash
+  ) return false;
   if (episode.status === "wanted") return true;
   if (episode.status === "failed" && episode.attempts < policy.maxAttempts) {
     return true;
@@ -583,12 +585,28 @@ function advanceFromSnapshot(
     snapshot?.name && snapshot.name.toLowerCase() !== episode.infoHash.toLowerCase()
       ? snapshot.name
       : undefined;
+  if (
+    [observedName, episode.releaseName].some((name) =>
+      name && episodeCoverage(name, episode).kind === "multiple"
+    ) ||
+    episode.error === "ambiguous-episode-coverage"
+  ) {
+    if (snapshot) {
+      return episode.error === "ambiguous-episode-coverage"
+        ? null
+        : { ...episode, status: "failed", error: "ambiguous-episode-coverage" };
+    }
+    // Reuse the rejection journal once the ambiguous download has been detached.
+  }
   const invalidName = observedName && !episodeIdentityMatches(episode, observedName)
     ? observedName
     : episode.releaseName && !episodeIdentityMatches(episode, episode.releaseName)
     ? episode.releaseName
     : undefined;
-  if (invalidName || episode.error === "identity-mismatch") {
+  if (
+    invalidName || episode.error === "identity-mismatch" ||
+    episode.error === "ambiguous-episode-coverage"
+  ) {
     const rejectedReleases = [...(episode.rejectedReleases ?? [])];
     if (
       !rejectedReleases.some((r) => r.infoHash.toLowerCase() === episode.infoHash!.toLowerCase())
@@ -1172,6 +1190,9 @@ export const definition = {
           throw new Error("Different alternate hash in saved intent");
         }
         if (!candidate) throw new Error("Alternate no longer ranked");
+        if (episodeCoverage(candidate.name, row).kind !== "exact") {
+          throw Error("Alternate does not cover exactly this episode");
+        }
         const stalled = z.record(z.string(), z.string()).parse(row.stalledReleases ?? {});
         return {
           dataHandles: [

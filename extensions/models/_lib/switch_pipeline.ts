@@ -1,3 +1,4 @@
+import { episodeCoverage } from "./episode_identity.ts";
 import { z } from "npm:zod@4.5.1";
 import {
   advanceSwitch,
@@ -98,7 +99,10 @@ export async function switchReleases(ctx: Runtime, owner: string, opts: Options)
     const blocked = new Set(
       foreign.flatMap((r) => typeof r.infoHash === "string" ? [r.infoHash.toLowerCase()] : []),
     );
-    const ranked = z.array(z.unknown()).parse(row.rankedReleases ?? []);
+    const covers = (name: unknown) =>
+      movie || typeof name === "string" && episodeCoverage(name, row).kind === "exact";
+    const ranked = z.array(z.record(z.string(), z.unknown())).parse(row.rankedReleases ?? [])
+      .filter((release) => covers(release.name));
     const maxAttempts = movie ? opts.movieLimit : opts.episodeLimit;
     for (
       const [hash, until] of Object.entries(
@@ -140,7 +144,10 @@ export async function switchReleases(ctx: Runtime, owner: string, opts: Options)
       for (const r of snap.torrents) blocked.add(r.infoHash);
       for (const r of snap.seeds) blocked.add(r.id);
       const candidate = alternate(ranked, blocked, Date.now(), opts.policy.candidateMaxAgeHours);
-      if (!candidate || await available() < opts.minFreeBytes + candidate.sizeBytes) continue;
+      if (
+        !candidate || !covers(old.name) ||
+        await available() < opts.minFreeBytes + candidate.sizeBytes
+      ) continue;
       const partial = await partialIdentity(opts.stagingRoot, old.name);
       if (!partial && health.sample.bytes > 0) continue;
       const now = new Date().toISOString();
@@ -191,6 +198,7 @@ export async function switchReleases(ctx: Runtime, owner: string, opts: Options)
       await save({ ...j, phase: "cancelled", updatedAt: new Date().toISOString() });
       return;
     }
+    if (!covers(candidate.name)) continue;
     const ownsAlt = foreign.some((r) => r.infoHash === candidate.infoHash);
     if (ownsAlt) throw new Error("Another title owns the proposed alternate");
     await advanceSwitch(j, {

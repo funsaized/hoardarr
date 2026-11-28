@@ -305,7 +305,7 @@ Deno.test("TV submissions cap at eight, rotate persistently, and exclude in-flig
       category: "tv",
       status: i === 0 ? "downloading" : "selected",
       infoHash: `hash-${i}`,
-      releaseName: "Fixture",
+      releaseName: `Fixture.S01E${String(i + 1).padStart(2, "0")}.1080p.WEB`,
     }));
     const saved = new Map<string, { name: string; attributes: Record<string, unknown> }>();
     const ctx: Runtime & { globalArgs: ReturnType<typeof model.globalArguments.parse> } = {

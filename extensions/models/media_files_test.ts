@@ -1109,9 +1109,9 @@ Deno.test("cleanup rejects symlinks introduced after enumeration as denied entri
 Deno.test("named preparation resumes renames and cleanup preserves neighboring episodes", () =>
   temporary(async (root) => {
     const stagingRoot = `${root}/staging`, libraryRoot = `${root}/library`;
-    await Deno.mkdir(`${stagingRoot}/Release/Subs`, { recursive: true });
-    await Deno.writeTextFile(`${stagingRoot}/Release/video.mkv`, "episode");
-    await Deno.writeTextFile(`${stagingRoot}/Release/Subs/en.srt`, "subtitle");
+    await Deno.mkdir(`${stagingRoot}/Show.S01E02/Subs`, { recursive: true });
+    await Deno.writeTextFile(`${stagingRoot}/Show.S01E02/video.mkv`, "episode");
+    await Deno.writeTextFile(`${stagingRoot}/Show.S01E02/Subs/en.srt`, "subtitle");
     const { context, store } = makeContext({
       stagingRoot,
       catalogType: "hoardarr/episode-catalog",
@@ -1124,7 +1124,8 @@ Deno.test("named preparation resumes renames and cleanup preserves neighboring e
       owner: crypto.randomUUID(),
       tmdbId: 2,
       mediaKind: "episode" as const,
-      sourceName: "Release",
+      sourceName: "Show.S01E02",
+      episodeSlot: { seasonNumber: 1, episodeNumber: 2 },
       libraryRelativeDir: "TV/Show (2022)/Season 01",
       stem: "Show - S01E02 - Second",
       preview: false,
@@ -1281,5 +1282,36 @@ Deno.test("an archived movie re-download stages its new payload even with the sa
     assert(
       first.aggregateSha256 !== store.resources.get("manifest-1")!.value.aggregateSha256,
       "fresh payload verified",
+    );
+  }));
+
+Deno.test("prepare refuses a range inside a single-episode download before mapping original filenames", () =>
+  temporary(async (root) => {
+    const sourceName = "Orbit.S01E02";
+    const { context, store } = makeContext({
+      stagingRoot: root,
+      catalogType: "hoardarr/episode-catalog",
+      catalogId: "episodes",
+    });
+    const args = {
+      owner: crypto.randomUUID(),
+      tmdbId: 102,
+      mediaKind: "episode" as const,
+      sourceName,
+      episodeSlot: { seasonNumber: 1, episodeNumber: 2 },
+      libraryRelativeDir: "TV/Orbit/Season 01",
+      stem: "Orbit - S01E02",
+      preview: false,
+    };
+    await Deno.mkdir(root + "/" + sourceName);
+    await Deno.writeTextFile(root + "/" + sourceName + "/Orbit.S01E02-03.mkv", "staged");
+    await model.methods.prepare.execute(args, context);
+    assert(
+      !store.resources.has("manifest-e-102") && !store.resources.has("preparation-e-102"),
+      "No preparation or manifest may authorize delivery",
+    );
+    assert(
+      await Deno.readTextFile(root + "/e-102/Orbit.S01E02-03.mkv") === "staged",
+      "Keep the staged input",
     );
   }));
